@@ -1,0 +1,170 @@
+{
+  "$defs": {
+    "ConditioningPack": {
+      "additionalProperties": false,
+      "properties": {
+        "base_rgb_ref": {
+          "minLength": 1,
+          "title": "Base Rgb Ref",
+          "type": "string"
+        },
+        "camera_ref": {
+          "minLength": 1,
+          "title": "Camera Ref",
+          "type": "string"
+        },
+        "clay_ref": {
+          "minLength": 1,
+          "title": "Clay Ref",
+          "type": "string"
+        },
+        "depth_ref": {
+          "minLength": 1,
+          "title": "Depth Ref",
+          "type": "string"
+        },
+        "edges_ref": {
+          "minLength": 1,
+          "title": "Edges Ref",
+          "type": "string"
+        },
+        "instance_id_ref": {
+          "minLength": 1,
+          "title": "Instance Id Ref",
+          "type": "string"
+        },
+        "material_id_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Material Id Ref"
+        },
+        "normal_ref": {
+          "minLength": 1,
+          "title": "Normal Ref",
+          "type": "string"
+        },
+        "semantic_ref": {
+          "minLength": 1,
+          "title": "Semantic Ref",
+          "type": "string"
+        },
+        "view_id": {
+          "minLength": 1,
+          "title": "View Id",
+          "type": "string"
+        },
+        "visibility_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Visibility Ref"
+        }
+      },
+      "required": [
+        "view_id",
+        "camera_ref",
+        "base_rgb_ref",
+        "clay_ref",
+        "depth_ref",
+        "normal_ref",
+        "instance_id_ref",
+        "semantic_ref",
+        "edges_ref"
+      ],
+      "title": "ConditioningPack",
+      "type": "object"
+    },
+    "GenerationProfile": {
+      "enum": [
+        "preview_fast",
+        "base_pro",
+        "strict_geometry",
+        "marketing_hero"
+      ],
+      "title": "GenerationProfile",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "conditioning_packs": {
+      "items": {
+        "$ref": "#/$defs/ConditioningPack"
+      },
+      "title": "Conditioning Packs",
+      "type": "array"
+    },
+    "design_revision": {
+      "minLength": 1,
+      "title": "Design Revision",
+      "type": "string"
+    },
+    "model_revision": {
+      "minLength": 1,
+      "title": "Model Revision",
+      "type": "string"
+    },
+    "profile": {
+      "$ref": "#/$defs/GenerationProfile"
+    },
+    "project_id": {
+      "minLength": 1,
+      "title": "Project Id",
+      "type": "string"
+    },
+    "prompt_version": {
+      "minLength": 1,
+      "title": "Prompt Version",
+      "type": "string"
+    },
+    "provider_model": {
+      "minLength": 1,
+      "title": "Provider Model",
+      "type": "string"
+    },
+    "reference_image_refs": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Reference Image Refs",
+      "type": "array"
+    },
+    "request_id": {
+      "minLength": 1,
+      "title": "Request Id",
+      "type": "string"
+    },
+    "view_set_id": {
+      "minLength": 1,
+      "title": "View Set Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "request_id",
+    "project_id",
+    "model_revision",
+    "design_revision",
+    "view_set_id",
+    "profile",
+    "prompt_version",
+    "provider_model",
+    "conditioning_packs"
+  ],
+  "title": "ViewSetGenerationRequest",
+  "type": "object"
+}

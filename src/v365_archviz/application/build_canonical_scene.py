@@ -37,9 +37,7 @@ class BuildCanonicalScene:
             source_sha256=inspection.sha256,
         )
         provider = IfcGeometryProvider(ifc_path)
-        scene = provider.extract(
-            GeometryExtractionRequest(source=source, working_directory=target)
-        )
+        scene = provider.extract(GeometryExtractionRequest(source=source, working_directory=target))
         return CanonicalSceneArtifacts(
             scene_path=target / "canonical_scene.json",
             diagnostics_path=target / "diagnostics.json",
@@ -47,4 +45,3 @@ class BuildCanonicalScene:
             element_count=len(scene.elements),
             surface_count=len(scene.surfaces),
         )
-

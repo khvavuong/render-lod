@@ -33,7 +33,10 @@ def test_generates_with_privacy_safe_request(tmp_path: Path) -> None:
         assert request.headers["x-goog-api-key"] == "test-secret"
         body = __import__("json").loads(request.content)
         assert body["store"] is False
-        assert len(body["input"]) == 5
+        assert len(body["input"]) == 6
+        prompt = body["input"][0]["text"]
+        assert "non-binding realism samples only" in prompt
+        assert "Do not copy their palette" in prompt
         return httpx.Response(
             200,
             json={
@@ -56,6 +59,7 @@ def test_generates_with_privacy_safe_request(tmp_path: Path) -> None:
         base_rgb=image,
         depth=image,
         instance_id=image,
+        semantic=image,
         edges=image,
         prompt="Refine this shared-scene render.",
     )

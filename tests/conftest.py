@@ -47,4 +47,3 @@ def valid_scene() -> CanonicalScene:
         coordinate_system=CoordinateSystem(source_to_world=IDENTITY_4X4),
         elements=elements,
     )
-

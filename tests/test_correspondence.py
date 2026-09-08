@@ -36,9 +36,7 @@ def test_builds_visibility_from_instance_identity_pass(
     ImageDraw.Draw(image).rectangle((2, 2, 10, 10), fill=(13, 0, 0))
     image.save(view_directory / "instance_id.png")
 
-    result = BuildCorrespondenceIndex().execute(
-        scene_path, view_set_path, tmp_path / "renders"
-    )
+    result = BuildCorrespondenceIndex().execute(scene_path, view_set_path, tmp_path / "renders")
 
     assert result.pair_count == 0
     visibility = json.loads(result.visibility_paths[0].read_text(encoding="utf-8"))

@@ -25,21 +25,15 @@ _ALLOWED_TRANSITIONS: dict[WorkflowState, frozenset[WorkflowState]] = {
     WorkflowState.DESIGN_VALIDATION: frozenset(
         {WorkflowState.NEEDS_INPUT, WorkflowState.BUILDING_SCENE, WorkflowState.FAILED}
     ),
-    WorkflowState.NEEDS_INPUT: frozenset(
-        {WorkflowState.DESIGN_PLANNING, WorkflowState.FAILED}
-    ),
-    WorkflowState.BUILDING_SCENE: frozenset(
-        {WorkflowState.PLANNING_CAMERAS, WorkflowState.FAILED}
-    ),
+    WorkflowState.NEEDS_INPUT: frozenset({WorkflowState.DESIGN_PLANNING, WorkflowState.FAILED}),
+    WorkflowState.BUILDING_SCENE: frozenset({WorkflowState.PLANNING_CAMERAS, WorkflowState.FAILED}),
     WorkflowState.PLANNING_CAMERAS: frozenset(
         {WorkflowState.RENDERING_PASSES, WorkflowState.FAILED}
     ),
     WorkflowState.RENDERING_PASSES: frozenset(
         {WorkflowState.GENERATING_VIEWSET, WorkflowState.FAILED}
     ),
-    WorkflowState.GENERATING_VIEWSET: frozenset(
-        {WorkflowState.VALIDATING, WorkflowState.FAILED}
-    ),
+    WorkflowState.GENERATING_VIEWSET: frozenset({WorkflowState.VALIDATING, WorkflowState.FAILED}),
     WorkflowState.VALIDATING: frozenset(
         {
             WorkflowState.REPAIRING,
@@ -54,9 +48,7 @@ _ALLOWED_TRANSITIONS: dict[WorkflowState, frozenset[WorkflowState]] = {
     WorkflowState.HUMAN_REVIEW: frozenset(
         {WorkflowState.COMPOSING_BOARD, WorkflowState.REPAIRING, WorkflowState.FAILED}
     ),
-    WorkflowState.COMPOSING_BOARD: frozenset(
-        {WorkflowState.COMPLETED, WorkflowState.FAILED}
-    ),
+    WorkflowState.COMPOSING_BOARD: frozenset({WorkflowState.COMPLETED, WorkflowState.FAILED}),
     WorkflowState.COMPLETED: frozenset(),
     WorkflowState.FAILED: frozenset(),
 }
@@ -64,6 +56,7 @@ _ALLOWED_TRANSITIONS: dict[WorkflowState, frozenset[WorkflowState]] = {
 
 class GenerationJob(DomainModel):
     job_id: str = Field(min_length=1)
+    trace_id: str = Field(min_length=1)
     idempotency_key: str = Field(min_length=1)
     project_id: str = Field(min_length=1)
     model_revision: str = Field(min_length=1)
@@ -94,6 +87,7 @@ class GenerationJob(DomainModel):
         now = utc_now()
         return cls(
             job_id=job_id,
+            trace_id=f"trace-{idempotency_key[:16]}",
             idempotency_key=idempotency_key,
             project_id=project_id,
             model_revision=model_revision,
@@ -115,11 +109,13 @@ class GenerationJob(DomainModel):
     ) -> GenerationJob:
         if state not in _ALLOWED_TRANSITIONS[self.state]:
             raise ValueError(f"invalid workflow transition: {self.state.value} -> {state.value}")
+        if state is WorkflowState.REPAIRING and self.attempt >= 3:
+            raise ValueError("repair attempt limit reached; human review is required")
         return self.model_copy(
             update={
                 "state": state,
                 "updated_at": utc_now(),
-                "attempt": self.attempt + (state is WorkflowState.REPAIRING),
+                "attempt": self.attempt + (1 if state is WorkflowState.REPAIRING else 0),
                 "artifact_refs": (
                     artifact_refs if artifact_refs is not None else self.artifact_refs
                 ),

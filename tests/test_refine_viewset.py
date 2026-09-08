@@ -83,7 +83,7 @@ def test_refines_an_ordered_view_set_as_one_unit(tmp_path: Path) -> None:
     for camera in cameras:
         target = render_root / camera.view_id
         target.mkdir(parents=True)
-        for name in ("base_rgb", "depth", "instance_id", "edges"):
+        for name in ("base_rgb", "depth", "instance_id", "semantic", "edges"):
             Image.new("RGB", (16, 9), "white").save(target / f"{name}.png")
 
     result = RefineViewSet().execute(

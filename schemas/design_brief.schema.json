@@ -91,6 +91,13 @@
       "additionalProperties": false,
       "description": "Dimensioned facade grammar applicable across projects and model scales.",
       "properties": {
+        "accent_bay_interval": {
+          "default": 6,
+          "maximum": 20,
+          "minimum": 0,
+          "title": "Accent Bay Interval",
+          "type": "integer"
+        },
         "entrance_canopy_projection_m": {
           "default": 1.8,
           "maximum": 6.0,
@@ -198,6 +205,36 @@
       },
       "title": "PresentationStrategy",
       "type": "object"
+    },
+    "SiteDesign": {
+      "additionalProperties": false,
+      "properties": {
+        "context_opacity": {
+          "default": 0.28,
+          "maximum": 0.65,
+          "minimum": 0.08,
+          "title": "Context Opacity",
+          "type": "number"
+        },
+        "context_render_mode": {
+          "default": "translucent_massing",
+          "pattern": "^translucent_massing$",
+          "title": "Context Render Mode",
+          "type": "string"
+        },
+        "preserve_landscape_boundaries": {
+          "default": true,
+          "title": "Preserve Landscape Boundaries",
+          "type": "boolean"
+        },
+        "preserve_transport_geometry": {
+          "default": true,
+          "title": "Preserve Transport Geometry",
+          "type": "boolean"
+        }
+      },
+      "title": "SiteDesign",
+      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -213,6 +250,14 @@
       "title": "Asset Library Version",
       "type": "string"
     },
+    "context_building_ids": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Context Building Ids",
+      "type": "array"
+    },
     "design_language": {
       "$ref": "#/$defs/DesignLanguage"
     },
@@ -221,6 +266,14 @@
     },
     "facade_articulation": {
       "$ref": "#/$defs/FacadeArticulation"
+    },
+    "focus_building_ids": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Focus Building Ids",
+      "type": "array"
     },
     "grammar_version": {
       "minLength": 1,
@@ -252,6 +305,26 @@
       "title": "Project Id",
       "type": "string"
     },
+    "roof_eave_overhang_m": {
+      "default": 0.6,
+      "maximum": 3.0,
+      "minimum": 0.0,
+      "title": "Roof Eave Overhang M",
+      "type": "number"
+    },
+    "roof_ridge_orientation": {
+      "default": "long_axis",
+      "pattern": "^(long_axis|short_axis)$",
+      "title": "Roof Ridge Orientation",
+      "type": "string"
+    },
+    "roof_slope_deg": {
+      "default": 7.0,
+      "maximum": 25.0,
+      "minimum": 0.0,
+      "title": "Roof Slope Deg",
+      "type": "number"
+    },
     "roof_type": {
       "minLength": 1,
       "title": "Roof Type",
@@ -261,6 +334,9 @@
       "default": "1.0.0",
       "title": "Schema Version",
       "type": "string"
+    },
+    "site_design": {
+      "$ref": "#/$defs/SiteDesign"
     },
     "solar_panels": {
       "default": false,

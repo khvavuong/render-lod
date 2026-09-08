@@ -62,7 +62,7 @@ def test_validates_complete_generated_view_set(tmp_path: Path) -> None:
     render_view.mkdir(parents=True)
     generated_view.mkdir(parents=True)
     inputs: dict[str, str] = {}
-    for name in ("base_rgb", "depth", "instance_id", "edges"):
+    for name in ("base_rgb", "depth", "instance_id", "semantic", "edges"):
         path = render_view / f"{name}.png"
         Image.new("RGB", (16, 9), "white").save(path)
         inputs[name] = _hash(path)
@@ -102,7 +102,7 @@ def test_detects_stale_conditioning_input(tmp_path: Path) -> None:
     render_view.mkdir(parents=True)
     generated_view.mkdir(parents=True)
     inputs: dict[str, str] = {}
-    for name in ("base_rgb", "depth", "instance_id", "edges"):
+    for name in ("base_rgb", "depth", "instance_id", "semantic", "edges"):
         path = render_view / f"{name}.png"
         Image.new("RGB", (16, 9), "white").save(path)
         inputs[name] = _hash(path)

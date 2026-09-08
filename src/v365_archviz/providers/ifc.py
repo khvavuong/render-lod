@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -54,13 +55,32 @@ def _semantic_role(
 ) -> tuple[SemanticRole, float]:
     width, depth, height = dimensions
     footprint_area = width * depth
-    normalized_name = (name or "").casefold()
+    normalized_name = "".join(
+        character
+        for character in unicodedata.normalize("NFD", (name or "").casefold())
+        if unicodedata.category(character) != "Mn"
+    ).replace("đ", "d")
+    if any(token in normalized_name for token in ("cay xanh", "landscape", "green")):
+        return SemanticRole.LANDSCAPE_ZONE, 0.98
+    if any(token in normalized_name for token in ("via he", "sidewalk", "pavement")):
+        return SemanticRole.SIDEWALK, 0.98
+    if any(token in normalized_name for token in ("duong", "road", "driveway")):
+        return SemanticRole.SITE_ROAD, 0.98
+    if any(
+        token in normalized_name
+        for token in ("cong chinh", "cong vao", "main gate", "entry gate")
+    ):
+        return SemanticRole.MAIN_ENTRANCE, 0.9
+    if any(token in normalized_name for token in ("hang rao", "fence", "boundary")):
+        return SemanticRole.SITE_BOUNDARY, 0.9
+    if any(token in normalized_name for token in ("bai xe", "parking")):
+        return SemanticRole.PARKING, 0.9
     if height <= 0.5 and footprint_area >= 500:
         return SemanticRole.SERVICE_YARD, 0.75
     if entity_type == "IfcBuildingElementProxy" and footprint_area >= 500 and height >= 5:
         return SemanticRole.MAIN_SHED, 0.9
     if 80 <= footprint_area < 500 and height >= 8:
-        confidence = 0.9 if "2 tầng" in normalized_name else 0.8
+        confidence = 0.9 if "2 tang" in normalized_name else 0.8
         return SemanticRole.OFFICE_BLOCK, confidence
     if 20 <= footprint_area < 500 and height >= 3:
         return SemanticRole.UTILITY_BLOCK, 0.65
@@ -99,9 +119,7 @@ def _box_surfaces(
             ),
             width_m=surface_width,
             height_m=height,
-            semantic_role=(
-                SemanticRole.PRIMARY_FACADE if name == "south" else element_role
-            ),
+            semantic_role=(SemanticRole.PRIMARY_FACADE if name == "south" else element_role),
         )
         for name, origin, u_axis, normal, surface_width in definitions
     )

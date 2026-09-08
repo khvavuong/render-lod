@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from v365_archviz.domain.jobs import GenerationJob
 from v365_archviz.domain.scene import CanonicalScene, SourceModelRef
 
 
@@ -30,6 +31,7 @@ class ViewConditioningInput:
     base_rgb: Path
     depth: Path
     instance_id: Path
+    semantic: Path
     edges: Path
     prompt: str
     reference_images: tuple[Path, ...] = ()
@@ -80,3 +82,15 @@ class ViewSetGenerativeRenderer(GenerativeRenderer, Protocol):
     """Generate one ordered, revision-bound view set as the core provider operation."""
 
     def generate_view_set(self, request: ViewSetGenerationInput) -> GeneratedViewSet: ...
+
+
+class JobRepository(Protocol):
+    """Durable metadata port; adapters may use local files or a database."""
+
+    def create_or_get(self, job: GenerationJob) -> tuple[GenerationJob, bool]: ...
+
+    def get(self, job_id: str) -> GenerationJob: ...
+
+    def get_by_view_set(self, view_set_id: str) -> GenerationJob: ...
+
+    def save(self, job: GenerationJob) -> None: ...

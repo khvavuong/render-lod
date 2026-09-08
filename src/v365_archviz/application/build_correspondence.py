@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import math
 from collections import Counter
-from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -48,9 +47,7 @@ class BuildCorrespondenceIndex:
     ) -> CorrespondenceArtifacts:
         scene = CanonicalScene.model_validate_json(scene_path.read_text(encoding="utf-8"))
         view_set = ViewSet.model_validate_json(view_set_path.read_text(encoding="utf-8"))
-        element_by_index = {
-            index: element for index, element in enumerate(scene.elements, start=1)
-        }
+        element_by_index = {index: element for index, element in enumerate(scene.elements, start=1)}
         surfaces_by_element: dict[str, list[str]] = {}
         for surface in scene.surfaces:
             surfaces_by_element.setdefault(surface.element_id, []).append(surface.surface_id)
@@ -63,8 +60,8 @@ class BuildCorrespondenceIndex:
                 raise InvalidModelError(f"instance ID pass not found: {image_path}")
             with Image.open(image_path) as image:
                 rgb = image.convert("RGB")
-                pixels = cast(Iterable[tuple[int, int, int]], rgb.getdata())
-                counts = Counter(_decode_id(color) for color in pixels)
+                pixels = rgb.get_flattened_data()
+                counts = Counter(_decode_id(cast(tuple[int, int, int], color)) for color in pixels)
                 pixel_count = rgb.width * rgb.height
             visible = []
             visible_ids: set[str] = set()
@@ -108,9 +105,7 @@ class BuildCorrespondenceIndex:
         cameras = view_set.cameras
         for left_index, left in enumerate(cameras):
             for right in cameras[left_index + 1 :]:
-                shared = sorted(
-                    visible_by_view[left.view_id] & visible_by_view[right.view_id]
-                )
+                shared = sorted(visible_by_view[left.view_id] & visible_by_view[right.view_id])
                 shared_surfaces = sorted(
                     {
                         surface_id

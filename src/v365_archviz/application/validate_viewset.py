@@ -52,9 +52,7 @@ class ValidateGeneratedViewSet:
     ) -> ViewSetValidationArtifacts:
         try:
             view_set = ViewSet.model_validate_json(view_set_path.read_text(encoding="utf-8"))
-            design = DesignDNA.model_validate_json(
-                design_dna_path.read_text(encoding="utf-8")
-            )
+            design = DesignDNA.model_validate_json(design_dna_path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
             raise InvalidModelError(f"cannot load QA contracts: {exc}") from exc
 
@@ -74,9 +72,7 @@ class ValidateGeneratedViewSet:
                     findings.append(self._finding("error", "manifest_invalid", str(exc)))
 
             if manifest:
-                self._check_equal(
-                    findings, "view_id", manifest.get("view_id"), camera.view_id
-                )
+                self._check_equal(findings, "view_id", manifest.get("view_id"), camera.view_id)
                 self._check_equal(
                     findings, "project_id", manifest.get("project_id"), design.project_id
                 )
@@ -94,14 +90,12 @@ class ValidateGeneratedViewSet:
                 )
 
             input_hashes = manifest.get("inputs", {}) if manifest else {}
-            for name in ("base_rgb", "depth", "instance_id", "edges"):
+            for name in ("base_rgb", "depth", "instance_id", "semantic", "edges"):
                 input_path = render_root / camera.view_id / f"{name}.png"
                 if not input_path.is_file():
                     findings.append(self._finding("error", "input_missing", str(input_path)))
                 elif input_hashes.get(name) != _sha256(input_path):
-                    findings.append(
-                        self._finding("error", "input_hash_mismatch", input_path.name)
-                    )
+                    findings.append(self._finding("error", "input_hash_mismatch", input_path.name))
 
             image_path = self._find_output(generated_root / camera.view_id)
             dimensions: list[int] | None = None
@@ -187,9 +181,7 @@ class ValidateGeneratedViewSet:
             )
 
         error_count = sum(
-            item["severity"] == "error"
-            for view in views
-            for item in view["findings"]
+            item["severity"] == "error" for view in views for item in view["findings"]
         ) + sum(item["severity"] == "error" for item in global_findings)
         report = {
             "schema_version": "1.0.0",
@@ -233,7 +225,6 @@ class ValidateGeneratedViewSet:
         candidates = sorted(
             path
             for path in view_directory.glob("refined.*")
-            if path.is_file()
-            and (mimetypes.guess_type(path.name)[0] or "").startswith("image/")
+            if path.is_file() and (mimetypes.guess_type(path.name)[0] or "").startswith("image/")
         )
         return candidates[0] if len(candidates) == 1 else None

@@ -1,0 +1,134 @@
+{
+  "$defs": {
+    "NormalizedRegion": {
+      "additionalProperties": false,
+      "properties": {
+        "height": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Height",
+          "type": "number"
+        },
+        "width": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Width",
+          "type": "number"
+        },
+        "x": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "X",
+          "type": "number"
+        },
+        "y": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Y",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "width",
+        "height"
+      ],
+      "title": "NormalizedRegion",
+      "type": "object"
+    },
+    "RepairStrategy": {
+      "enum": [
+        "local_inpaint",
+        "full_regeneration"
+      ],
+      "title": "RepairStrategy",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "attempt": {
+      "maximum": 3,
+      "minimum": 1,
+      "title": "Attempt",
+      "type": "integer"
+    },
+    "design_revision": {
+      "minLength": 1,
+      "title": "Design Revision",
+      "type": "string"
+    },
+    "finding_ids": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Finding Ids",
+      "type": "array"
+    },
+    "mask_ref": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Mask Ref"
+    },
+    "project_id": {
+      "minLength": 1,
+      "title": "Project Id",
+      "type": "string"
+    },
+    "region": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/NormalizedRegion"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "repair_id": {
+      "minLength": 1,
+      "title": "Repair Id",
+      "type": "string"
+    },
+    "source_report_id": {
+      "minLength": 1,
+      "title": "Source Report Id",
+      "type": "string"
+    },
+    "strategy": {
+      "$ref": "#/$defs/RepairStrategy"
+    },
+    "view_id": {
+      "minLength": 1,
+      "title": "View Id",
+      "type": "string"
+    },
+    "view_set_id": {
+      "minLength": 1,
+      "title": "View Set Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "repair_id",
+    "source_report_id",
+    "project_id",
+    "design_revision",
+    "view_set_id",
+    "view_id",
+    "finding_ids",
+    "strategy",
+    "attempt"
+  ],
+  "title": "RepairRequest",
+  "type": "object"
+}

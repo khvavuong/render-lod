@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Literal
 
@@ -25,6 +26,9 @@ app = FastAPI(
     description="Geometry-first multi-view architectural visualization API",
 )
 
+SAFE_IDENTIFIER_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+_SAFE_IDENTIFIER = re.compile(SAFE_IDENTIFIER_PATTERN)
+
 
 class HealthResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -44,7 +48,7 @@ class CapabilityResponse(BaseModel):
 class CreateDesignRevisionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    model_revision: str = Field(min_length=1)
+    model_revision: str = Field(pattern=SAFE_IDENTIFIER_PATTERN)
     brief: DesignBrief
 
 
@@ -61,7 +65,7 @@ class DesignRevisionResponse(BaseModel):
 class CreateViewSetRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    model_revision: str = Field(min_length=1)
+    model_revision: str = Field(pattern=SAFE_IDENTIFIER_PATTERN)
     profile: GenerationProfile = GenerationProfile.PREVIEW_FAST
 
 
@@ -69,6 +73,7 @@ class ViewSetJobResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     job_id: str
+    trace_id: str
     view_set_id: str
     design_revision: str
     state: WorkflowState
@@ -78,7 +83,7 @@ class ViewSetJobResponse(BaseModel):
 class ViewActionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    view_set_id: str = Field(min_length=1)
+    view_set_id: str = Field(pattern=SAFE_IDENTIFIER_PATTERN)
 
 
 def _settings() -> Settings:
@@ -89,10 +94,16 @@ def _repository(settings: Settings) -> LocalJobRepository:
     return LocalJobRepository(settings.artifact_dir / "metadata")
 
 
-def _design_directory(
-    artifact_dir: Path, model_revision: str, design_revision: str
-) -> Path:
+def _design_directory(artifact_dir: Path, model_revision: str, design_revision: str) -> Path:
     return artifact_dir / "scenes" / model_revision / "designs" / design_revision
+
+
+def _require_safe_identifier(value: str, label: str) -> None:
+    if not _SAFE_IDENTIFIER.fullmatch(value):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"invalid {label}",
+        )
 
 
 @app.get("/healthz", response_model=HealthResponse, tags=["system"])
@@ -119,18 +130,14 @@ def capabilities() -> CapabilityResponse:
 def create_design_revision(
     project_id: str, request: CreateDesignRevisionRequest
 ) -> DesignRevisionResponse:
+    _require_safe_identifier(project_id, "project_id")
     if request.brief.project_id != project_id:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="brief project_id must match the route project_id",
         )
     settings = _settings()
-    scene_path = (
-        settings.artifact_dir
-        / "scenes"
-        / request.model_revision
-        / "canonical_scene.json"
-    )
+    scene_path = settings.artifact_dir / "scenes" / request.model_revision / "canonical_scene.json"
     if not scene_path.is_file():
         raise HTTPException(status_code=404, detail="canonical scene not found")
     scene = CanonicalScene.model_validate_json(scene_path.read_text(encoding="utf-8"))
@@ -154,25 +161,17 @@ def create_design_revision(
     status_code=status.HTTP_202_ACCEPTED,
     tags=["generation"],
 )
-def create_view_set(
-    design_revision: str, request: CreateViewSetRequest
-) -> ViewSetJobResponse:
+def create_view_set(design_revision: str, request: CreateViewSetRequest) -> ViewSetJobResponse:
+    _require_safe_identifier(design_revision, "design_revision")
     settings = _settings()
-    scene_path = (
-        settings.artifact_dir
-        / "scenes"
-        / request.model_revision
-        / "canonical_scene.json"
-    )
+    scene_path = settings.artifact_dir / "scenes" / request.model_revision / "canonical_scene.json"
     design_path = (
         _design_directory(settings.artifact_dir, request.model_revision, design_revision)
         / "design_dna.json"
     )
     if not scene_path.is_file() or not design_path.is_file():
         raise HTTPException(status_code=404, detail="design revision not found")
-    design = DesignDNA.model_validate_json(
-        design_path.read_text(encoding="utf-8")
-    )
+    design = DesignDNA.model_validate_json(design_path.read_text(encoding="utf-8"))
     if design.design_revision != design_revision:
         raise HTTPException(status_code=409, detail="design revision is not immutable")
     view_set = PlanStandardCameras().execute(scene_path, design_path)
@@ -193,6 +192,7 @@ def create_view_set(
         _repository(settings).save(job)
     return ViewSetJobResponse(
         job_id=job.job_id,
+        trace_id=job.trace_id,
         view_set_id=job.view_set_id,
         design_revision=job.design_revision,
         state=job.state,
@@ -206,12 +206,14 @@ def create_view_set(
     tags=["generation"],
 )
 def get_view_set(view_set_id: str) -> ViewSetJobResponse:
+    _require_safe_identifier(view_set_id, "view_set_id")
     try:
         job = _repository(_settings()).get_by_view_set(view_set_id)
     except OSError as exc:
         raise HTTPException(status_code=404, detail="view set not found") from exc
     return ViewSetJobResponse(
         job_id=job.job_id,
+        trace_id=job.trace_id,
         view_set_id=job.view_set_id,
         design_revision=job.design_revision,
         state=job.state,
@@ -219,9 +221,7 @@ def get_view_set(view_set_id: str) -> ViewSetJobResponse:
     )
 
 
-def _transition_view_set(
-    view_set_id: str, target: WorkflowState
-) -> ViewSetJobResponse:
+def _transition_view_set(view_set_id: str, target: WorkflowState) -> ViewSetJobResponse:
     repository = _repository(_settings())
     try:
         job = repository.get_by_view_set(view_set_id)
@@ -233,6 +233,7 @@ def _transition_view_set(
     repository.save(updated)
     return ViewSetJobResponse(
         job_id=updated.job_id,
+        trace_id=updated.trace_id,
         view_set_id=updated.view_set_id,
         design_revision=updated.design_revision,
         state=updated.state,
@@ -246,7 +247,7 @@ def _transition_view_set(
     tags=["review"],
 )
 def approve_view(view_id: str, request: ViewActionRequest) -> ViewSetJobResponse:
-    del view_id
+    _require_safe_identifier(view_id, "view_id")
     return _transition_view_set(request.view_set_id, WorkflowState.COMPOSING_BOARD)
 
 
@@ -256,5 +257,5 @@ def approve_view(view_id: str, request: ViewActionRequest) -> ViewSetJobResponse
     tags=["review"],
 )
 def repair_view(view_id: str, request: ViewActionRequest) -> ViewSetJobResponse:
-    del view_id
+    _require_safe_identifier(view_id, "view_id")
     return _transition_view_set(request.view_set_id, WorkflowState.REPAIRING)

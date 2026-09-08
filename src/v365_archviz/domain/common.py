@@ -26,4 +26,3 @@ class DomainModel(BaseModel):
     """Strict base class for durable, versioned domain contracts."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, validate_assignment=True)
-

@@ -10,16 +10,18 @@ from pathlib import Path
 
 from v365_archviz.application.build_canonical_scene import BuildCanonicalScene
 from v365_archviz.application.build_correspondence import BuildCorrespondenceIndex
+from v365_archviz.application.evaluate_consistency import EvaluateConsistency
 from v365_archviz.application.extract_ifc import ExtractIfc
 from v365_archviz.application.inspect_model import InspectModel
 from v365_archviz.application.plan_cameras import PlanStandardCameras
 from v365_archviz.application.plan_design import PlanDesign
+from v365_archviz.application.plan_repairs import PlanRepairs
 from v365_archviz.application.refine_view import DEFAULT_PROMPT, RefineView
 from v365_archviz.application.refine_viewset import RefineViewSet
 from v365_archviz.application.validate_viewset import ValidateGeneratedViewSet
 from v365_archviz.config import Settings
 from v365_archviz.domain.design import DesignDNA
-from v365_archviz.domain.workflow import GenerationProfile
+from v365_archviz.domain.workflow import GenerationProfile, ViewSet
 from v365_archviz.errors import V365Error
 from v365_archviz.providers.aps import ApsModelDerivativeClient
 from v365_archviz.providers.gemini import GeminiImageRenderer
@@ -99,12 +101,32 @@ def _parser() -> argparse.ArgumentParser:
     validate.add_argument("--view-set", type=Path, required=True)
     validate.add_argument("--design-dna", type=Path, required=True)
     validate.add_argument("--output", type=Path)
+    validate.add_argument(
+        "--report-only",
+        action="store_true",
+        help="write the report without using QA failure as the process exit code",
+    )
     correspondence = subcommands.add_parser(
         "build-correspondence", help="build cross-view identity and visibility indexes"
     )
     correspondence.add_argument("scene", type=Path)
     correspondence.add_argument("render_root", type=Path)
     correspondence.add_argument("--view-set", type=Path, required=True)
+    consistency = subcommands.add_parser(
+        "evaluate-consistency", help="create a fail-closed cross-view QA report"
+    )
+    consistency.add_argument("technical_report", type=Path)
+    consistency.add_argument("--model-revision", required=True)
+    consistency.add_argument("--view-set", type=Path, required=True)
+    consistency.add_argument("--output", type=Path)
+    repairs = subcommands.add_parser("plan-repairs", help="plan bounded local or full-view repairs")
+    repairs.add_argument("consistency_report", type=Path)
+    repairs.add_argument(
+        "--attempts",
+        type=Path,
+        help="optional JSON object mapping view IDs to completed repair attempts",
+    )
+    repairs.add_argument("--output", type=Path)
     return parser
 
 
@@ -132,7 +154,12 @@ def _refinement_prompt(
     environment = design.environment
     palette = design.material_palette
     presentation = design.presentation
+    site_design = design.site_design
     roof_types = sorted({building.roof.roof_type for building in design.buildings})
+    focus_count = sum(building.treatment.value == "focus" for building in design.buildings)
+    context_count = sum(
+        building.treatment.value == "context" for building in design.buildings
+    )
     solar_policy = (
         "permitted only on buildings explicitly marked true"
         if any(building.roof.solar_panels for building in design.buildings)
@@ -154,7 +181,13 @@ def _refinement_prompt(
         f"- paving: {presentation.paving_character}\n"
         f"- entourage density: {presentation.entourage_density}\n"
         f"- approved roof instructions: {', '.join(roof_types)}\n"
-        f"- solar-panel policy: {solar_policy}"
+        f"- solar-panel policy: {solar_policy}\n"
+        "- road, sidewalk, gate and landscape geometry: preserve exactly\n"
+        f"- approved focus building count: {focus_count}\n"
+        f"- approved context building count: {context_count}; generate exactly this count, "
+        "never infer additional context\n"
+        f"- context buildings: {site_design.context_render_mode}, opacity reference "
+        f"{site_design.context_opacity:.2f}, no facade design"
     )
     return design, prompt
 
@@ -219,9 +252,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         if args.command == "refine-view":
             settings = Settings.from_env()
-            loaded_design, prompt = _refinement_prompt(
-                args.design_dna, args.prompt_file
-            )
+            loaded_design, prompt = _refinement_prompt(args.design_dna, args.prompt_file)
             with GeminiImageRenderer(settings) as renderer:
                 output_directory = args.output
                 if output_directory is None:
@@ -237,10 +268,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         else "unbound-design"
                     )
                     output_directory = (
-                        settings.artifact_dir
-                        / "generated"
-                        / model_revision
-                        / design_revision
+                        settings.artifact_dir / "generated" / model_revision / design_revision
                     )
                 artifacts = RefineView().execute(
                     renderer,
@@ -249,13 +277,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                     output_directory,
                     prompt,
                     tuple(args.reference_image),
-                    project_id=(
-                        loaded_design.project_id if loaded_design is not None else None
-                    ),
+                    project_id=(loaded_design.project_id if loaded_design is not None else None),
                     design_revision=(
-                        loaded_design.design_revision
-                        if loaded_design is not None
-                        else None
+                        loaded_design.design_revision if loaded_design is not None else None
                     ),
                 )
             print(
@@ -316,7 +340,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     indent=2,
                 )
             )
-            return 0 if validation.passed else 3
+            return 0 if validation.passed or args.report_only else 3
         if args.command == "build-correspondence":
             correspondence_artifacts = BuildCorrespondenceIndex().execute(
                 args.scene, args.view_set, args.render_root
@@ -325,10 +349,49 @@ def main(argv: Sequence[str] | None = None) -> int:
                 json.dumps(
                     {
                         "manifest": str(correspondence_artifacts.manifest_path),
-                        "visibility_manifests": len(
-                            correspondence_artifacts.visibility_paths
-                        ),
+                        "visibility_manifests": len(correspondence_artifacts.visibility_paths),
                         "pair_count": correspondence_artifacts.pair_count,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return 0
+        if args.command == "evaluate-consistency":
+            view_set = ViewSet.model_validate_json(args.view_set.read_text(encoding="utf-8"))
+            consistency_result = EvaluateConsistency().execute(
+                args.technical_report,
+                args.model_revision,
+                view_set.view_set_id,
+                args.output,
+            )
+            print(
+                json.dumps(
+                    {
+                        "report": str(consistency_result.report_path),
+                        "status": consistency_result.report.status.value,
+                        "finding_count": len(consistency_result.report.findings),
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return 0
+        if args.command == "plan-repairs":
+            attempts = (
+                json.loads(args.attempts.read_text(encoding="utf-8")) if args.attempts else None
+            )
+            repair_result = PlanRepairs().execute(
+                args.consistency_report,
+                attempts_by_view=attempts,
+                output_path=args.output,
+            )
+            print(
+                json.dumps(
+                    {
+                        "plan": str(repair_result.plan_path),
+                        "request_count": len(repair_result.requests),
+                        "exhausted_view_ids": repair_result.exhausted_view_ids,
                     },
                     ensure_ascii=False,
                     indent=2,

@@ -22,7 +22,7 @@ REFERENCE_ARGS = $(foreach reference,$(REFERENCES),--reference-image "$(referenc
 
 .PHONY: install test lint typecheck require-model require-brief require-design inspect extract-ifc \
 	canonicalize plan-design plan-cameras renderer-image render refine-view refine-viewset \
-	build-correspondence validate-viewset compose-board api
+	build-correspondence validate-viewset evaluate-consistency plan-repairs compose-board api
 
 install:
 	$(PYTHON) -m pip install -e ".[dev]"
@@ -99,6 +99,17 @@ build-correspondence: require-model require-design
 validate-viewset: require-model require-design
 	$(PYTHON) -m v365_archviz validate-viewset "$(RENDER_DIR)" "$(GENERATED_DIR)" \
 		--view-set "$(VIEW_SET)" --design-dna "$(DESIGN_DNA)"
+
+evaluate-consistency: require-model require-design
+	$(PYTHON) -m v365_archviz validate-viewset "$(RENDER_DIR)" "$(GENERATED_DIR)" \
+		--view-set "$(VIEW_SET)" --design-dna "$(DESIGN_DNA)" --report-only
+	$(PYTHON) -m v365_archviz evaluate-consistency \
+		"$(GENERATED_DIR)/technical_qa.json" --model-revision "$(REVISION)" \
+		--view-set "$(VIEW_SET)"
+
+plan-repairs: evaluate-consistency
+	$(PYTHON) -m v365_archviz plan-repairs \
+		"$(GENERATED_DIR)/consistency_report.json"
 
 compose-board: require-model require-design
 	$(PYTHON) scripts/compose_viewset_board.py "$(GENERATED_DIR)" \

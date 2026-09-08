@@ -28,6 +28,8 @@ class SemanticRole(str, Enum):
     OFFICE_BLOCK = "office_block"
     LOADING_ZONE = "loading_zone"
     SERVICE_YARD = "service_yard"
+    SITE_ROAD = "site_road"
+    SIDEWALK = "sidewalk"
     UTILITY_BLOCK = "utility_block"
     PARKING = "parking"
     MAIN_ENTRANCE = "main_entrance"
@@ -134,4 +136,3 @@ class CanonicalScene(DomainModel):
         if missing:
             raise ValueError(f"surfaces reference missing elements: {sorted(missing)}")
         return self
-

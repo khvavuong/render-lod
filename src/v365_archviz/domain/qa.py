@@ -23,6 +23,21 @@ class QAStatus(str, Enum):
     REVIEW = "review"
 
 
+class NormalizedRegion(DomainModel):
+    x: UnitInterval
+    y: UnitInterval
+    width: UnitInterval
+    height: UnitInterval
+
+    @model_validator(mode="after")
+    def validate_bounds(self) -> NormalizedRegion:
+        if self.width <= 0 or self.height <= 0:
+            raise ValueError("repair region must have positive area")
+        if self.x + self.width > 1 or self.y + self.height > 1:
+            raise ValueError("repair region must stay inside the image")
+        return self
+
+
 class QAFinding(DomainModel):
     finding_id: str = Field(min_length=1)
     gate: QAGate
@@ -36,6 +51,7 @@ class QAFinding(DomainModel):
     score: UnitInterval | None = None
     threshold: UnitInterval | None = None
     repairable: bool = False
+    region: NormalizedRegion | None = None
 
 
 class ConsistencyReport(DomainModel):
@@ -50,29 +66,18 @@ class ConsistencyReport(DomainModel):
     @model_validator(mode="after")
     def validate_status(self) -> ConsistencyReport:
         has_failure = any(finding.status is QAStatus.FAIL for finding in self.findings)
-        if self.status is QAStatus.PASS and has_failure:
-            raise ValueError("a passing report cannot contain failed findings")
+        has_review = any(finding.status is QAStatus.REVIEW for finding in self.findings)
+        expected = (
+            QAStatus.FAIL if has_failure else QAStatus.REVIEW if has_review else QAStatus.PASS
+        )
+        if self.status is not expected:
+            raise ValueError(f"report status must be {expected.value} for its finding statuses")
         return self
 
 
 class RepairStrategy(str, Enum):
     LOCAL_INPAINT = "local_inpaint"
     FULL_REGENERATION = "full_regeneration"
-
-
-class NormalizedRegion(DomainModel):
-    x: UnitInterval
-    y: UnitInterval
-    width: UnitInterval
-    height: UnitInterval
-
-    @model_validator(mode="after")
-    def validate_bounds(self) -> NormalizedRegion:
-        if self.width <= 0 or self.height <= 0:
-            raise ValueError("repair region must have positive area")
-        if self.x + self.width > 1 or self.y + self.height > 1:
-            raise ValueError("repair region must stay inside the image")
-        return self
 
 
 class RepairRequest(DomainModel):

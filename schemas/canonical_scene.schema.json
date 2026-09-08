@@ -349,6 +349,8 @@
         "office_block",
         "loading_zone",
         "service_yard",
+        "site_road",
+        "sidewalk",
         "utility_block",
         "parking",
         "main_entrance",

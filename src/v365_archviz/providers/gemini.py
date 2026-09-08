@@ -99,16 +99,26 @@ class GeminiImageRenderer:
     def generate(self, request: ViewConditioningInput) -> GeneratedImage:
         labeled_prompt = (
             f"{request.prompt}\n\n"
-            "The attached images are ordered as: base RGB, depth, instance ID, edges, "
+            "The attached images are ordered as: base RGB, depth, instance ID, semantic ID, "
+            "edges, "
             "then optional approved references. Preserve the camera and all hard geometry "
-            "from the base RGB; auxiliary passes are constraints. Approved references define "
-            "only visual quality, material language, lighting, and landscaping—not project "
-            "geometry, logos, labels, or text."
+            "from the base RGB; auxiliary passes are constraints. Approved references are "
+            "non-binding realism samples only: use their photographic credibility, material "
+            "response and construction-detail density. Do not copy their palette, facade motif, "
+            "roof form, massing, site or landscape layout, surrounding land use, camera, logos, "
+            "labels, text, or project-specific objects. Semantic-ID legend: red = focus factory "
+            "shed, "
+            "blue = focus office, bright green = authored landscape zone, charcoal = road, "
+            "warm grey = sidewalk, cyan = authored roof, muted grey = context building. "
+            "Respect every semantic boundary exactly. A context building may be drawn only over "
+            "muted-grey context pixels; grey background is empty space, not permission to invent "
+            "massing."
         )
         paths = (
             request.base_rgb,
             request.depth,
             request.instance_id,
+            request.semantic,
             request.edges,
             *request.reference_images,
         )
@@ -152,7 +162,6 @@ class GeminiImageRenderer:
         """Execute the ordered unit sequentially behind the provider-neutral view-set port."""
 
         views = tuple(
-            GeneratedView(view_id=view.view_id, image=self.generate(view))
-            for view in request.views
+            GeneratedView(view_id=view.view_id, image=self.generate(view)) for view in request.views
         )
         return GeneratedViewSet(request_id=request.request_id, views=views)

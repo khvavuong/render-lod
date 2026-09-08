@@ -40,17 +40,15 @@ class Settings:
             artifact_dir=Path(os.getenv("V365_ARTIFACT_DIR", ".artifacts")),
             log_level=os.getenv("V365_LOG_LEVEL", "INFO"),
             gemini_api_key=os.getenv("GEMINI_API_KEY"),
-            gemini_image_model=os.getenv(
-                "GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image"
-            ),
+            gemini_image_model=os.getenv("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image"),
             gemini_store_interactions=_as_bool(
                 os.getenv("GEMINI_STORE_INTERACTIONS"), default=False
             ),
             aps_client_id=os.getenv("APS_CLIENT_ID"),
             aps_client_secret=os.getenv("APS_CLIENT_SECRET"),
-            aps_base_url=os.getenv(
-                "APS_BASE_URL", "https://developer.api.autodesk.com"
-            ).rstrip("/"),
+            aps_base_url=os.getenv("APS_BASE_URL", "https://developer.api.autodesk.com").rstrip(
+                "/"
+            ),
             aps_region=os.getenv("APS_REGION", "US"),
             aps_bucket_key=os.getenv("APS_BUCKET_KEY"),
         )

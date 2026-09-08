@@ -25,7 +25,7 @@ def test_passing_report_cannot_hide_failed_finding() -> None:
         repairable=True,
     )
 
-    with pytest.raises(ValidationError, match="passing report"):
+    with pytest.raises(ValidationError, match="report status must be fail"):
         ConsistencyReport(
             report_id="report-1",
             project_id="project-1",

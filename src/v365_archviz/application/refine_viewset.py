@@ -54,9 +54,7 @@ class RefineViewSet:
         profile: GenerationProfile = GenerationProfile.PREVIEW_FAST,
     ) -> RefinedViewSetArtifacts:
         view_set = ViewSet.model_validate_json(view_set_path.read_text(encoding="utf-8"))
-        design = DesignDNA.model_validate_json(
-            design_dna_path.read_text(encoding="utf-8")
-        )
+        design = DesignDNA.model_validate_json(design_dna_path.read_text(encoding="utf-8"))
         if view_set.design_revision != design.design_revision:
             raise InvalidModelError("view set and Design DNA revisions do not match")
         requests = tuple(
@@ -65,6 +63,7 @@ class RefineViewSet:
                 base_rgb=render_root / camera.view_id / "base_rgb.png",
                 depth=render_root / camera.view_id / "depth.png",
                 instance_id=render_root / camera.view_id / "instance_id.png",
+                semantic=render_root / camera.view_id / "semantic.png",
                 edges=render_root / camera.view_id / "edges.png",
                 prompt=prompt,
                 reference_images=reference_images,

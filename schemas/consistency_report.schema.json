@@ -1,0 +1,251 @@
+{
+  "$defs": {
+    "NormalizedRegion": {
+      "additionalProperties": false,
+      "properties": {
+        "height": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Height",
+          "type": "number"
+        },
+        "width": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Width",
+          "type": "number"
+        },
+        "x": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "X",
+          "type": "number"
+        },
+        "y": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Y",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "width",
+        "height"
+      ],
+      "title": "NormalizedRegion",
+      "type": "object"
+    },
+    "QAFinding": {
+      "additionalProperties": false,
+      "properties": {
+        "actual": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Actual"
+        },
+        "code": {
+          "minLength": 1,
+          "title": "Code",
+          "type": "string"
+        },
+        "expected": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected"
+        },
+        "finding_id": {
+          "minLength": 1,
+          "title": "Finding Id",
+          "type": "string"
+        },
+        "gate": {
+          "$ref": "#/$defs/QAGate"
+        },
+        "message": {
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        },
+        "region": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NormalizedRegion"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "repairable": {
+          "default": false,
+          "title": "Repairable",
+          "type": "boolean"
+        },
+        "score": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Score"
+        },
+        "status": {
+          "$ref": "#/$defs/QAStatus"
+        },
+        "surface_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Surface Id"
+        },
+        "threshold": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Threshold"
+        },
+        "view_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "View Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "finding_id",
+        "gate",
+        "status",
+        "code",
+        "message",
+        "view_ids"
+      ],
+      "title": "QAFinding",
+      "type": "object"
+    },
+    "QAGate": {
+      "enum": [
+        "geometry",
+        "semantic",
+        "cross_view_appearance",
+        "aesthetic",
+        "artifact_integrity"
+      ],
+      "title": "QAGate",
+      "type": "string"
+    },
+    "QAStatus": {
+      "enum": [
+        "pass",
+        "fail",
+        "review"
+      ],
+      "title": "QAStatus",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "design_revision": {
+      "minLength": 1,
+      "title": "Design Revision",
+      "type": "string"
+    },
+    "findings": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/QAFinding"
+      },
+      "title": "Findings",
+      "type": "array"
+    },
+    "model_revision": {
+      "minLength": 1,
+      "title": "Model Revision",
+      "type": "string"
+    },
+    "project_id": {
+      "minLength": 1,
+      "title": "Project Id",
+      "type": "string"
+    },
+    "report_id": {
+      "minLength": 1,
+      "title": "Report Id",
+      "type": "string"
+    },
+    "status": {
+      "$ref": "#/$defs/QAStatus"
+    },
+    "view_set_id": {
+      "minLength": 1,
+      "title": "View Set Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "report_id",
+    "project_id",
+    "model_revision",
+    "design_revision",
+    "view_set_id",
+    "status"
+  ],
+  "title": "ConsistencyReport",
+  "type": "object"
+}

@@ -23,4 +23,3 @@ def test_manifest_excludes_original_machine_path() -> None:
 
     assert "last_save_path" not in str(manifest)
     assert manifest["source"]["file_name"] == SAMPLE.name  # type: ignore[index]
-

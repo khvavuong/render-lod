@@ -18,6 +18,10 @@
         },
         "roof": {
           "$ref": "#/$defs/RoofDesign"
+        },
+        "treatment": {
+          "$ref": "#/$defs/BuildingTreatment",
+          "default": "focus"
         }
       },
       "required": [
@@ -26,6 +30,14 @@
       ],
       "title": "BuildingDesign",
       "type": "object"
+    },
+    "BuildingTreatment": {
+      "enum": [
+        "focus",
+        "context"
+      ],
+      "title": "BuildingTreatment",
+      "type": "string"
     },
     "DesignLanguage": {
       "additionalProperties": false,
@@ -140,6 +152,13 @@
       "additionalProperties": false,
       "description": "Dimensioned facade grammar applicable across projects and model scales.",
       "properties": {
+        "accent_bay_interval": {
+          "default": 6,
+          "maximum": 20,
+          "minimum": 0,
+          "title": "Accent Bay Interval",
+          "type": "integer"
+        },
         "entrance_canopy_projection_m": {
           "default": 1.8,
           "maximum": 6.0,
@@ -324,10 +343,30 @@
     "RoofDesign": {
       "additionalProperties": false,
       "properties": {
+        "eave_overhang_m": {
+          "default": 0.6,
+          "maximum": 3.0,
+          "minimum": 0.0,
+          "title": "Eave Overhang M",
+          "type": "number"
+        },
+        "ridge_orientation": {
+          "default": "long_axis",
+          "pattern": "^(long_axis|short_axis)$",
+          "title": "Ridge Orientation",
+          "type": "string"
+        },
         "roof_type": {
           "minLength": 1,
           "title": "Roof Type",
           "type": "string"
+        },
+        "slope_deg": {
+          "default": 7.0,
+          "maximum": 25.0,
+          "minimum": 0.0,
+          "title": "Slope Deg",
+          "type": "number"
         },
         "solar_panels": {
           "default": false,
@@ -339,6 +378,36 @@
         "roof_type"
       ],
       "title": "RoofDesign",
+      "type": "object"
+    },
+    "SiteDesign": {
+      "additionalProperties": false,
+      "properties": {
+        "context_opacity": {
+          "default": 0.28,
+          "maximum": 0.65,
+          "minimum": 0.08,
+          "title": "Context Opacity",
+          "type": "number"
+        },
+        "context_render_mode": {
+          "default": "translucent_massing",
+          "pattern": "^translucent_massing$",
+          "title": "Context Render Mode",
+          "type": "string"
+        },
+        "preserve_landscape_boundaries": {
+          "default": true,
+          "title": "Preserve Landscape Boundaries",
+          "type": "boolean"
+        },
+        "preserve_transport_geometry": {
+          "default": true,
+          "title": "Preserve Transport Geometry",
+          "type": "boolean"
+        }
+      },
+      "title": "SiteDesign",
       "type": "object"
     }
   },
@@ -387,6 +456,9 @@
       "default": "1.0.0",
       "title": "Schema Version",
       "type": "string"
+    },
+    "site_design": {
+      "$ref": "#/$defs/SiteDesign"
     }
   },
   "required": [

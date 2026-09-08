@@ -20,8 +20,7 @@ jobs:
       - run: python -m pytest
       - run: python -m ruff check .
       - run: python -m mypy
-      - run: python scripts/export_schemas.py
+      - run: python scripts/export_schemas.py --check
         env:
           PYTHONPATH: src
-      - run: git diff --exit-code -- schemas
         name: Verify generated schemas are current

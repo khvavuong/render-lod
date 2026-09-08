@@ -23,12 +23,10 @@ def _scene_bounds(
     scene: CanonicalScene,
 ) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
     minimum = tuple(
-        min(element.bounding_box.minimum[index] for element in scene.elements)
-        for index in range(3)
+        min(element.bounding_box.minimum[index] for element in scene.elements) for index in range(3)
     )
     maximum = tuple(
-        max(element.bounding_box.maximum[index] for element in scene.elements)
-        for index in range(3)
+        max(element.bounding_box.maximum[index] for element in scene.elements) for index in range(3)
     )
     return minimum, maximum  # type: ignore[return-value]
 
@@ -44,9 +42,7 @@ def _architectural_elements(scene: CanonicalScene) -> list[SceneElement]:
 
 def _footprint(element: SceneElement) -> float:
     bounds = element.bounding_box
-    return (bounds.maximum[0] - bounds.minimum[0]) * (
-        bounds.maximum[1] - bounds.minimum[1]
-    )
+    return (bounds.maximum[0] - bounds.minimum[0]) * (bounds.maximum[1] - bounds.minimum[1])
 
 
 def _height(element: SceneElement) -> float:
@@ -136,9 +132,7 @@ class PlanStandardCameras:
         )
         design_revision = f"scene-{revision_key}"
         if design_dna_path is not None:
-            design = DesignDNA.model_validate_json(
-                design_dna_path.read_text(encoding="utf-8")
-            )
+            design = DesignDNA.model_validate_json(design_dna_path.read_text(encoding="utf-8"))
             design_revision = design.design_revision
         view_set = ViewSet(
             view_set_id=f"{revision_key}-{design_revision}-standard-v1",

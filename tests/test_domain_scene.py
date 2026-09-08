@@ -71,4 +71,3 @@ def test_surface_frame_rejects_non_unit_axes() -> None:
             v_axis=(0, 0, 1),
             normal=(0, -1, 0),
         )
-

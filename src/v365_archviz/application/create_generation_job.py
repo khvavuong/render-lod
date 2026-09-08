@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from v365_archviz.domain.jobs import GenerationJob
 from v365_archviz.domain.workflow import GenerationProfile, ViewSet, WorkflowState
-from v365_archviz.providers.local_jobs import LocalJobRepository
+from v365_archviz.providers.contracts import JobRepository
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,7 +32,7 @@ def generation_idempotency_key(
 class CreateGenerationJob:
     def execute(
         self,
-        repository: LocalJobRepository,
+        repository: JobRepository,
         *,
         project_id: str,
         model_revision: str,

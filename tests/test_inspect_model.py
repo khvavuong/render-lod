@@ -13,4 +13,3 @@ def test_writes_content_addressed_artifacts(tmp_path: Path) -> None:
     assert first.preview_path is not None and first.preview_path.is_file()
     manifest = json.loads(first.manifest_path.read_text(encoding="utf-8"))
     assert manifest["source"]["sha256"] == first.inspection.sha256
-

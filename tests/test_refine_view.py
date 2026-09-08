@@ -25,7 +25,13 @@ class FakeRenderer:
 def test_refines_complete_conditioning_pack_and_writes_manifest(tmp_path: Path) -> None:
     view = tmp_path / "renders" / "view-01"
     view.mkdir(parents=True)
-    for name in ("base_rgb.png", "depth.png", "instance_id.png", "edges.png"):
+    for name in (
+        "base_rgb.png",
+        "depth.png",
+        "instance_id.png",
+        "semantic.png",
+        "edges.png",
+    ):
         Image.new("RGB", (2, 2), "white").save(view / name)
     reference = tmp_path / "reference.jpg"
     Image.new("RGB", (2, 2), "blue").save(reference)
@@ -46,6 +52,7 @@ def test_refines_complete_conditioning_pack_and_writes_manifest(tmp_path: Path) 
         "base_rgb",
         "depth",
         "instance_id",
+        "semantic",
         "edges",
         "reference_01",
     }

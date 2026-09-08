@@ -19,4 +19,3 @@ def atomic_write(path: Path, content: bytes) -> None:
     except BaseException:
         Path(temporary_name).unlink(missing_ok=True)
         raise
-

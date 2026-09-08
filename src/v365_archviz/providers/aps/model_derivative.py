@@ -275,4 +275,3 @@ class ApsModelDerivativeClient:
         except httpx.HTTPError as exc:
             raise ProviderError("APS IFC derivative download failed") from exc
         return response.content
-

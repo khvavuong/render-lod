@@ -18,6 +18,21 @@ def test_two_storey_small_mass_is_inferred_as_office() -> None:
     assert confidence == 0.9
 
 
+def test_vietnamese_site_names_take_priority_over_dimensions() -> None:
+    landscape, landscape_confidence = _semantic_role(
+        "IfcBuildingElementProxy", (370.0, 189.0, 0.25), "cây xanh1:cây xanh"
+    )
+    road, road_confidence = _semantic_role(
+        "IfcBuildingElementProxy", (391.0, 210.0, 0.25), "đường1:đường"
+    )
+    sidewalk, _ = _semantic_role("IfcBuildingElementProxy", (376.0, 195.0, 0.25), "Vỉa hè")
+
+    assert landscape is SemanticRole.LANDSCAPE_ZONE
+    assert road is SemanticRole.SITE_ROAD
+    assert sidewalk is SemanticRole.SIDEWALK
+    assert landscape_confidence == road_confidence == 0.98
+
+
 def test_box_produces_four_orthonormal_facade_frames() -> None:
     surfaces = _box_surfaces(
         "ifc:building-1",

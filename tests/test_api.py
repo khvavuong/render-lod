@@ -23,7 +23,9 @@ def test_capabilities_never_expose_credentials(monkeypatch) -> None:  # type: ig
 
 
 def test_design_revision_and_view_set_are_idempotent(
-    tmp_path, monkeypatch, valid_scene: CanonicalScene  # type: ignore[no-untyped-def]
+    tmp_path,
+    monkeypatch,
+    valid_scene: CanonicalScene,  # type: ignore[no-untyped-def]
 ) -> None:
     monkeypatch.setenv("V365_ARTIFACT_DIR", str(tmp_path))
     model_revision = "model-revision"
@@ -70,3 +72,16 @@ def test_design_revision_and_view_set_are_idempotent(
     status_response = client.get(f"/v1/view-sets/{view_set_id}")
     assert status_response.status_code == 200
     assert status_response.json()["job_id"] == first.json()["job_id"]
+    assert (tmp_path / "metadata" / "jobs" / f"{first.json()['job_id']}.json").is_file()
+
+
+def test_api_rejects_revision_path_traversal(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("V365_ARTIFACT_DIR", str(tmp_path))
+
+    response = client.post(
+        "/v1/projects/project/design-revisions",
+        json={"model_revision": "..", "brief": {}},
+    )
+
+    assert response.status_code == 422
+    assert not (tmp_path.parent / "canonical_scene.json").exists()

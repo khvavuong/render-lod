@@ -3,12 +3,21 @@
 from __future__ import annotations
 
 import fcntl
+import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
 from v365_archviz.artifacts import atomic_write
 from v365_archviz.domain.jobs import GenerationJob
+
+_SAFE_KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$")
+
+
+def _storage_key(value: str) -> str:
+    if not _SAFE_KEY.fullmatch(value):
+        raise ValueError("unsafe metadata storage key")
+    return value
 
 
 class LocalJobRepository:
@@ -28,24 +37,24 @@ class LocalJobRepository:
 
     def create_or_get(self, job: GenerationJob) -> tuple[GenerationJob, bool]:
         with self._lock():
-            idempotency_path = self._root / "idempotency" / job.idempotency_key
+            idempotency_path = self._root / "idempotency" / _storage_key(job.idempotency_key)
             if idempotency_path.is_file():
                 existing_id = idempotency_path.read_text(encoding="utf-8").strip()
                 return self.get(existing_id), False
             self._write(job)
             atomic_write(idempotency_path, f"{job.job_id}\n".encode())
             atomic_write(
-                self._root / "view_sets" / job.view_set_id,
+                self._root / "view_sets" / _storage_key(job.view_set_id),
                 f"{job.job_id}\n".encode(),
             )
             return job, True
 
     def get(self, job_id: str) -> GenerationJob:
-        path = self._root / "jobs" / f"{job_id}.json"
+        path = self._root / "jobs" / f"{_storage_key(job_id)}.json"
         return GenerationJob.model_validate_json(path.read_text(encoding="utf-8"))
 
     def get_by_view_set(self, view_set_id: str) -> GenerationJob:
-        index = self._root / "view_sets" / view_set_id
+        index = self._root / "view_sets" / _storage_key(view_set_id)
         job_id = index.read_text(encoding="utf-8").strip()
         return self.get(job_id)
 
@@ -55,6 +64,6 @@ class LocalJobRepository:
 
     def _write(self, job: GenerationJob) -> None:
         atomic_write(
-            self._root / "jobs" / f"{job.job_id}.json",
+            self._root / "jobs" / f"{_storage_key(job.job_id)}.json",
             job.model_dump_json(indent=2).encode() + b"\n",
         )

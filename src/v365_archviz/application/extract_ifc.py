@@ -91,4 +91,3 @@ class ExtractIfc:
             manifest_path=manifest_path,
             source_sha256=inspection.sha256,
         )
-

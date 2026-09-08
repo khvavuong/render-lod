@@ -28,7 +28,8 @@
     "office_glazing_ratio": 0.72,
     "feature_frame_depth_m": 0.55,
     "entrance_canopy_projection_m": 1.8,
-    "vertical_fin_count": 4
+    "vertical_fin_count": 4,
+    "accent_bay_interval": 8
   },
   "presentation": {
     "landscape_character": "restrained climate-appropriate planting",
@@ -38,8 +39,19 @@
   "panel_module_m": 1.2,
   "loading_docks_per_main_facade": 0,
   "add_office_entrances": false,
-  "roof_type": "preserve source massing",
+  "roof_type": "low-slope gable profiled-metal roof",
+  "roof_slope_deg": 7.0,
+  "roof_eave_overhang_m": 0.6,
+  "roof_ridge_orientation": "long_axis",
   "solar_panels": false,
+  "focus_building_ids": [],
+  "context_building_ids": [],
+  "site_design": {
+    "preserve_transport_geometry": true,
+    "preserve_landscape_boundaries": true,
+    "context_render_mode": "translucent_massing",
+    "context_opacity": 0.28
+  },
   "grammar_version": "baseline-grammar-v1",
   "asset_library_version": "baseline-assets-v1"
 }

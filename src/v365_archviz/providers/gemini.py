@@ -8,10 +8,17 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from PIL import Image, UnidentifiedImageError
 
 from v365_archviz.config import Settings
 from v365_archviz.errors import ConfigurationError, ProviderError
-from v365_archviz.providers.contracts import GeneratedImage, ViewConditioningInput
+from v365_archviz.providers.contracts import (
+    GeneratedImage,
+    GeneratedView,
+    GeneratedViewSet,
+    ViewConditioningInput,
+    ViewSetGenerationInput,
+)
 
 DEFAULT_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/interactions"
 
@@ -20,6 +27,12 @@ def _image_block(path: Path) -> dict[str, str]:
     if not path.is_file():
         raise ProviderError(f"conditioning image does not exist: {path}")
     media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    try:
+        with Image.open(path) as image:
+            if image.format:
+                media_type = Image.MIME.get(image.format, media_type)
+    except (UnidentifiedImageError, OSError):
+        pass
     if not media_type.startswith("image/"):
         raise ProviderError(f"conditioning artifact is not an image: {path}")
     return {
@@ -88,7 +101,9 @@ class GeminiImageRenderer:
             f"{request.prompt}\n\n"
             "The attached images are ordered as: base RGB, depth, instance ID, edges, "
             "then optional approved references. Preserve the camera and all hard geometry "
-            "from the base RGB; auxiliary passes are constraints, not visual style references."
+            "from the base RGB; auxiliary passes are constraints. Approved references define "
+            "only visual quality, material language, lighting, and landscaping—not project "
+            "geometry, logos, labels, or text."
         )
         paths = (
             request.base_rgb,
@@ -132,3 +147,12 @@ class GeminiImageRenderer:
             media_type=media_type,
             provider_request_id=request_id if isinstance(request_id, str) else None,
         )
+
+    def generate_view_set(self, request: ViewSetGenerationInput) -> GeneratedViewSet:
+        """Execute the ordered unit sequentially behind the provider-neutral view-set port."""
+
+        views = tuple(
+            GeneratedView(view_id=view.view_id, image=self.generate(view))
+            for view in request.views
+        )
+        return GeneratedViewSet(request_id=request.request_id, views=views)

@@ -70,6 +70,7 @@ def _semantic_role(
 def _box_surfaces(
     element_id: str,
     bounding_box: BoundingBox,
+    element_role: SemanticRole = SemanticRole.UNKNOWN,
 ) -> tuple[SceneSurface, ...]:
     x0, y0, z0 = bounding_box.minimum
     x1, y1, z1 = bounding_box.maximum
@@ -98,7 +99,9 @@ def _box_surfaces(
             ),
             width_m=surface_width,
             height_m=height,
-            semantic_role=SemanticRole.UNKNOWN,
+            semantic_role=(
+                SemanticRole.PRIMARY_FACADE if name == "south" else element_role
+            ),
         )
         for name, origin, u_axis, normal, surface_width in definitions
     )
@@ -203,7 +206,7 @@ class IfcGeometryProvider:
                 semantic_confidence=confidence,
             )
             elements.append(element)
-            surfaces.extend(_box_surfaces(scene_element_id, bounding_box))
+            surfaces.extend(_box_surfaces(scene_element_id, bounding_box, role))
             diagnostics.append(IfcDiagnostic(entity.id(), entity.is_a(), global_id, "extracted"))
 
         if not elements:

@@ -1,32 +1,5 @@
 {
   "$defs": {
-    "BuildingDesign": {
-      "additionalProperties": false,
-      "properties": {
-        "building_id": {
-          "minLength": 1,
-          "title": "Building Id",
-          "type": "string"
-        },
-        "facades": {
-          "default": [],
-          "items": {
-            "$ref": "#/$defs/FacadeDesign"
-          },
-          "title": "Facades",
-          "type": "array"
-        },
-        "roof": {
-          "$ref": "#/$defs/RoofDesign"
-        }
-      },
-      "required": [
-        "building_id",
-        "roof"
-      ],
-      "title": "BuildingDesign",
-      "type": "object"
-    },
     "DesignLanguage": {
       "additionalProperties": false,
       "properties": {
@@ -70,28 +43,6 @@
         "office_material"
       ],
       "title": "DesignLanguage",
-      "type": "object"
-    },
-    "Entrance": {
-      "additionalProperties": false,
-      "properties": {
-        "u": {
-          "maximum": 1.0,
-          "minimum": 0.0,
-          "title": "U",
-          "type": "number"
-        },
-        "width_m": {
-          "exclusiveMinimum": 0.0,
-          "title": "Width M",
-          "type": "number"
-        }
-      },
-      "required": [
-        "u",
-        "width_m"
-      ],
-      "title": "Entrance",
       "type": "object"
     },
     "EnvironmentDesign": {
@@ -186,79 +137,6 @@
       "title": "FacadeArticulation",
       "type": "object"
     },
-    "FacadeDesign": {
-      "additionalProperties": false,
-      "properties": {
-        "articulation": {
-          "$ref": "#/$defs/FacadeArticulation"
-        },
-        "loading_docks": {
-          "default": [],
-          "items": {
-            "$ref": "#/$defs/LoadingDock"
-          },
-          "title": "Loading Docks",
-          "type": "array"
-        },
-        "office_entrance": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Entrance"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "panel_module_m": {
-          "exclusiveMinimum": 0.0,
-          "maximum": 1.5,
-          "minimum": 0.8,
-          "title": "Panel Module M",
-          "type": "number"
-        },
-        "surface_id": {
-          "minLength": 1,
-          "title": "Surface Id",
-          "type": "string"
-        }
-      },
-      "required": [
-        "surface_id",
-        "panel_module_m"
-      ],
-      "title": "FacadeDesign",
-      "type": "object"
-    },
-    "LoadingDock": {
-      "additionalProperties": false,
-      "properties": {
-        "dock_id": {
-          "minLength": 1,
-          "title": "Dock Id",
-          "type": "string"
-        },
-        "u": {
-          "maximum": 1.0,
-          "minimum": 0.0,
-          "title": "U",
-          "type": "number"
-        },
-        "width_m": {
-          "exclusiveMinimum": 0.0,
-          "title": "Width M",
-          "type": "number"
-        }
-      },
-      "required": [
-        "dock_id",
-        "u",
-        "width_m"
-      ],
-      "title": "LoadingDock",
-      "type": "object"
-    },
     "MaterialPalette": {
       "additionalProperties": false,
       "properties": {
@@ -320,60 +198,51 @@
       },
       "title": "PresentationStrategy",
       "type": "object"
-    },
-    "RoofDesign": {
-      "additionalProperties": false,
-      "properties": {
-        "roof_type": {
-          "minLength": 1,
-          "title": "Roof Type",
-          "type": "string"
-        },
-        "solar_panels": {
-          "default": false,
-          "title": "Solar Panels",
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "roof_type"
-      ],
-      "title": "RoofDesign",
-      "type": "object"
     }
   },
   "additionalProperties": false,
+  "description": "Project input; no visual language is inferred from a repository fixture.",
   "properties": {
+    "add_office_entrances": {
+      "default": false,
+      "title": "Add Office Entrances",
+      "type": "boolean"
+    },
     "asset_library_version": {
       "minLength": 1,
       "title": "Asset Library Version",
       "type": "string"
     },
-    "buildings": {
-      "items": {
-        "$ref": "#/$defs/BuildingDesign"
-      },
-      "title": "Buildings",
-      "type": "array"
-    },
     "design_language": {
       "$ref": "#/$defs/DesignLanguage"
     },
-    "design_revision": {
-      "minLength": 1,
-      "title": "Design Revision",
-      "type": "string"
-    },
     "environment": {
       "$ref": "#/$defs/EnvironmentDesign"
+    },
+    "facade_articulation": {
+      "$ref": "#/$defs/FacadeArticulation"
     },
     "grammar_version": {
       "minLength": 1,
       "title": "Grammar Version",
       "type": "string"
     },
+    "loading_docks_per_main_facade": {
+      "default": 0,
+      "maximum": 12,
+      "minimum": 0,
+      "title": "Loading Docks Per Main Facade",
+      "type": "integer"
+    },
     "material_palette": {
       "$ref": "#/$defs/MaterialPalette"
+    },
+    "panel_module_m": {
+      "exclusiveMinimum": 0.0,
+      "maximum": 1.5,
+      "minimum": 0.8,
+      "title": "Panel Module M",
+      "type": "number"
     },
     "presentation": {
       "$ref": "#/$defs/PresentationStrategy"
@@ -383,21 +252,31 @@
       "title": "Project Id",
       "type": "string"
     },
+    "roof_type": {
+      "minLength": 1,
+      "title": "Roof Type",
+      "type": "string"
+    },
     "schema_version": {
       "default": "1.0.0",
       "title": "Schema Version",
       "type": "string"
+    },
+    "solar_panels": {
+      "default": false,
+      "title": "Solar Panels",
+      "type": "boolean"
     }
   },
   "required": [
     "project_id",
-    "design_revision",
     "design_language",
     "environment",
-    "buildings",
+    "panel_module_m",
+    "roof_type",
     "grammar_version",
     "asset_library_version"
   ],
-  "title": "DesignDNA",
+  "title": "DesignBrief",
   "type": "object"
 }

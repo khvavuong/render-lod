@@ -1,0 +1,45 @@
+{
+  "schema_version": "1.0.0",
+  "project_id": "replace-with-project-id",
+  "design_language": {
+    "style": "contemporary architecture appropriate to the project context",
+    "primary_material": "project-defined primary facade material",
+    "secondary_material": "project-defined secondary facade material",
+    "office_material": "project-defined glazing or office material",
+    "accent": null
+  },
+  "environment": {
+    "time": "09:30",
+    "weather": "project-defined daylight condition",
+    "sun_azimuth_deg": 135.0,
+    "sun_elevation_deg": 45.0,
+    "white_balance_k": 5600
+  },
+  "material_palette": {
+    "primary_hex": "#E7E5DF",
+    "secondary_hex": "#252B31",
+    "glass_hex": "#315263",
+    "accent_hex": "#2F6B4F",
+    "paving_hex": "#777B7A"
+  },
+  "facade_articulation": {
+    "plinth_height_m": 0.75,
+    "parapet_band_height_m": 0.55,
+    "office_glazing_ratio": 0.72,
+    "feature_frame_depth_m": 0.55,
+    "entrance_canopy_projection_m": 1.8,
+    "vertical_fin_count": 4
+  },
+  "presentation": {
+    "landscape_character": "restrained climate-appropriate planting",
+    "paving_character": "clean durable industrial paving",
+    "entourage_density": "low"
+  },
+  "panel_module_m": 1.2,
+  "loading_docks_per_main_facade": 0,
+  "add_office_entrances": false,
+  "roof_type": "preserve source massing",
+  "solar_panels": false,
+  "grammar_version": "baseline-grammar-v1",
+  "asset_library_version": "baseline-assets-v1"
+}

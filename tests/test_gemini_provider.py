@@ -2,10 +2,11 @@ import base64
 from pathlib import Path
 
 import httpx
+from PIL import Image
 
 from v365_archviz.config import Settings
 from v365_archviz.providers.contracts import ViewConditioningInput
-from v365_archviz.providers.gemini import GeminiImageRenderer
+from v365_archviz.providers.gemini import GeminiImageRenderer, _image_block
 
 
 def _settings() -> Settings:
@@ -65,3 +66,14 @@ def test_generates_with_privacy_safe_request(tmp_path: Path) -> None:
     assert result.content == b"output-image"
     assert result.media_type == "image/jpeg"
     assert result.provider_request_id == "interaction-1"
+
+
+def test_image_block_detects_content_mime_instead_of_misleading_suffix(
+    tmp_path: Path,
+) -> None:
+    reference = tmp_path / "reference.png"
+    Image.new("RGB", (2, 2), "white").save(reference, format="JPEG")
+
+    block = _image_block(reference)
+
+    assert block["mime_type"] == "image/jpeg"

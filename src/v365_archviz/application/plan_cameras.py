@@ -5,7 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from v365_archviz.artifacts import atomic_write
-from v365_archviz.domain.scene import CanonicalScene, SceneElement, SemanticRole
+from v365_archviz.domain.design import DesignDNA
+from v365_archviz.domain.scene import CanonicalScene, SceneElement
 from v365_archviz.domain.workflow import Camera, ViewRole, ViewSet
 
 
@@ -32,18 +33,28 @@ def _scene_bounds(
     return minimum, maximum  # type: ignore[return-value]
 
 
-def _frontmost(scene: CanonicalScene, role: SemanticRole) -> SceneElement:
-    candidates = [element for element in scene.elements if element.semantic_role is role]
-    if not candidates:
-        candidates = list(scene.elements)
-    return min(
-        candidates,
-        key=lambda element: (element.bounding_box.minimum[1], _center(element)[0]),
+def _architectural_elements(scene: CanonicalScene) -> list[SceneElement]:
+    candidates = [
+        element
+        for element in scene.elements
+        if element.bounding_box.maximum[2] - element.bounding_box.minimum[2] >= 3.0
+    ]
+    return candidates or list(scene.elements)
+
+
+def _footprint(element: SceneElement) -> float:
+    bounds = element.bounding_box
+    return (bounds.maximum[0] - bounds.minimum[0]) * (
+        bounds.maximum[1] - bounds.minimum[1]
     )
 
 
+def _height(element: SceneElement) -> float:
+    return element.bounding_box.maximum[2] - element.bounding_box.minimum[2]
+
+
 class PlanStandardCameras:
-    def execute(self, scene_path: Path) -> ViewSet:
+    def execute(self, scene_path: Path, design_dna_path: Path | None = None) -> ViewSet:
         scene = CanonicalScene.model_validate_json(scene_path.read_text(encoding="utf-8"))
         minimum, maximum = _scene_bounds(scene)
         center = tuple((low + high) / 2 for low, high in zip(minimum, maximum, strict=True))
@@ -51,10 +62,19 @@ class PlanStandardCameras:
         span_y = maximum[1] - minimum[1]
         span = max(span_x, span_y)
 
-        office = _frontmost(scene, SemanticRole.OFFICE_BLOCK)
-        shed = _frontmost(scene, SemanticRole.MAIN_SHED)
-        office_target = _center(office)
-        shed_target = _center(shed)
+        architectural = _architectural_elements(scene)
+        tallest = max(_height(element) for element in architectural)
+        hero_candidates = [
+            element for element in architectural if _height(element) >= tallest * 0.9
+        ]
+        hero = min(hero_candidates, key=_footprint)
+        detail = max(architectural, key=_footprint)
+        hero_target = _center(hero)
+        detail_target = _center(detail)
+        hero_width = hero.bounding_box.maximum[0] - hero.bounding_box.minimum[0]
+        hero_depth = hero.bounding_box.maximum[1] - hero.bounding_box.minimum[1]
+        detail_width = detail.bounding_box.maximum[0] - detail.bounding_box.minimum[0]
+        detail_depth = detail.bounding_box.maximum[1] - detail.bounding_box.minimum[1]
         cameras = (
             Camera(
                 view_id="view-01",
@@ -80,19 +100,31 @@ class PlanStandardCameras:
             ),
             Camera(
                 view_id="view-03",
-                role=ViewRole.OFFICE_HERO,
-                position=(office_target[0], office.bounding_box.minimum[1] - 32.0, 2.1),
-                target=(office_target[0], office_target[1], min(4.0, office_target[2])),
-                focal_length_mm=28,
+                role=ViewRole.HERO,
+                position=(
+                    hero.bounding_box.maximum[0] + max(24.0, hero_width * 1.8),
+                    hero.bounding_box.minimum[1] - max(28.0, hero_depth * 2.2),
+                    hero.bounding_box.maximum[2] + max(2.0, _height(hero) * 0.2),
+                ),
+                target=(hero_target[0], hero_target[1], hero_target[2]),
+                focal_length_mm=48,
                 sensor_width_mm=36,
                 aspect_ratio="16:9",
             ),
             Camera(
                 view_id="view-04",
-                role=ViewRole.LOADING_DETAIL,
-                position=(shed_target[0] - 12.0, shed.bounding_box.minimum[1] - 28.0, 2.1),
-                target=(shed_target[0], shed.bounding_box.minimum[1], min(4.5, shed_target[2])),
-                focal_length_mm=35,
+                role=ViewRole.DETAIL,
+                position=(
+                    detail.bounding_box.maximum[0] + max(25.0, detail_width * 0.8),
+                    detail.bounding_box.minimum[1] - max(25.0, detail_depth * 0.7),
+                    detail.bounding_box.maximum[2] + max(2.0, _height(detail) * 0.25),
+                ),
+                target=(
+                    detail_target[0],
+                    detail.bounding_box.minimum[1],
+                    detail_target[2],
+                ),
+                focal_length_mm=42,
                 sensor_width_mm=36,
                 aspect_ratio="16:9",
             ),
@@ -102,11 +134,21 @@ class PlanStandardCameras:
             if scene.source.source_sha256
             else scene.source.version_id.replace(":", "-")
         )
+        design_revision = f"scene-{revision_key}"
+        if design_dna_path is not None:
+            design = DesignDNA.model_validate_json(
+                design_dna_path.read_text(encoding="utf-8")
+            )
+            design_revision = design.design_revision
         view_set = ViewSet(
-            view_set_id=f"{revision_key}-standard-v1",
-            design_revision="R00-base",
+            view_set_id=f"{revision_key}-{design_revision}-standard-v1",
+            design_revision=design_revision,
             cameras=cameras,
         )
-        output = scene_path.parent / "view_set.json"
+        output = (
+            design_dna_path.parent / "view_set.json"
+            if design_dna_path is not None
+            else scene_path.parent / "view_set.json"
+        )
         atomic_write(output, view_set.model_dump_json(indent=2).encode() + b"\n")
         return view_set

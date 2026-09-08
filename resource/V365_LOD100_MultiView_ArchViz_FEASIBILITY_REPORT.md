@@ -55,14 +55,30 @@ Lưu ý vận hành: Interactions API mặc định `store=true`. Production ph�
 - `store=false` để giảm retention, nhưng không dùng được `previous_interaction_id`; hoặc
 - stateful session và chấp nhận/configure retention sau data-governance review.
 
-### 2.3. Những gì chưa thể kiểm nghiệm trong môi trường hiện tại
+### 2.3. Kiểm nghiệm end-to-end sau khi có APS credentials
 
-- Máy hiện tại không có Revit, Blender hoặc .NET runtime.
-- Repo chưa có implementation.
-- `.env` chỉ có Gemini key, chưa có APS client/project/storage credentials.
-- Sample hiện là file local, chưa có Autodesk model/version reference trên ACC/Forma.
+Vertical slice đã được triển khai và chạy thật trên sample local:
 
-Vì vậy chưa thể đo chính xác element count, mesh fidelity, camera render, depth/ID pass, correspondence map hoặc cross-view score.
+- APS OAuth và transient OSS bucket hoạt động;
+- signed-S3 upload thành công cho RVT 2.166.784 bytes;
+- Model Derivative dịch RVT 2026 → IFC2X3 thành công;
+- IFC artifact khoảng 208 KB, source được pin bằng SHA-256;
+- IfcOpenShell trích xuất 42 element, 7.164 vertex và 14.144 triangle;
+- semantic baseline nhận 14 main shed, 15 office block, 5 service yard,
+  5 utility block và 3 unknown;
+- Design DNA R01 chứa 29 building/façade và grammar sinh 34 loading dock;
+- Blender headless container render một shared scene qua 4 camera;
+- mỗi view có RGB, clay, depth PNG/EXR, normal EXR, instance ID, semantic mask,
+  edge và camera spec;
+- Gemini Flash refinement pilot cho `view-01` thành công ở 1376×768.
+
+Kết quả pilot AI có chất lượng marketing tốt và giữ bố cục campus ở mức tổng thể,
+nhưng đã diễn giải lại mái, đường và cảnh quan. Vì vậy kết luận ban đầu được giữ nguyên:
+base render là geometry-authoritative; output Gemini phải được gắn nhãn
+`MARKETING_GENERATIVE` và qua reject/human-review gate.
+
+Phần chưa kiểm nghiệm vẫn gồm Revit Automation fallback, AEC granular geometry,
+cross-view metric trên nhiều model, protected compositing và benchmark 10–20 mẫu.
 
 ## 3. Đối chiếu các giả định nền tảng
 

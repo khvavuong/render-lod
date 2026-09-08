@@ -1,0 +1,45 @@
+{
+  "schema_version": "1.0.0",
+  "project_id": "lod-evaluation-factory-campus",
+  "design_language": {
+    "style": "modern sustainable industrial campus with refined architectural proportions",
+    "primary_material": "light neutral architectural metal cladding",
+    "secondary_material": "dark graphite metal accents",
+    "office_material": "high-performance blue-grey architectural glazing",
+    "accent": "restrained deep-green architectural accent"
+  },
+  "environment": {
+    "time": "09:30",
+    "weather": "clear bright morning with soft atmospheric depth",
+    "sun_azimuth_deg": 132.0,
+    "sun_elevation_deg": 48.0,
+    "white_balance_k": 5600
+  },
+  "material_palette": {
+    "primary_hex": "#ECE9E1",
+    "secondary_hex": "#202A31",
+    "glass_hex": "#294B5B",
+    "accent_hex": "#176B4D",
+    "paving_hex": "#74797A"
+  },
+  "facade_articulation": {
+    "plinth_height_m": 0.9,
+    "parapet_band_height_m": 0.65,
+    "office_glazing_ratio": 0.76,
+    "feature_frame_depth_m": 0.75,
+    "entrance_canopy_projection_m": 2.4,
+    "vertical_fin_count": 5
+  },
+  "presentation": {
+    "landscape_character": "layered low-maintenance subtropical planting concentrated at arrival zones",
+    "paving_character": "clean light-grey concrete with darker service lanes and precise edge detailing",
+    "entourage_density": "low"
+  },
+  "panel_module_m": 1.2,
+  "loading_docks_per_main_facade": 3,
+  "add_office_entrances": true,
+  "roof_type": "preserve source roof envelope",
+  "solar_panels": false,
+  "grammar_version": "industrial-grammar-v2",
+  "asset_library_version": "baseline-assets-v2"
+}

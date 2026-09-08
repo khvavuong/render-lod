@@ -2,7 +2,7 @@ from pathlib import Path
 
 from v365_archviz.application.plan_cameras import PlanStandardCameras
 from v365_archviz.domain.scene import CanonicalScene
-from v365_archviz.domain.workflow import ViewSet
+from v365_archviz.domain.workflow import ViewRole, ViewSet
 
 
 def test_plans_four_reproducible_cameras(tmp_path: Path, valid_scene: CanonicalScene) -> None:
@@ -15,5 +15,10 @@ def test_plans_four_reproducible_cameras(tmp_path: Path, valid_scene: CanonicalS
     assert first == second
     assert len(first.cameras) == 4
     assert len({camera.role for camera in first.cameras}) == 4
+    assert {camera.role for camera in first.cameras} == {
+        ViewRole.OVERALL,
+        ViewRole.CONTEXT,
+        ViewRole.HERO,
+        ViewRole.DETAIL,
+    }
     assert ViewSet.model_validate_json((tmp_path / "view_set.json").read_text()) == first
-

@@ -44,6 +44,29 @@ class GeneratedImage:
     provider_request_id: str | None
 
 
+@dataclass(frozen=True)
+class ViewSetGenerationInput:
+    request_id: str
+    project_id: str
+    model_revision: str
+    design_revision: str
+    view_set_id: str
+    profile: str
+    views: tuple[ViewConditioningInput, ...]
+
+
+@dataclass(frozen=True)
+class GeneratedView:
+    view_id: str
+    image: GeneratedImage
+
+
+@dataclass(frozen=True)
+class GeneratedViewSet:
+    request_id: str
+    views: tuple[GeneratedView, ...]
+
+
 class GenerativeRenderer(Protocol):
     """Render one view without owning or changing the shared design state."""
 
@@ -51,3 +74,9 @@ class GenerativeRenderer(Protocol):
     def name(self) -> str: ...
 
     def generate(self, request: ViewConditioningInput) -> GeneratedImage: ...
+
+
+class ViewSetGenerativeRenderer(GenerativeRenderer, Protocol):
+    """Generate one ordered, revision-bound view set as the core provider operation."""
+
+    def generate_view_set(self, request: ViewSetGenerationInput) -> GeneratedViewSet: ...

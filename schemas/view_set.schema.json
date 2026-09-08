@@ -77,6 +77,8 @@
       "enum": [
         "overall",
         "context",
+        "hero",
+        "detail",
         "office_hero",
         "loading_detail"
       ],

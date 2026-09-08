@@ -6,10 +6,13 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends blender ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libegl1 python3-numpy \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN useradd --create-home --uid 10001 v365
 WORKDIR /workspace
 COPY scripts/blender/render_conditioning.py /opt/v365/render_conditioning.py
 USER v365
 
 ENTRYPOINT ["blender", "--background", "--python", "/opt/v365/render_conditioning.py", "--"]
-

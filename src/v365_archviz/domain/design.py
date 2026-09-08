@@ -18,11 +18,39 @@ class Entrance(DomainModel):
     width_m: PositiveMeters
 
 
+class MaterialPalette(DomainModel):
+    primary_hex: str = Field(default="#E7E5DF", pattern=r"^#[0-9A-Fa-f]{6}$")
+    secondary_hex: str = Field(default="#252B31", pattern=r"^#[0-9A-Fa-f]{6}$")
+    glass_hex: str = Field(default="#315263", pattern=r"^#[0-9A-Fa-f]{6}$")
+    accent_hex: str = Field(default="#2F6B4F", pattern=r"^#[0-9A-Fa-f]{6}$")
+    paving_hex: str = Field(default="#777B7A", pattern=r"^#[0-9A-Fa-f]{6}$")
+
+
+class FacadeArticulation(DomainModel):
+    """Dimensioned facade grammar applicable across projects and model scales."""
+
+    plinth_height_m: float = Field(default=0.75, ge=0.0, le=2.5)
+    parapet_band_height_m: float = Field(default=0.55, ge=0.0, le=2.5)
+    office_glazing_ratio: float = Field(default=0.72, ge=0.25, le=0.95)
+    feature_frame_depth_m: float = Field(default=0.55, ge=0.05, le=2.5)
+    entrance_canopy_projection_m: float = Field(default=1.8, ge=0.0, le=6.0)
+    vertical_fin_count: int = Field(default=4, ge=0, le=16)
+
+
+class PresentationStrategy(DomainModel):
+    landscape_character: str = Field(
+        default="restrained climate-appropriate planting", min_length=1
+    )
+    paving_character: str = Field(default="clean durable industrial paving", min_length=1)
+    entourage_density: str = Field(default="low", pattern=r"^(none|low|medium|high)$")
+
+
 class FacadeDesign(DomainModel):
     surface_id: str = Field(min_length=1)
     panel_module_m: PositiveMeters = Field(ge=0.8, le=1.5)
     office_entrance: Entrance | None = None
     loading_docks: tuple[LoadingDock, ...] = ()
+    articulation: FacadeArticulation = Field(default_factory=FacadeArticulation)
 
     @model_validator(mode="after")
     def validate_docks(self) -> FacadeDesign:
@@ -59,11 +87,33 @@ class EnvironmentDesign(DomainModel):
     white_balance_k: int = Field(ge=1000, le=20000)
 
 
+class DesignBrief(DomainModel):
+    """Project input; no visual language is inferred from a repository fixture."""
+
+    schema_version: str = "1.0.0"
+    project_id: str = Field(min_length=1)
+    design_language: DesignLanguage
+    environment: EnvironmentDesign
+    material_palette: MaterialPalette = Field(default_factory=MaterialPalette)
+    facade_articulation: FacadeArticulation = Field(default_factory=FacadeArticulation)
+    presentation: PresentationStrategy = Field(default_factory=PresentationStrategy)
+    panel_module_m: PositiveMeters = Field(ge=0.8, le=1.5)
+    loading_docks_per_main_facade: int = Field(default=0, ge=0, le=12)
+    add_office_entrances: bool = False
+    roof_type: str = Field(min_length=1)
+    solar_panels: bool = False
+    grammar_version: str = Field(min_length=1)
+    asset_library_version: str = Field(min_length=1)
+
+
 class DesignDNA(DomainModel):
     schema_version: str = "1.0.0"
+    project_id: str = Field(min_length=1)
     design_revision: str = Field(min_length=1)
     design_language: DesignLanguage
     environment: EnvironmentDesign
+    material_palette: MaterialPalette = Field(default_factory=MaterialPalette)
+    presentation: PresentationStrategy = Field(default_factory=PresentationStrategy)
     buildings: tuple[BuildingDesign, ...]
     grammar_version: str = Field(min_length=1)
     asset_library_version: str = Field(min_length=1)
@@ -79,4 +129,3 @@ class DesignDNA(DomainModel):
         if len(surface_ids) != len(set(surface_ids)):
             raise ValueError("facade surface IDs must be unique")
         return self
-

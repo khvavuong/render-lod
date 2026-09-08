@@ -1,39 +1,108 @@
-.PHONY: install test lint typecheck inspect extract-ifc api
+PYTHON ?= .venv/bin/python
+MODEL ?=
+BRIEF ?=
+REFERENCES ?=
+VIEW ?= view-01
+ARTIFACT_DIR ?= .artifacts
+
+MODEL_NAME = $(basename $(notdir $(MODEL)))
+REVISION = $(shell if test -n "$(MODEL)"; then $(PYTHON) -m v365_archviz revision-key "$(MODEL)" 2>/dev/null; fi)
+IFC ?= $(ARTIFACT_DIR)/extractions/$(REVISION)/$(MODEL_NAME).ifc
+SCENE_DIR ?= $(ARTIFACT_DIR)/scenes/$(REVISION)
+SCENE ?= $(SCENE_DIR)/canonical_scene.json
+DESIGN_REVISION ?= $(shell if test -n "$(BRIEF)" -a -f "$(SCENE)"; then \
+	$(PYTHON) -m v365_archviz design-revision "$(SCENE)" --brief "$(BRIEF)" 2>/dev/null; fi)
+DESIGN_DIR ?= $(SCENE_DIR)/designs/$(DESIGN_REVISION)
+DESIGN_DNA ?= $(DESIGN_DIR)/design_dna.json
+VIEW_SET ?= $(DESIGN_DIR)/view_set.json
+RENDER_DIR ?= $(ARTIFACT_DIR)/renders/$(REVISION)/$(DESIGN_REVISION)
+GENERATED_DIR ?= $(ARTIFACT_DIR)/generated/$(REVISION)/$(DESIGN_REVISION)
+VIEWS ?= view-01 view-02 view-03 view-04
+REFERENCE_ARGS = $(foreach reference,$(REFERENCES),--reference-image "$(reference)")
+
+.PHONY: install test lint typecheck require-model require-brief require-design inspect extract-ifc \
+	canonicalize plan-design plan-cameras renderer-image render refine-view refine-viewset \
+	build-correspondence validate-viewset compose-board api
 
 install:
-	python3 -m pip install -e ".[dev]"
+	$(PYTHON) -m pip install -e ".[dev]"
 
 test:
-	python3 -m pytest
+	$(PYTHON) -m pytest
 
 lint:
-	python3 -m ruff check .
+	$(PYTHON) -m ruff check .
 
 typecheck:
-	python3 -m mypy
+	$(PYTHON) -m mypy
 
-inspect:
-	python3 -m v365_archviz inspect resource/model_lod100_sample.rvt
+require-model:
+	@test -n "$(MODEL)" || { echo "MODEL is required, e.g. MODEL=path/to/model.rvt"; exit 2; }
 
-extract-ifc:
-	python3 -m v365_archviz extract-ifc resource/model_lod100_sample.rvt
+require-brief:
+	@test -n "$(BRIEF)" || { echo "BRIEF is required, e.g. BRIEF=path/to/design_brief.json"; exit 2; }
 
-canonicalize:
-	python3 -m v365_archviz canonicalize-ifc resource/model_lod100_sample.rvt \
-		.artifacts/extractions/480b5e6346f2877b/model_lod100_sample.ifc
+require-design:
+	@test -n "$(DESIGN_REVISION)" || { \
+		echo "BRIEF or DESIGN_REVISION is required to resolve an immutable design"; exit 2; \
+	}
+
+inspect: require-model
+	$(PYTHON) -m v365_archviz inspect "$(MODEL)" --output "$(ARTIFACT_DIR)"
+
+extract-ifc: require-model
+	$(PYTHON) -m v365_archviz extract-ifc "$(MODEL)" --output "$(ARTIFACT_DIR)"
+
+canonicalize: require-model
+	$(PYTHON) -m v365_archviz canonicalize-ifc "$(MODEL)" "$(IFC)" \
+		--output "$(ARTIFACT_DIR)"
+
+plan-design: require-model require-brief
+	$(PYTHON) -m v365_archviz plan-design "$(SCENE)" --brief "$(BRIEF)"
+
+plan-cameras: require-model require-design
+	$(PYTHON) -m v365_archviz plan-cameras "$(SCENE)" --design-dna "$(DESIGN_DNA)"
 
 renderer-image:
 	docker build -f Dockerfile.renderer -t v365-archviz-renderer:foundation .
 
-render:
-	python3 -c "from pathlib import Path; from v365_archviz.application.plan_cameras import PlanStandardCameras; PlanStandardCameras().execute(Path('.artifacts/scenes/480b5e6346f2877b/canonical_scene.json'))"
-	docker run --rm -v "$(CURDIR):/workspace" v365-archviz-renderer:foundation \
-		--scene /workspace/.artifacts/scenes/480b5e6346f2877b/canonical_scene.json \
-		--view-set /workspace/.artifacts/scenes/480b5e6346f2877b/view_set.json \
-		--output /workspace/.artifacts/renders/480b5e6346f2877b
+render: require-model require-brief renderer-image
+	$(PYTHON) -m v365_archviz plan-design "$(SCENE)" --brief "$(BRIEF)" >/dev/null
+	$(PYTHON) -m v365_archviz plan-cameras "$(SCENE)" \
+		--design-dna "$(DESIGN_DNA)" >/dev/null
+	docker run --rm --user "$$(id -u):$$(id -g)" -e HOME=/tmp \
+		-v "$(CURDIR):/workspace" v365-archviz-renderer:foundation \
+		--scene "/workspace/$(SCENE)" \
+		--design-dna "/workspace/$(DESIGN_DNA)" \
+		--view-set "/workspace/$(VIEW_SET)" \
+		--output "/workspace/$(RENDER_DIR)"
+	$(PYTHON) -m v365_archviz build-correspondence "$(SCENE)" "$(RENDER_DIR)" \
+		--view-set "$(VIEW_SET)"
 
-extract-ifc:
-	python3 -m v365_archviz extract-ifc resource/model_lod100_sample.rvt
+refine-view: require-model require-design
+	$(PYTHON) -m v365_archviz refine-view "$(RENDER_DIR)" "$(VIEW)" \
+		--design-dna "$(DESIGN_DNA)" \
+		$(REFERENCE_ARGS)
+
+refine-viewset: require-model require-design
+	$(PYTHON) -m v365_archviz refine-viewset "$(RENDER_DIR)" \
+		--view-set "$(VIEW_SET)" \
+		--design-dna "$(DESIGN_DNA)" \
+		--model-revision "$(REVISION)" \
+		--output "$(GENERATED_DIR)" \
+		$(REFERENCE_ARGS)
+
+build-correspondence: require-model require-design
+	$(PYTHON) -m v365_archviz build-correspondence "$(SCENE)" "$(RENDER_DIR)" \
+		--view-set "$(VIEW_SET)"
+
+validate-viewset: require-model require-design
+	$(PYTHON) -m v365_archviz validate-viewset "$(RENDER_DIR)" "$(GENERATED_DIR)" \
+		--view-set "$(VIEW_SET)" --design-dna "$(DESIGN_DNA)"
+
+compose-board: require-model require-design
+	$(PYTHON) scripts/compose_viewset_board.py "$(GENERATED_DIR)" \
+		"$(GENERATED_DIR)/viewset_board.jpg"
 
 api:
-	python3 -m uvicorn v365_archviz.api:app --reload
+	$(PYTHON) -m uvicorn v365_archviz.api:app --reload

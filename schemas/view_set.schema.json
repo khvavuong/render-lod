@@ -1,0 +1,114 @@
+{
+  "$defs": {
+    "Camera": {
+      "additionalProperties": false,
+      "properties": {
+        "aspect_ratio": {
+          "pattern": "^\\d+:\\d+$",
+          "title": "Aspect Ratio",
+          "type": "string"
+        },
+        "focal_length_mm": {
+          "exclusiveMinimum": 0,
+          "title": "Focal Length Mm",
+          "type": "number"
+        },
+        "position": {
+          "maxItems": 3,
+          "minItems": 3,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Position",
+          "type": "array"
+        },
+        "role": {
+          "$ref": "#/$defs/ViewRole"
+        },
+        "sensor_width_mm": {
+          "exclusiveMinimum": 0,
+          "title": "Sensor Width Mm",
+          "type": "number"
+        },
+        "target": {
+          "maxItems": 3,
+          "minItems": 3,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Target",
+          "type": "array"
+        },
+        "view_id": {
+          "minLength": 1,
+          "title": "View Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "view_id",
+        "role",
+        "position",
+        "target",
+        "focal_length_mm",
+        "sensor_width_mm",
+        "aspect_ratio"
+      ],
+      "title": "Camera",
+      "type": "object"
+    },
+    "ViewRole": {
+      "enum": [
+        "overall",
+        "context",
+        "office_hero",
+        "loading_detail"
+      ],
+      "title": "ViewRole",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "cameras": {
+      "items": {
+        "$ref": "#/$defs/Camera"
+      },
+      "title": "Cameras",
+      "type": "array"
+    },
+    "design_revision": {
+      "minLength": 1,
+      "title": "Design Revision",
+      "type": "string"
+    },
+    "view_set_id": {
+      "minLength": 1,
+      "title": "View Set Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "view_set_id",
+    "design_revision",
+    "cameras"
+  ],
+  "title": "ViewSet",
+  "type": "object"
+}

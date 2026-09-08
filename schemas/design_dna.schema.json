@@ -1,0 +1,276 @@
+{
+  "$defs": {
+    "BuildingDesign": {
+      "additionalProperties": false,
+      "properties": {
+        "building_id": {
+          "minLength": 1,
+          "title": "Building Id",
+          "type": "string"
+        },
+        "facades": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/FacadeDesign"
+          },
+          "title": "Facades",
+          "type": "array"
+        },
+        "roof": {
+          "$ref": "#/$defs/RoofDesign"
+        }
+      },
+      "required": [
+        "building_id",
+        "roof"
+      ],
+      "title": "BuildingDesign",
+      "type": "object"
+    },
+    "DesignLanguage": {
+      "additionalProperties": false,
+      "properties": {
+        "accent": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Accent"
+        },
+        "office_material": {
+          "minLength": 1,
+          "title": "Office Material",
+          "type": "string"
+        },
+        "primary_material": {
+          "minLength": 1,
+          "title": "Primary Material",
+          "type": "string"
+        },
+        "secondary_material": {
+          "minLength": 1,
+          "title": "Secondary Material",
+          "type": "string"
+        },
+        "style": {
+          "minLength": 1,
+          "title": "Style",
+          "type": "string"
+        }
+      },
+      "required": [
+        "style",
+        "primary_material",
+        "secondary_material",
+        "office_material"
+      ],
+      "title": "DesignLanguage",
+      "type": "object"
+    },
+    "Entrance": {
+      "additionalProperties": false,
+      "properties": {
+        "u": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "U",
+          "type": "number"
+        },
+        "width_m": {
+          "exclusiveMinimum": 0.0,
+          "title": "Width M",
+          "type": "number"
+        }
+      },
+      "required": [
+        "u",
+        "width_m"
+      ],
+      "title": "Entrance",
+      "type": "object"
+    },
+    "EnvironmentDesign": {
+      "additionalProperties": false,
+      "properties": {
+        "sun_azimuth_deg": {
+          "exclusiveMaximum": 360.0,
+          "minimum": 0.0,
+          "title": "Sun Azimuth Deg",
+          "type": "number"
+        },
+        "sun_elevation_deg": {
+          "maximum": 90.0,
+          "minimum": -90.0,
+          "title": "Sun Elevation Deg",
+          "type": "number"
+        },
+        "time": {
+          "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$",
+          "title": "Time",
+          "type": "string"
+        },
+        "weather": {
+          "minLength": 1,
+          "title": "Weather",
+          "type": "string"
+        },
+        "white_balance_k": {
+          "maximum": 20000,
+          "minimum": 1000,
+          "title": "White Balance K",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "time",
+        "weather",
+        "sun_azimuth_deg",
+        "sun_elevation_deg",
+        "white_balance_k"
+      ],
+      "title": "EnvironmentDesign",
+      "type": "object"
+    },
+    "FacadeDesign": {
+      "additionalProperties": false,
+      "properties": {
+        "loading_docks": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/LoadingDock"
+          },
+          "title": "Loading Docks",
+          "type": "array"
+        },
+        "office_entrance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Entrance"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "panel_module_m": {
+          "exclusiveMinimum": 0.0,
+          "maximum": 1.5,
+          "minimum": 0.8,
+          "title": "Panel Module M",
+          "type": "number"
+        },
+        "surface_id": {
+          "minLength": 1,
+          "title": "Surface Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "surface_id",
+        "panel_module_m"
+      ],
+      "title": "FacadeDesign",
+      "type": "object"
+    },
+    "LoadingDock": {
+      "additionalProperties": false,
+      "properties": {
+        "dock_id": {
+          "minLength": 1,
+          "title": "Dock Id",
+          "type": "string"
+        },
+        "u": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "U",
+          "type": "number"
+        },
+        "width_m": {
+          "exclusiveMinimum": 0.0,
+          "title": "Width M",
+          "type": "number"
+        }
+      },
+      "required": [
+        "dock_id",
+        "u",
+        "width_m"
+      ],
+      "title": "LoadingDock",
+      "type": "object"
+    },
+    "RoofDesign": {
+      "additionalProperties": false,
+      "properties": {
+        "roof_type": {
+          "minLength": 1,
+          "title": "Roof Type",
+          "type": "string"
+        },
+        "solar_panels": {
+          "default": false,
+          "title": "Solar Panels",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "roof_type"
+      ],
+      "title": "RoofDesign",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "asset_library_version": {
+      "minLength": 1,
+      "title": "Asset Library Version",
+      "type": "string"
+    },
+    "buildings": {
+      "items": {
+        "$ref": "#/$defs/BuildingDesign"
+      },
+      "title": "Buildings",
+      "type": "array"
+    },
+    "design_language": {
+      "$ref": "#/$defs/DesignLanguage"
+    },
+    "design_revision": {
+      "minLength": 1,
+      "title": "Design Revision",
+      "type": "string"
+    },
+    "environment": {
+      "$ref": "#/$defs/EnvironmentDesign"
+    },
+    "grammar_version": {
+      "minLength": 1,
+      "title": "Grammar Version",
+      "type": "string"
+    },
+    "schema_version": {
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "design_revision",
+    "design_language",
+    "environment",
+    "buildings",
+    "grammar_version",
+    "asset_library_version"
+  ],
+  "title": "DesignDNA",
+  "type": "object"
+}

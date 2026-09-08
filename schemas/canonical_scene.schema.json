@@ -1,0 +1,565 @@
+{
+  "$defs": {
+    "BoundingBox": {
+      "additionalProperties": false,
+      "properties": {
+        "maximum": {
+          "maxItems": 3,
+          "minItems": 3,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Maximum",
+          "type": "array"
+        },
+        "minimum": {
+          "maxItems": 3,
+          "minItems": 3,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Minimum",
+          "type": "array"
+        }
+      },
+      "required": [
+        "minimum",
+        "maximum"
+      ],
+      "title": "BoundingBox",
+      "type": "object"
+    },
+    "ConstraintLevel": {
+      "enum": [
+        "hard",
+        "soft"
+      ],
+      "title": "ConstraintLevel",
+      "type": "string"
+    },
+    "CoordinateSystem": {
+      "additionalProperties": false,
+      "properties": {
+        "handedness": {
+          "default": "right",
+          "title": "Handedness",
+          "type": "string"
+        },
+        "linear_unit": {
+          "default": "meter",
+          "title": "Linear Unit",
+          "type": "string"
+        },
+        "source_to_world": {
+          "maxItems": 4,
+          "minItems": 4,
+          "prefixItems": [
+            {
+              "maxItems": 4,
+              "minItems": 4,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "maxItems": 4,
+              "minItems": 4,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "maxItems": 4,
+              "minItems": 4,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "maxItems": 4,
+              "minItems": 4,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            }
+          ],
+          "title": "Source To World",
+          "type": "array"
+        },
+        "up_axis": {
+          "default": "Z",
+          "title": "Up Axis",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_to_world"
+      ],
+      "title": "CoordinateSystem",
+      "type": "object"
+    },
+    "GeometryProviderKind": {
+      "enum": [
+        "aec_data_model",
+        "model_derivative",
+        "revit_automation",
+        "local_fixture"
+      ],
+      "title": "GeometryProviderKind",
+      "type": "string"
+    },
+    "SceneElement": {
+      "additionalProperties": false,
+      "properties": {
+        "bounding_box": {
+          "$ref": "#/$defs/BoundingBox"
+        },
+        "constraint_level": {
+          "$ref": "#/$defs/ConstraintLevel",
+          "default": "hard"
+        },
+        "mesh_ref": {
+          "minLength": 1,
+          "title": "Mesh Ref",
+          "type": "string"
+        },
+        "scene_element_id": {
+          "minLength": 1,
+          "title": "Scene Element Id",
+          "type": "string"
+        },
+        "semantic_confidence": {
+          "default": 0.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Semantic Confidence",
+          "type": "number"
+        },
+        "semantic_role": {
+          "$ref": "#/$defs/SemanticRole",
+          "default": "unknown"
+        },
+        "source": {
+          "$ref": "#/$defs/SourceElementRef"
+        },
+        "transform": {
+          "maxItems": 4,
+          "minItems": 4,
+          "prefixItems": [
+            {
+              "maxItems": 4,
+              "minItems": 4,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "maxItems": 4,
+              "minItems": 4,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "maxItems": 4,
+              "minItems": 4,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "maxItems": 4,
+              "minItems": 4,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            }
+          ],
+          "title": "Transform",
+          "type": "array"
+        }
+      },
+      "required": [
+        "scene_element_id",
+        "source",
+        "transform",
+        "mesh_ref",
+        "bounding_box"
+      ],
+      "title": "SceneElement",
+      "type": "object"
+    },
+    "SceneSurface": {
+      "additionalProperties": false,
+      "properties": {
+        "element_id": {
+          "minLength": 1,
+          "title": "Element Id",
+          "type": "string"
+        },
+        "frame": {
+          "$ref": "#/$defs/SurfaceFrame"
+        },
+        "height_m": {
+          "exclusiveMinimum": 0.0,
+          "title": "Height M",
+          "type": "number"
+        },
+        "semantic_role": {
+          "$ref": "#/$defs/SemanticRole",
+          "default": "unknown"
+        },
+        "surface_id": {
+          "minLength": 1,
+          "title": "Surface Id",
+          "type": "string"
+        },
+        "width_m": {
+          "exclusiveMinimum": 0.0,
+          "title": "Width M",
+          "type": "number"
+        }
+      },
+      "required": [
+        "surface_id",
+        "element_id",
+        "frame",
+        "width_m",
+        "height_m"
+      ],
+      "title": "SceneSurface",
+      "type": "object"
+    },
+    "SemanticRole": {
+      "enum": [
+        "unknown",
+        "main_shed",
+        "office_block",
+        "loading_zone",
+        "service_yard",
+        "utility_block",
+        "parking",
+        "main_entrance",
+        "secondary_entrance",
+        "landscape_zone",
+        "roof",
+        "site_boundary",
+        "primary_facade"
+      ],
+      "title": "SemanticRole",
+      "type": "string"
+    },
+    "SourceElementRef": {
+      "additionalProperties": false,
+      "properties": {
+        "category": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Category"
+        },
+        "external_id": {
+          "minLength": 1,
+          "title": "External Id",
+          "type": "string"
+        },
+        "type_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Type Name"
+        }
+      },
+      "required": [
+        "external_id"
+      ],
+      "title": "SourceElementRef",
+      "type": "object"
+    },
+    "SourceModelRef": {
+      "additionalProperties": false,
+      "properties": {
+        "model_id": {
+          "minLength": 1,
+          "title": "Model Id",
+          "type": "string"
+        },
+        "project_id": {
+          "minLength": 1,
+          "title": "Project Id",
+          "type": "string"
+        },
+        "provider": {
+          "$ref": "#/$defs/GeometryProviderKind"
+        },
+        "source_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Sha256"
+        },
+        "version_id": {
+          "minLength": 1,
+          "title": "Version Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "project_id",
+        "model_id",
+        "version_id"
+      ],
+      "title": "SourceModelRef",
+      "type": "object"
+    },
+    "SurfaceFrame": {
+      "additionalProperties": false,
+      "properties": {
+        "normal": {
+          "maxItems": 3,
+          "minItems": 3,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Normal",
+          "type": "array"
+        },
+        "origin": {
+          "maxItems": 3,
+          "minItems": 3,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Origin",
+          "type": "array"
+        },
+        "u_axis": {
+          "maxItems": 3,
+          "minItems": 3,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "U Axis",
+          "type": "array"
+        },
+        "v_axis": {
+          "maxItems": 3,
+          "minItems": 3,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "V Axis",
+          "type": "array"
+        }
+      },
+      "required": [
+        "origin",
+        "u_axis",
+        "v_axis",
+        "normal"
+      ],
+      "title": "SurfaceFrame",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "coordinate_system": {
+      "$ref": "#/$defs/CoordinateSystem"
+    },
+    "elements": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/SceneElement"
+      },
+      "title": "Elements",
+      "type": "array"
+    },
+    "schema_version": {
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "source": {
+      "$ref": "#/$defs/SourceModelRef"
+    },
+    "surfaces": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/SceneSurface"
+      },
+      "title": "Surfaces",
+      "type": "array"
+    }
+  },
+  "required": [
+    "source",
+    "coordinate_system"
+  ],
+  "title": "CanonicalScene",
+  "type": "object"
+}

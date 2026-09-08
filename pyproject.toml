@@ -1,0 +1,59 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "v365-archviz"
+version = "0.1.0"
+description = "Geometry-first multi-view architectural visualization pipeline for Revit LOD100 models"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Proprietary" }
+dependencies = [
+  "fastapi>=0.116,<1",
+  "httpx>=0.28,<1",
+  "ifcopenshell>=0.8.3,<0.9",
+  "numpy>=2.0,<3",
+  "olefile>=0.47,<1",
+  "pillow>=10,<13",
+  "pydantic>=2.11,<3",
+  "python-dotenv>=1.1,<2",
+  "uvicorn[standard]>=0.35,<1",
+]
+
+[project.optional-dependencies]
+geometry = [
+  "ifcopenshell>=0.8.3,<0.9",
+  "numpy>=2.0,<3",
+]
+dev = [
+  "mypy>=1.17,<2",
+  "pytest>=8.4,<10",
+  "pytest-cov>=6.2,<8",
+  "ruff>=0.12,<1",
+  "types-olefile>=0.47,<1",
+  "ifcopenshell>=0.8.3,<0.9",
+  "numpy>=2.0,<3",
+]
+
+[project.scripts]
+v365-archviz = "v365_archviz.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/v365_archviz"]
+
+[tool.pytest.ini_options]
+addopts = "-q --strict-markers"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+packages = ["v365_archviz"]

@@ -70,6 +70,10 @@ def _semantic_role(
         token in normalized_name for token in ("cong chinh", "cong vao", "main gate", "entry gate")
     ):
         return SemanticRole.MAIN_ENTRANCE, 0.9
+    if any(token in normalized_name for token in ("nha bao ve", "guardhouse", "security house")):
+        # LOD100 masterplans commonly encode the controlled entrance as its
+        # guardhouse mass instead of a separately modelled gate leaf.
+        return SemanticRole.MAIN_ENTRANCE, 0.88
     if any(token in normalized_name for token in ("hang rao", "fence", "boundary")):
         return SemanticRole.SITE_BOUNDARY, 0.9
     if any(token in normalized_name for token in ("bai xe", "parking")):

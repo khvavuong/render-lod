@@ -135,6 +135,29 @@ class PlanStandardCameras:
         ground_target_z = minimum[2] + height * 0.42
         aerial_target_z = minimum[2] + height * 0.25
         corridor_cross = _corridor_cross_coordinate(design, long_axis, center[cross_axis])
+        site_roles = {
+            SemanticRole.SITE_ROAD,
+            SemanticRole.SIDEWALK,
+            SemanticRole.SERVICE_YARD,
+            SemanticRole.PARKING,
+            SemanticRole.MAIN_ENTRANCE,
+            SemanticRole.SECONDARY_ENTRANCE,
+            SemanticRole.LANDSCAPE_ZONE,
+            SemanticRole.SITE_BOUNDARY,
+        }
+        site_elements = [
+            element for element in scene.elements if element.semantic_role in site_roles
+        ]
+        site_minimum, site_maximum = _bounds_for([*architectural, *site_elements])
+        site_center = (
+            (site_minimum[0] + site_maximum[0]) / 2,
+            (site_minimum[1] + site_maximum[1]) / 2,
+            (site_minimum[2] + site_maximum[2]) / 2,
+        )
+        site_span_x = site_maximum[0] - site_minimum[0]
+        site_span_y = site_maximum[1] - site_minimum[1]
+        site_long_span = (site_span_x, site_span_y)[long_axis]
+        site_span = max(site_span_x, site_span_y)
 
         def point(long_offset: float, cross_offset: float, z: float) -> tuple[float, float, float]:
             return _axis_point(center, long_axis, long_offset, cross_offset, z)
@@ -149,9 +172,15 @@ class PlanStandardCameras:
             Camera(
                 view_id="view-01",
                 role=ViewRole.OVERALL,
-                position=point(-long_span * 1.28, -span * 1.05, maximum[2] + span * 0.78),
-                target=(center[0], center[1], aerial_target_z),
-                focal_length_mm=42,
+                position=_axis_point(
+                    site_center,
+                    long_axis,
+                    -site_long_span * 1.45,
+                    -site_span * 1.25,
+                    maximum[2] + site_span * 1.05,
+                ),
+                target=(site_center[0], site_center[1], minimum[2] + height * 0.15),
+                focal_length_mm=46,
                 sensor_width_mm=36,
                 aspect_ratio="16:9",
             ),
@@ -224,7 +253,7 @@ class PlanStandardCameras:
         if design is not None:
             design_revision = design.design_revision
         view_set = ViewSet(
-            view_set_id=f"{revision_key}-{design_revision}-standard-v5",
+            view_set_id=f"{revision_key}-{design_revision}-standard-v6",
             design_revision=design_revision,
             cameras=cameras,
         )

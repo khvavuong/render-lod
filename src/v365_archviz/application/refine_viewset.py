@@ -10,13 +10,43 @@ from pathlib import Path
 from v365_archviz.application.refine_view import PROMPT_VERSION, RefineView
 from v365_archviz.artifacts import atomic_write
 from v365_archviz.domain.design import DesignDNA
-from v365_archviz.domain.workflow import GenerationProfile, ViewSet
+from v365_archviz.domain.workflow import GenerationProfile, ViewRole, ViewSet
 from v365_archviz.errors import InvalidModelError, ProviderError
 from v365_archviz.providers.contracts import (
     ViewConditioningInput,
     ViewSetGenerationInput,
     ViewSetGenerativeRenderer,
 )
+
+VIEW_DIRECTIVES = {
+    ViewRole.OVERALL: (
+        "VIEW PURPOSE — CAMPUS MASTERPLAN: show the complete authored project parcel in one frame. "
+        "Do not crop any side of the project boundary. Keep every perimeter road, external "
+        "approach, entrance/security gatehouse, parking area, landscape strip and all focus "
+        "buildings legible."
+    ),
+    ViewRole.CONTEXT: (
+        "VIEW PURPOSE — CONTEXT: explain the opposite approach, adjoining roads and the "
+        "relationship between the focus factory and subdued surrounding massing."
+    ),
+    ViewRole.HERO: (
+        "VIEW PURPOSE — CLOSE HERO: retain this low, close corridor composition and emphasize a "
+        "buildable facade, entrances and human scale; do not turn it into an aerial view."
+    ),
+    ViewRole.DETAIL: (
+        "VIEW PURPOSE — LONG FACADE: retain this oblique side view so the long elevation, loading "
+        "access, roof edge, drainage and facade rhythm can be assessed."
+    ),
+    ViewRole.OFFICE_HERO: (
+        "VIEW PURPOSE — OPPOSITE CORNER: retain this distinct reverse three-quarter composition "
+        "and show its access frontage; do not copy the close-hero camera."
+    ),
+    ViewRole.LOADING_DETAIL: (
+        "VIEW PURPOSE — HUMAN EYE LEVEL: keep the camera at pedestrian eye height inside the "
+        "authored circulation space. Show realistic scale and access without converting it to a "
+        "drone view."
+    ),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,7 +96,7 @@ class RefineViewSet:
                 instance_id=render_root / camera.view_id / "instance_id.png",
                 semantic=render_root / camera.view_id / "semantic.png",
                 edges=render_root / camera.view_id / "edges.png",
-                prompt=prompt,
+                prompt=f"{prompt}\n\n{VIEW_DIRECTIVES[camera.role]}",
                 reference_images=reference_images,
                 aspect_ratio=camera.aspect_ratio,
             )

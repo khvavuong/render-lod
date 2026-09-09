@@ -33,6 +33,15 @@ def test_vietnamese_site_names_take_priority_over_dimensions() -> None:
     assert landscape_confidence == road_confidence == 0.98
 
 
+def test_guardhouse_marks_an_authored_site_entrance() -> None:
+    role, confidence = _semantic_role(
+        "IfcBuildingElementProxy", (4.0, 3.5, 3.5), "GM-Nhà bảo vệ"
+    )
+
+    assert role is SemanticRole.MAIN_ENTRANCE
+    assert confidence == 0.88
+
+
 def test_box_produces_four_orthonormal_facade_frames() -> None:
     surfaces = _box_surfaces(
         "ifc:building-1",

@@ -19,7 +19,7 @@ from v365_archviz.providers.contracts import (
     ViewConditioningInput,
 )
 
-PROMPT_VERSION = "geometry-first-vietnam-industrial-v9-neutral-semantic"
+PROMPT_VERSION = "geometry-first-vietnam-industrial-v10-site-access"
 DEFAULT_PROMPT = """Create a photorealistic professional architectural visualization of this
 Vietnamese industrial project. Treat the base render and auxiliary passes as immutable spatial
 geometry: preserve the exact camera, site boundary, road and sidewalk centerlines and widths,
@@ -68,6 +68,12 @@ generic CGI cleanliness.
 
 Convert authored landscape-zone geometry into continuous, climate-appropriate Vietnamese planting
 without changing its footprint. Keep traffic and fire-access routes fully legible and unobstructed.
+SITE-ACCESS RULE: preserve every authored perimeter/external road and every approach to the site.
+Where a main-entrance semantic element or security gatehouse touches an authored boundary road,
+render a plausible controlled gate opening and guardhouse at that exact location and nowhere else.
+Keep all authored entrance locations simultaneously visible when the camera framing contains them.
+Never relocate an entrance or block it with planting, vehicles or invented construction. Draw a
+perimeter fence only where boundary geometry is explicitly present in the conditioning passes.
 CONTEXT-BUILDING RULE: render a context building only where its geometry exists in the base render
 and its pixels are explicitly marked as context in the semantic-ID pass. Never extrapolate, mirror,
 clone or fill unmarked background with blocks. For approved context geometry, use quiet pale

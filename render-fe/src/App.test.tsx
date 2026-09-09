@@ -13,10 +13,10 @@ describe('V365 Render Studio', () => {
   it('renders the two-panel configuration and generation workspace', () => {
     render(<App gateway={gateway} />);
 
-    expect(screen.getByText('Thiết lập phương án')).toBeInTheDocument();
-    expect(screen.getByText('Không gian tạo sinh')).toBeInTheDocument();
+    expect(screen.getByText('Thông tin dự án')).toBeInTheDocument();
+    expect(screen.getByText('V365 Render Studio')).toBeInTheDocument();
     expect(screen.getByLabelText('Mã dự án')).toBeInTheDocument();
-    expect(screen.getByText('Màu sắc vật liệu')).toBeInTheDocument();
+    expect(screen.getByText('Bảng màu vật liệu')).toBeInTheDocument();
     expect(screen.queryByLabelText('Model revision')).not.toBeInTheDocument();
     expect(screen.queryByText('Độ dốc mái')).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText(/sảnh đón chuyên nghiệp/)).toBeInTheDocument();

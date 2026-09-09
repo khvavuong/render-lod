@@ -13,6 +13,7 @@ interface DesignRevisionResponse {
 
 interface LatestModelResponse {
   model_revision: string;
+  ready: boolean;
 }
 
 interface ViewSetResponse {
@@ -52,7 +53,22 @@ function toJob(job: ViewSetResponse, outputs: OutputArtifact[] = []): StudioJob 
 
 export class HttpStudioGateway implements StudioGateway {
   async createDesign(values: DesignFormValues): Promise<StudioJob> {
-    const model = await request<LatestModelResponse>('/v1/models/latest');
+    if (!values.modelFile) {
+      throw new Error('Chưa chọn file RVT');
+    }
+    const model = await request<LatestModelResponse>('/v1/models', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'X-Filename': encodeURIComponent(values.modelFile.name),
+      },
+      body: values.modelFile,
+    });
+    if (!model.ready) {
+      throw new Error(
+        `Model đã tải lên nhưng chưa được xử lý. Chạy APS extraction cho revision ${model.model_revision} trước khi tạo ảnh.`,
+      );
+    }
     const revision = await request<DesignRevisionResponse>(
       `/v1/projects/${encodeURIComponent(values.projectId)}/design-revisions`,
       {

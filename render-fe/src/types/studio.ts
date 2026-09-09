@@ -18,6 +18,7 @@ export interface MaterialPalette {
 
 export interface DesignFormValues {
   projectId: string;
+  modelFile?: File;
   stylePreset: StylePreset;
   palette: MaterialPalette;
   decorLevel: DecorLevel;

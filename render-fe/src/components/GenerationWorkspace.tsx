@@ -69,7 +69,7 @@ function ArtifactCard({ artifact }: { artifact: OutputArtifact }) {
             <VideoCameraOutlined />
             <Typography.Text strong>{artifact.title}</Typography.Text>
           </Space>
-          <Tag variant="filled">MP4</Tag>
+          <Tag bordered={false}>MP4</Tag>
         </div>
       </article>
     );
@@ -79,6 +79,7 @@ function ArtifactCard({ artifact }: { artifact: OutputArtifact }) {
       className={`artifact-card ${artifact.kind === "board" ? "artifact-board" : ""}`}
     >
       <Image
+        className="artifact-image"
         src={artifact.url}
         alt={artifact.title}
         preview={{
@@ -94,7 +95,7 @@ function ArtifactCard({ artifact }: { artifact: OutputArtifact }) {
           <FileImageOutlined />
           <Typography.Text strong>{artifact.title}</Typography.Text>
         </Space>
-        <Tag variant="filled">
+        <Tag bordered={false}>
           {artifact.kind === "board"
             ? "BOARD"
             : artifact.view_id?.toUpperCase()}
@@ -115,9 +116,10 @@ function EmptyCanvas() {
         ))}
       </div>
       <Empty
+        className="empty-state"
         image={Empty.PRESENTED_IMAGE_SIMPLE}
         description={
-          <Space orientation="vertical" size={2}>
+          <Space direction="vertical" size={2}>
             <Typography.Text strong>Chưa có phiên diễn họa</Typography.Text>
             <Typography.Text type="secondary">
               Hoàn thiện thiết lập bên trái để bắt đầu tạo 6 góc nhìn.

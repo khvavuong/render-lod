@@ -17,7 +17,17 @@ describe('HttpStudioGateway', () => {
   it('creates an immutable design revision before requesting the view set', async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(jsonResponse({ model_revision: 'model-revision-01' }))
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            model_revision: 'model-revision-01',
+            file_name: 'factory.rvt',
+            size_bytes: 12,
+            ready: true,
+          },
+          201,
+        ),
+      )
       .mockResolvedValueOnce(jsonResponse({ design_revision: 'R01-design' }, 201))
       .mockResolvedValueOnce(
         jsonResponse(
@@ -36,10 +46,12 @@ describe('HttpStudioGateway', () => {
     const result = await new HttpStudioGateway().createDesign({
       ...DEFAULT_FORM_VALUES,
       projectId: 'factory-01',
+      modelFile: new File(['rvt-content'], 'factory.rvt'),
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(fetchMock.mock.calls[0][0]).toBe('/v1/models/latest');
+    expect(fetchMock.mock.calls[0][0]).toBe('/v1/models');
+    expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe('POST');
     expect(fetchMock.mock.calls[1][0]).toBe('/v1/projects/factory-01/design-revisions');
     const firstRequest = fetchMock.mock.calls[1][1] as RequestInit;
     const payload = JSON.parse(firstRequest.body as string) as {

@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from v365_archviz.api import app
@@ -18,6 +20,28 @@ def test_brand_logo_is_served_as_png() -> None:
 
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/png"
+
+
+def test_uploads_and_inspects_rvt_model(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("V365_ARTIFACT_DIR", str(tmp_path))
+    source = Path("resource/model_lod100_sample.rvt")
+
+    response = client.post(
+        "/v1/models",
+        content=source.read_bytes(),
+        headers={
+            "Content-Type": "application/octet-stream",
+            "X-Filename": "factory.rvt",
+        },
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["file_name"] == "factory.rvt"
+    assert payload["size_bytes"] == source.stat().st_size
+    assert payload["ready"] is False
+    assert (tmp_path / "uploads" / payload["model_revision"] / "source.rvt").is_file()
+    assert (tmp_path / "inspections" / payload["model_revision"] / "manifest.json").is_file()
 
 
 def test_capabilities_never_expose_credentials(monkeypatch) -> None:  # type: ignore[no-untyped-def]

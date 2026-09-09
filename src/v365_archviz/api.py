@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
+import os
 import re
+import uuid
 from pathlib import Path
 from typing import Literal
+from urllib.parse import unquote
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, Header, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from v365_archviz import __version__
 from v365_archviz.application.create_generation_job import CreateGenerationJob
+from v365_archviz.application.inspect_model import InspectModel
 from v365_archviz.application.plan_cameras import PlanStandardCameras
 from v365_archviz.application.plan_design import PlanDesign
 from v365_archviz.artifacts import atomic_write
@@ -20,9 +24,12 @@ from v365_archviz.config import Settings
 from v365_archviz.domain.design import DesignBrief, DesignDNA
 from v365_archviz.domain.scene import CanonicalScene
 from v365_archviz.domain.workflow import GenerationProfile, WorkflowState
+from v365_archviz.errors import InvalidModelError
 from v365_archviz.providers.local_jobs import LocalJobRepository
+from v365_archviz.providers.local_rvt import LocalRvtInspector
 
 OutputKind = Literal["image", "board", "video"]
+MAX_RVT_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024
 
 app = FastAPI(
     title="V365 ArchViz Control Plane",
@@ -34,7 +41,7 @@ app.add_middleware(
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
     allow_credentials=False,
     allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type"],
+    allow_headers=["Content-Type", "X-Filename"],
 )
 
 SAFE_IDENTIFIER_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
@@ -60,6 +67,15 @@ class ActiveModelResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     model_revision: str = Field(pattern=SAFE_IDENTIFIER_PATTERN)
+
+
+class ModelUploadResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    model_revision: str = Field(pattern=SAFE_IDENTIFIER_PATTERN)
+    file_name: str
+    size_bytes: int = Field(gt=0)
+    ready: bool
 
 
 class CreateDesignRevisionRequest(BaseModel):
@@ -185,6 +201,57 @@ def latest_model() -> ActiveModelResponse:
         raise HTTPException(status_code=404, detail="no canonical model is available")
     latest = max(candidates, key=lambda path: path.stat().st_mtime_ns)
     return ActiveModelResponse(model_revision=latest.parent.name)
+
+
+@app.post(
+    "/v1/models",
+    response_model=ModelUploadResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["models"],
+)
+async def upload_model(
+    request: Request,
+    x_filename: str = Header(..., min_length=1, max_length=512),
+) -> ModelUploadResponse:
+    file_name = Path(unquote(x_filename)).name
+    if Path(file_name).suffix.lower() != ".rvt":
+        raise HTTPException(status_code=422, detail="only .rvt files are supported")
+    content_length = request.headers.get("content-length")
+    if content_length and int(content_length) > MAX_RVT_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="RVT file exceeds the 2 GiB limit")
+
+    settings = _settings()
+    incoming = settings.artifact_dir / "uploads" / ".incoming"
+    incoming.mkdir(parents=True, exist_ok=True)
+    temporary = incoming / f"{uuid.uuid4().hex}.rvt"
+    size_bytes = 0
+    try:
+        with temporary.open("xb") as output:
+            async for chunk in request.stream():
+                size_bytes += len(chunk)
+                if size_bytes > MAX_RVT_UPLOAD_BYTES:
+                    raise HTTPException(status_code=413, detail="RVT file exceeds the 2 GiB limit")
+                output.write(chunk)
+        if not size_bytes:
+            raise HTTPException(status_code=422, detail="RVT file is empty")
+        inspection = LocalRvtInspector().inspect(temporary)
+        model_revision = inspection.sha256[:16]
+        target = settings.artifact_dir / "uploads" / model_revision / "source.rvt"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(temporary, target)
+        InspectModel().execute(target, settings.artifact_dir)
+    except InvalidModelError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    finally:
+        temporary.unlink(missing_ok=True)
+
+    ready = (settings.artifact_dir / "scenes" / model_revision / "canonical_scene.json").is_file()
+    return ModelUploadResponse(
+        model_revision=model_revision,
+        file_name=file_name,
+        size_bytes=size_bytes,
+        ready=ready,
+    )
 
 
 @app.get("/v1/brand/logo", response_class=FileResponse, tags=["system"])

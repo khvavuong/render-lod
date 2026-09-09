@@ -3,6 +3,7 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   plugins: [react()],
+  publicDir: '../resource/logo',
   server: {
     port: 5173,
     proxy: {

@@ -218,6 +218,7 @@ Các endpoint control plane hiện có:
 - `GET /healthz`
 - `GET /v1/system/capabilities`
 - `GET /v1/models/latest`
+- `POST /v1/models` (upload và kiểm tra file RVT)
 - `GET /v1/brand/logo`
 - `POST /v1/projects/{project_id}/design-revisions`
 - `POST /v1/design-revisions/{design_revision}/view-sets`
@@ -230,9 +231,10 @@ Các endpoint control plane hiện có:
 
 ## Render Studio frontend
 
-Frontend React + Ant Design nằm trong `render-fe/`. Giao diện hai panel compile phong cách,
-palette, mức decor, tầng văn phòng, mái, loading dock, cảnh quan và prompt tự do thành
-`DesignBrief` có version. Số tầng và prompt là ưu tiên thiết kế mềm; các khóa bảo toàn hình học,
+Frontend React + Ant Design nằm trong `render-fe/`. Giao diện hai panel nhận file RVT và
+compile phong cách, palette, mức decor, tầng văn phòng, mái, loading dock, cảnh quan và prompt tự do thành
+`DesignBrief` có version. File được kiểm tra, lưu content-addressed theo SHA và tự khớp với
+Canonical Scene đã xử lý. Số tầng và prompt là ưu tiên thiết kế mềm; các khóa bảo toàn hình học,
 đường giao thông và ranh cây xanh luôn được bật trong payload. Panel đầu ra poll trạng thái job,
 hiển thị sáu view, board và showreel trực tiếp từ artifact API.
 
@@ -257,7 +259,9 @@ make fe-build
 `fe-e2e` chạy luồng trình duyệt Chromium bằng Playwright với API được cô lập, vì vậy không gọi
 Gemini/Veo và không phát sinh chi phí. Khi dùng giao diện thật, nhập mã dự án, chọn phong cách,
 mức chi tiết, màu sắc và bối cảnh, thêm yêu cầu tự do nếu cần rồi bấm **Tạo phương án diễn họa**.
-Frontend tự khóa model canonical mới nhất, sau đó theo dõi job và cập nhật ảnh/video ở panel phải.
+Frontend upload và khóa đúng revision của file được chọn, sau đó theo dõi job và cập nhật
+ảnh/video ở panel phải. Nếu revision chưa có Canonical Scene, giao diện dừng an toàn và yêu cầu
+chạy APS extraction/canonicalization trước khi phát sinh tác vụ sinh ảnh.
 
 ## Quality gates
 

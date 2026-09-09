@@ -25,16 +25,18 @@ export function PaletteEditor({ value, onChange }: PaletteEditorProps) {
   return (
     <div className="palette-grid">
       {COLORS.map(({ key, label }) => (
-        <Space key={key} className="palette-row" size={10}>
+        <Space key={key} className="palette-row" size={8}>
           <ColorPicker
+            className="palette-picker"
             aria-label={`Chọn ${label.toLowerCase()}`}
             value={value[key]}
             onChange={(_, hex) => update(key, hex)}
             showText={false}
           />
           <div className="palette-meta">
-            <Typography.Text type="secondary">{label}</Typography.Text>
+            <Typography.Text type="secondary" className="palette-label">{label}</Typography.Text>
             <Input
+              className="palette-input"
               aria-label={label}
               value={value[key]}
               onChange={(event) => update(key, event.target.value)}

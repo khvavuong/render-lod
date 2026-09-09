@@ -1,19 +1,21 @@
 import { expect, test } from '@playwright/test';
 
-const transparentPixel = Buffer.from(
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAEAQH/6KYXjgAAAABJRU5ErkJggg==',
-  'base64',
-);
-
 test('configures a design and follows the generation output', async ({ page }) => {
   let submittedBrief: Record<string, unknown> | undefined;
 
-  await page.route('**/v1/brand/logo', (route) =>
-    route.fulfill({ status: 200, contentType: 'image/png', body: transparentPixel }),
-  );
-  await page.route('**/v1/models/latest', (route) =>
-    route.fulfill({ json: { model_revision: 'model-revision-e2e' } }),
-  );
+  await page.route('**/v1/models', async (route) => {
+    expect(route.request().method()).toBe('POST');
+    expect(route.request().headers()['x-filename']).toBe('factory.rvt');
+    await route.fulfill({
+      status: 201,
+      json: {
+        model_revision: 'model-revision-e2e',
+        file_name: 'factory.rvt',
+        size_bytes: 11,
+        ready: true,
+      },
+    });
+  });
   await page.route('**/v1/projects/*/design-revisions', async (route) => {
     submittedBrief = (await route.request().postDataJSON()) as Record<string, unknown>;
     await route.fulfill({ status: 201, json: { design_revision: 'R01-e2e' } });
@@ -59,11 +61,21 @@ test('configures a design and follows the generation output', async ({ page }) =
 
   await page.goto('/');
 
-  await expect(page.getByRole('heading', { name: 'Thiết lập phương án' })).toBeVisible();
-  await expect(page.getByText('Không gian tạo sinh')).toBeVisible();
+  const logo = page.getByRole('img', { name: 'TD Group' });
+  await expect(logo).toBeVisible();
+  await expect
+    .poll(() => logo.evaluate((image: HTMLImageElement) => image.naturalWidth))
+    .toBeGreaterThan(0);
+  await expect(page.getByText('Thông tin dự án')).toBeVisible();
+  await expect(page.getByText('V365 Render Studio')).toBeVisible();
   await expect(page.getByLabel('Model revision')).toHaveCount(0);
   await expect(page.getByText('Độ dốc mái')).toHaveCount(0);
 
+  await page.locator('input[type="file"]').setInputFiles({
+    name: 'factory.rvt',
+    mimeType: 'application/octet-stream',
+    buffer: Buffer.from('rvt-content'),
+  });
   await page.getByLabel('Mã dự án').fill('factory-e2e');
   await page.getByText('Nổi bật', { exact: true }).click();
   await page

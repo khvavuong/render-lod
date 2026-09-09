@@ -67,8 +67,7 @@ def _semantic_role(
     if any(token in normalized_name for token in ("duong", "road", "driveway")):
         return SemanticRole.SITE_ROAD, 0.98
     if any(
-        token in normalized_name
-        for token in ("cong chinh", "cong vao", "main gate", "entry gate")
+        token in normalized_name for token in ("cong chinh", "cong vao", "main gate", "entry gate")
     ):
         return SemanticRole.MAIN_ENTRANCE, 0.9
     if any(token in normalized_name for token in ("hang rao", "fence", "boundary")):

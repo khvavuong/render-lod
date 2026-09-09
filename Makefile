@@ -17,7 +17,8 @@ DESIGN_DNA ?= $(DESIGN_DIR)/design_dna.json
 VIEW_SET ?= $(DESIGN_DIR)/view_set.json
 RENDER_DIR ?= $(ARTIFACT_DIR)/renders/$(REVISION)/$(DESIGN_REVISION)
 GENERATED_DIR ?= $(ARTIFACT_DIR)/generated/$(REVISION)/$(DESIGN_REVISION)
-VIEWS ?= view-01 view-02 view-03 view-04
+VIEWS ?= view-01 view-02 view-03 view-04 view-05 view-06
+PROFILE ?= preview_fast
 REFERENCE_ARGS = $(foreach reference,$(REFERENCES),--reference-image "$(reference)")
 
 .PHONY: install test lint typecheck require-model require-brief require-design inspect extract-ifc \
@@ -90,6 +91,7 @@ refine-viewset: require-model require-design
 		--design-dna "$(DESIGN_DNA)" \
 		--model-revision "$(REVISION)" \
 		--output "$(GENERATED_DIR)" \
+		--profile "$(PROFILE)" \
 		$(REFERENCE_ARGS)
 
 build-correspondence: require-model require-design

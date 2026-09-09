@@ -231,6 +231,24 @@
           "default": true,
           "title": "Preserve Transport Geometry",
           "type": "boolean"
+        },
+        "surrounding_context_count": {
+          "default": 0,
+          "maximum": 12,
+          "minimum": 0,
+          "title": "Surrounding Context Count",
+          "type": "integer"
+        },
+        "surrounding_context_mode": {
+          "default": "authored_only",
+          "pattern": "^(authored_only|procedural_perimeter)$",
+          "title": "Surrounding Context Mode",
+          "type": "string"
+        },
+        "surrounding_landscape_buffer": {
+          "default": false,
+          "title": "Surrounding Landscape Buffer",
+          "type": "boolean"
         }
       },
       "title": "SiteDesign",
@@ -311,6 +329,19 @@
       "minimum": 0.0,
       "title": "Roof Eave Overhang M",
       "type": "number"
+    },
+    "roof_group_gap_tolerance_m": {
+      "default": 2.0,
+      "maximum": 30.0,
+      "minimum": 0.0,
+      "title": "Roof Group Gap Tolerance M",
+      "type": "number"
+    },
+    "roof_grouping_mode": {
+      "default": "per_element",
+      "pattern": "^(per_element|continuous_rows)$",
+      "title": "Roof Grouping Mode",
+      "type": "string"
     },
     "roof_ridge_orientation": {
       "default": "long_axis",

@@ -157,9 +157,7 @@ def _refinement_prompt(
     site_design = design.site_design
     roof_types = sorted({building.roof.roof_type for building in design.buildings})
     focus_count = sum(building.treatment.value == "focus" for building in design.buildings)
-    context_count = sum(
-        building.treatment.value == "context" for building in design.buildings
-    )
+    context_count = sum(building.treatment.value == "context" for building in design.buildings)
     solar_policy = (
         "permitted only on buildings explicitly marked true"
         if any(building.roof.solar_panels for building in design.buildings)
@@ -174,20 +172,30 @@ def _refinement_prompt(
         f"- accent: {language.accent or 'none'}\n"
         "- approved color palette: "
         f"primary {palette.primary_hex}, secondary {palette.secondary_hex}, "
-        f"glass {palette.glass_hex}, accent {palette.accent_hex}\n"
+        f"glass {palette.glass_hex}, accent {palette.accent_hex}, "
+        f"paving {palette.paving_hex}\n"
+        f"- focus-factory semantic red must be recolored only with primary "
+        f"{palette.primary_hex}, secondary {palette.secondary_hex}, or approved accent "
+        f"{palette.accent_hex}; red is forbidden because it is not in this palette\n"
         f"- time/weather: {environment.time}, {environment.weather}\n"
         f"- white balance: {environment.white_balance_k} K\n"
         f"- landscape: {presentation.landscape_character}\n"
         f"- paving: {presentation.paving_character}\n"
         f"- entourage density: {presentation.entourage_density}\n"
         f"- approved roof instructions: {', '.join(roof_types)}\n"
+        f"- continuous roof assembly count: {len(design.roof_assemblies)}; preserve each "
+        "assembly as one longitudinal roof\n"
         f"- solar-panel policy: {solar_policy}\n"
         "- road, sidewalk, gate and landscape geometry: preserve exactly\n"
         f"- approved focus building count: {focus_count}\n"
         f"- approved context building count: {context_count}; generate exactly this count, "
+        "plus only the deterministic perimeter massings explicitly present in semantic pixels; "
         "never infer additional context\n"
         f"- context buildings: {site_design.context_render_mode}, opacity reference "
-        f"{site_design.context_opacity:.2f}, no facade design"
+        f"{site_design.context_opacity:.2f}, no facade design\n"
+        f"- surrounding context mode: {site_design.surrounding_context_mode}; "
+        f"perimeter massing count: {site_design.surrounding_context_count}\n"
+        f"- surrounding landscape buffer: {site_design.surrounding_landscape_buffer}"
     )
     return design, prompt
 

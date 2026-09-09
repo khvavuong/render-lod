@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 from pathlib import Path
@@ -26,6 +27,7 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--width", type=int, default=768)
     parser.add_argument("--height", type=int, default=432)
     parser.add_argument("--view-id", action="append", dest="view_ids")
+    parser.add_argument("--pbr-only", action="store_true")
     return parser.parse_args(argv)
 
 
@@ -94,7 +96,7 @@ def build_materials(design_data: dict | None):
     )
     return {
         "main_shed": material("main_shed", _hex_color(palette["primary_hex"]), 0.35, 0.3),
-        "office_block": material("office_block", _hex_color(palette["glass_hex"]), 0.15, 0.2),
+        "office_block": material("office_block", _hex_color(palette["primary_hex"]), 0.18, 0.38),
         "service_yard": material("service_yard", _hex_color(palette["paving_hex"]), 0.0, 0.72),
         "site_road": material("site_road", (0.12, 0.135, 0.14, 1), 0.0, 0.82),
         "sidewalk": material("sidewalk", (0.48, 0.49, 0.48, 1), 0.0, 0.76),
@@ -111,9 +113,22 @@ def build_materials(design_data: dict | None):
         "roof": material("roof", (0.62, 0.66, 0.68, 1), 0.48, 0.28),
         "primary_facade": material("primary_facade", _hex_color(palette["primary_hex"]), 0.35, 0.3),
         "context": material("context", (0.66, 0.70, 0.73, context_opacity), 0.05, 0.65),
+        "context_landscape": material("context_landscape", (0.12, 0.22, 0.12, 0.72), 0.0, 0.95),
         "utility_block": material("utility_block", _hex_color(palette["secondary_hex"]), 0.2, 0.45),
         "unknown": material("unknown", (0.45, 0.47, 0.48, 1), 0.0, 0.55),
     }
+
+
+def _roof_rise(bounding_box: dict, roof: dict) -> float:
+    minimum = bounding_box["minimum"]
+    maximum = bounding_box["maximum"]
+    span_x = maximum[0] - minimum[0]
+    span_y = maximum[1] - minimum[1]
+    long_axis = "x" if span_x >= span_y else "y"
+    if roof.get("ridge_orientation", "long_axis") == "short_axis":
+        long_axis = "y" if long_axis == "x" else "x"
+    cross_span = span_y if long_axis == "x" else span_x
+    return min(4.5, max(0.35, cross_span * 0.5 * np.tan(np.radians(roof["slope_deg"]))))
 
 
 def create_objects(scene_data: dict, scene_root: Path, design_data: dict | None) -> int:
@@ -122,9 +137,40 @@ def create_objects(scene_data: dict, scene_root: Path, design_data: dict | None)
         building["building_id"]: building.get("treatment", "focus")
         for building in (design_data or {}).get("buildings", [])
     }
+    roofs = {
+        building["building_id"]: building["roof"]
+        for building in (design_data or {}).get("buildings", [])
+    }
+    roof_bounds = {
+        building_id: assembly["bounding_box"]
+        for assembly in (design_data or {}).get("roof_assemblies", [])
+        for building_id in assembly["building_ids"]
+    }
+    assembly_roofs = {
+        building_id: assembly["roof"]
+        for assembly in (design_data or {}).get("roof_assemblies", [])
+        for building_id in assembly["building_ids"]
+    }
     for index, element in enumerate(scene_data["elements"], start=1):
         arrays = np.load(scene_root / element["mesh_ref"])
         vertices = arrays["vertices"].tolist()
+        roof = assembly_roofs.get(
+            element["scene_element_id"], roofs.get(element["scene_element_id"])
+        )
+        if (
+            roof
+            and treatments.get(element["scene_element_id"]) == "focus"
+            and element["semantic_role"] == "main_shed"
+            and "gable" in roof["roof_type"].casefold()
+        ):
+            top = element["bounding_box"]["maximum"][2]
+            eave = top - _roof_rise(
+                roof_bounds.get(element["scene_element_id"], element["bounding_box"]), roof
+            )
+            vertices = [
+                [vertex[0], vertex[1], eave if abs(vertex[2] - top) < 1e-4 else vertex[2]]
+                for vertex in vertices
+            ]
         faces = arrays["faces"].tolist()
         mesh = bpy.data.meshes.new(element["scene_element_id"])
         mesh.from_pydata(vertices, [], faces)
@@ -230,7 +276,7 @@ def _gable_roof(
     minimum = bounding_box["minimum"]
     maximum = bounding_box["maximum"]
     x0, y0, _ = minimum
-    x1, y1, z_eave = maximum
+    x1, y1, z_ridge = maximum
     overhang = roof.get("eave_overhang_m", 0.6)
     x0 -= overhang
     x1 += overhang
@@ -239,9 +285,7 @@ def _gable_roof(
     long_axis = "x" if (x1 - x0) >= (y1 - y0) else "y"
     if roof.get("ridge_orientation", "long_axis") == "short_axis":
         long_axis = "y" if long_axis == "x" else "x"
-    cross_span = (y1 - y0) if long_axis == "x" else (x1 - x0)
-    ridge_height = min(4.5, cross_span * 0.5 * np.tan(np.radians(roof["slope_deg"])))
-    z_ridge = z_eave + max(0.35, ridge_height)
+    z_eave = z_ridge - _roof_rise(bounding_box, roof)
     if long_axis == "x":
         middle = (y0 + y1) / 2
         vertices = (
@@ -290,9 +334,105 @@ def _gable_roof(
     bpy.context.collection.objects.link(obj)
 
 
+def create_context_environment(scene_data: dict, design_data: dict, start_index: int) -> int:
+    site = design_data.get("site_design", {})
+    if site.get("surrounding_context_mode") != "procedural_perimeter":
+        return start_index
+    elements = scene_data["elements"]
+    minimum = [min(item["bounding_box"]["minimum"][axis] for item in elements) for axis in range(3)]
+    maximum = [max(item["bounding_box"]["maximum"][axis] for item in elements) for axis in range(3)]
+    span_x = maximum[0] - minimum[0]
+    span_y = maximum[1] - minimum[1]
+    center_x = (minimum[0] + maximum[0]) / 2
+    center_y = (minimum[1] + maximum[1]) / 2
+    buffer = max(24.0, max(span_x, span_y) * 0.11)
+    materials = build_materials(design_data)
+    index = start_index
+
+    if site.get("surrounding_landscape_buffer", False):
+        strips = (
+            (
+                Vector((center_x, maximum[1] + buffer / 2, minimum[2] - 0.12)),
+                span_x + 2 * buffer,
+                buffer,
+            ),
+            (
+                Vector((center_x, minimum[1] - buffer / 2, minimum[2] - 0.12)),
+                span_x + 2 * buffer,
+                buffer,
+            ),
+            (Vector((maximum[0] + buffer / 2, center_y, minimum[2] - 0.12)), buffer, span_y),
+            (Vector((minimum[0] - buffer / 2, center_y, minimum[2] - 0.12)), buffer, span_y),
+        )
+        for strip_number, (center, width, depth) in enumerate(strips, start=1):
+            index += 1
+            _oriented_box(
+                f"context-landscape-{strip_number:02d}",
+                center,
+                ((Vector((1, 0, 0)), width), (Vector((0, 1, 0)), depth), (Vector((0, 0, 1)), 0.2)),
+                materials["context_landscape"],
+                index,
+                semantic_role="context_landscape",
+            )
+
+    long_size = max(52.0, min(96.0, span_x * 0.22))
+    short_size = max(24.0, min(42.0, span_y * 0.18))
+    height = max(7.0, min(11.0, (maximum[2] - minimum[2]) * 0.85))
+    slots = (
+        (center_x - span_x * 0.28, maximum[1] + buffer * 2.8, long_size, short_size),
+        (center_x + span_x * 0.28, maximum[1] + buffer * 2.8, long_size, short_size),
+        (maximum[0] + buffer * 2.8, center_y - span_y * 0.25, short_size, long_size),
+        (maximum[0] + buffer * 2.8, center_y + span_y * 0.25, short_size, long_size),
+        (minimum[0] - buffer * 2.8, center_y - span_y * 0.25, short_size, long_size),
+        (minimum[0] - buffer * 2.8, center_y + span_y * 0.25, short_size, long_size),
+    )
+    count = min(site.get("surrounding_context_count", 0), len(slots))
+    for massing_number, (x, y, width, depth) in enumerate(slots[:count], start=1):
+        index += 1
+        _oriented_box(
+            f"procedural-context-{massing_number:02d}",
+            Vector((x, y, minimum[2] + height / 2)),
+            ((Vector((1, 0, 0)), width), (Vector((0, 1, 0)), depth), (Vector((0, 0, 1)), height)),
+            materials["context"],
+            index,
+            semantic_role="context_building",
+        )
+    return index
+
+
+def batch_noncanonical_details(base_object_count: int) -> None:
+    """Join generated details by semantic role; their per-object identity is not canonical."""
+
+    for role in ("design_detail", "roof", "context_building", "context_landscape"):
+        candidates = [
+            obj
+            for obj in bpy.context.scene.objects
+            if obj.type == "MESH"
+            and obj.pass_index > base_object_count
+            and obj.get("semantic_role") == role
+        ]
+        if len(candidates) < 2:
+            continue
+        bpy.ops.object.select_all(action="DESELECT")
+        for obj in candidates:
+            obj.select_set(True)
+        bpy.context.view_layer.objects.active = candidates[0]
+        bpy.ops.object.join()
+        merged = candidates[0]
+        merged.name = f"batched-{role}"
+        merged.pass_index = base_object_count + 1
+        merged["semantic_role"] = role
+
+
 def create_design_details(scene_data: dict, design_data: dict, start_index: int) -> None:
     surfaces = {surface["surface_id"]: surface for surface in scene_data["surfaces"]}
     elements = {element["scene_element_id"]: element for element in scene_data["elements"]}
+    has_roof_assemblies = bool(design_data.get("roof_assemblies"))
+    assembly_by_building = {
+        building_id: assembly
+        for assembly in design_data.get("roof_assemblies", [])
+        for building_id in assembly["building_ids"]
+    }
     palette = _palette(design_data)
     detail_materials = {
         "seam": material("panel_seam", _hex_color(palette["secondary_hex"]), 0.55, 0.32),
@@ -306,10 +446,18 @@ def create_design_details(scene_data: dict, design_data: dict, start_index: int)
     for building in design_data["buildings"]:
         if building.get("treatment", "focus") != "focus":
             continue
+        assembly = assembly_by_building.get(building["building_id"])
         for facade in building["facades"]:
             surface = surfaces[facade["surface_id"]]
+            if assembly and not _surface_on_assembly_perimeter(surface, assembly["bounding_box"]):
+                continue
             width = surface["width_m"]
             height = surface["height_m"]
+            if assembly:
+                eave = assembly["bounding_box"]["maximum"][2] - _roof_rise(
+                    assembly["bounding_box"], assembly["roof"]
+                )
+                height = min(height, eave - surface["frame"]["origin"][2])
             module = facade["panel_module_m"]
             articulation = facade.get("articulation", {})
             plinth_height = min(articulation.get("plinth_height_m", 0.75), height * 0.22)
@@ -477,7 +625,11 @@ def create_design_details(scene_data: dict, design_data: dict, start_index: int)
                     )
         element = elements[building["building_id"]]
         roof = building["roof"]
-        if element["semantic_role"] == "main_shed" and "gable" in roof["roof_type"].casefold():
+        if (
+            not has_roof_assemblies
+            and element["semantic_role"] == "main_shed"
+            and "gable" in roof["roof_type"].casefold()
+        ):
             detail_index += 1
             _gable_roof(
                 f"{building['building_id']}:gable-roof",
@@ -486,9 +638,34 @@ def create_design_details(scene_data: dict, design_data: dict, start_index: int)
                 detail_materials["roof"],
                 detail_index,
             )
+    for assembly in design_data.get("roof_assemblies", []):
+        roof = assembly["roof"]
+        if "gable" not in roof["roof_type"].casefold():
+            continue
+        detail_index += 1
+        _gable_roof(
+            assembly["assembly_id"],
+            assembly["bounding_box"],
+            roof,
+            detail_materials["roof"],
+            detail_index,
+        )
 
 
-def configure_world(width: int, height: int) -> None:
+def _surface_on_assembly_perimeter(surface: dict, bounding_box: dict) -> bool:
+    normal = surface["frame"]["normal"]
+    origin = surface["frame"]["origin"]
+    tolerance = 0.02
+    if abs(normal[0]) > 0.9:
+        boundary = bounding_box["maximum"][0] if normal[0] > 0 else bounding_box["minimum"][0]
+        return abs(origin[0] - boundary) <= tolerance
+    if abs(normal[1]) > 0.9:
+        boundary = bounding_box["maximum"][1] if normal[1] > 0 else bounding_box["minimum"][1]
+        return abs(origin[1] - boundary) <= tolerance
+    return True
+
+
+def configure_world(width: int, height: int, design_data: dict | None = None) -> None:
     scene = bpy.context.scene
     try:
         scene.render.engine = "BLENDER_EEVEE_NEXT"
@@ -500,13 +677,38 @@ def configure_world(width: int, height: int) -> None:
     scene.render.image_settings.file_format = "PNG"
     scene.render.image_settings.color_mode = "RGB"
     scene.render.film_transparent = False
-    scene.world.color = (0.04, 0.06, 0.09)
+    environment = design_data.get("environment", {}) if design_data else {}
+    sun_azimuth = math.radians(float(environment.get("sun_azimuth_deg", 135.0)))
+    sun_elevation = math.radians(float(environment.get("sun_elevation_deg", 42.0)))
+    scene.world.use_nodes = True
+    world_tree = scene.world.node_tree
+    world_tree.nodes.clear()
+    sky = world_tree.nodes.new("ShaderNodeTexSky")
+    sky.sky_type = "NISHITA"
+    sky.sun_rotation = sun_azimuth
+    sky.sun_elevation = sun_elevation
+    sky.air_density = 1.1
+    sky.dust_density = 1.4
+    sky.ozone_density = 1.0
+    background = world_tree.nodes.new("ShaderNodeBackground")
+    background.inputs["Strength"].default_value = 0.45
+    output = world_tree.nodes.new("ShaderNodeOutputWorld")
+    world_tree.links.new(sky.outputs["Color"], background.inputs["Color"])
+    world_tree.links.new(background.outputs["Background"], output.inputs["Surface"])
+    try:
+        scene.view_settings.view_transform = "AgX"
+    except TypeError:
+        scene.view_settings.view_transform = "Filmic"
+    try:
+        scene.view_settings.look = "AgX - Medium High Contrast"
+    except TypeError:
+        scene.view_settings.look = "Medium High Contrast"
 
     sun_data = bpy.data.lights.new("Sun", type="SUN")
-    sun_data.energy = 3.0
-    sun_data.angle = 0.08
+    sun_data.energy = 2.2
+    sun_data.angle = math.radians(1.2)
     sun = bpy.data.objects.new("Sun", sun_data)
-    sun.rotation_euler = (0.75, -0.35, -0.8)
+    sun.rotation_euler = (math.pi / 2 - sun_elevation, 0.0, sun_azimuth)
     bpy.context.collection.objects.link(sun)
 
 
@@ -600,6 +802,7 @@ def render_masks(view_dir: Path) -> None:
         "roof": (0.12, 0.78, 0.82, 1.0),
         "primary_facade": (0.82, 0.42, 0.16, 1.0),
         "context_building": (0.42, 0.46, 0.50, 1.0),
+        "context_landscape": (0.08, 0.32, 0.10, 1.0),
         "utility_block": (0.95, 0.65, 0.10, 1.0),
         "unknown": (0.55, 0.55, 0.55, 1.0),
         "design_detail": (0.75, 0.20, 0.85, 1.0),
@@ -667,8 +870,10 @@ def main() -> None:
         design_data = json.loads(args.design_dna.resolve().read_text(encoding="utf-8"))
     base_object_count = create_objects(scene_data, scene_path.parent, design_data)
     if design_data:
-        create_design_details(scene_data, design_data, base_object_count)
-    configure_world(args.width, args.height)
+        detail_start = create_context_environment(scene_data, design_data, base_object_count)
+        create_design_details(scene_data, design_data, detail_start)
+        batch_noncanonical_details(base_object_count)
+    configure_world(args.width, args.height, design_data)
     camera_specs = view_set["cameras"]
     if args.view_ids:
         requested = set(args.view_ids)
@@ -684,8 +889,9 @@ def main() -> None:
         )
         camera = configure_camera(camera_spec)
         render_pbr(view_dir)
-        render_masks(view_dir)
-        render_clay_and_edges(view_dir)
+        if not args.pbr_only:
+            render_masks(view_dir)
+            render_clay_and_edges(view_dir)
         bpy.data.objects.remove(camera, do_unlink=True)
     bpy.ops.wm.save_as_mainfile(filepath=str(output / "designed_scene.blend"))
 

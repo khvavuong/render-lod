@@ -33,9 +33,10 @@ def _request_id(
     view_set_id: str,
     profile: GenerationProfile,
     prompt: str,
+    prompt_version: str,
 ) -> str:
     payload = "\n".join(
-        (model_revision, design_revision, view_set_id, profile.value, prompt)
+        (model_revision, design_revision, view_set_id, profile.value, prompt_version, prompt)
     ).encode()
     return f"gen-{hashlib.sha256(payload).hexdigest()[:16]}"
 
@@ -77,6 +78,7 @@ class RefineViewSet:
             view_set.view_set_id,
             profile,
             prompt,
+            PROMPT_VERSION,
         )
         generated = renderer.generate_view_set(
             ViewSetGenerationInput(
@@ -121,6 +123,12 @@ class RefineViewSet:
             "profile": profile.value,
             "provider": renderer.name,
             "prompt_version": PROMPT_VERSION,
+            "generation_strategy": (
+                "view-03-style-anchor"
+                if profile in {GenerationProfile.BASE_PRO, GenerationProfile.MARKETING_HERO}
+                and any(camera.view_id == "view-03" for camera in view_set.cameras)
+                else "independent-views"
+            ),
             "grammar_version": design.grammar_version,
             "asset_library_version": design.asset_library_version,
             "views": [

@@ -7,6 +7,7 @@ from enum import Enum
 from pydantic import Field, model_validator
 
 from v365_archviz.domain.common import DomainModel, PositiveMeters, UnitInterval
+from v365_archviz.domain.scene import BoundingBox
 
 
 class LoadingDock(DomainModel):
@@ -83,6 +84,21 @@ class BuildingDesign(DomainModel):
     facades: tuple[FacadeDesign, ...] = ()
 
 
+class RoofAssembly(DomainModel):
+    """One continuous roof spanning one or more aligned LOD100 source blocks."""
+
+    assembly_id: str = Field(min_length=1)
+    building_ids: tuple[str, ...] = Field(min_length=1)
+    bounding_box: BoundingBox
+    roof: RoofDesign
+
+    @model_validator(mode="after")
+    def validate_buildings(self) -> RoofAssembly:
+        if len(self.building_ids) != len(set(self.building_ids)):
+            raise ValueError("roof assembly building IDs must be unique")
+        return self
+
+
 class SiteDesign(DomainModel):
     preserve_transport_geometry: bool = True
     preserve_landscape_boundaries: bool = True
@@ -90,6 +106,17 @@ class SiteDesign(DomainModel):
         default="translucent_massing", pattern=r"^translucent_massing$"
     )
     context_opacity: float = Field(default=0.28, ge=0.08, le=0.65)
+    surrounding_context_mode: str = Field(
+        default="authored_only", pattern=r"^(authored_only|procedural_perimeter)$"
+    )
+    surrounding_context_count: int = Field(default=0, ge=0, le=12)
+    surrounding_landscape_buffer: bool = False
+
+    @model_validator(mode="after")
+    def validate_surrounding_context(self) -> SiteDesign:
+        if self.surrounding_context_mode == "authored_only" and self.surrounding_context_count:
+            raise ValueError("authored_only context cannot request procedural massings")
+        return self
 
 
 class DesignLanguage(DomainModel):
@@ -128,6 +155,10 @@ class DesignBrief(DomainModel):
     roof_slope_deg: float = Field(default=7.0, ge=0.0, le=25.0)
     roof_eave_overhang_m: float = Field(default=0.6, ge=0.0, le=3.0)
     roof_ridge_orientation: str = Field(default="long_axis", pattern=r"^(long_axis|short_axis)$")
+    roof_grouping_mode: str = Field(
+        default="per_element", pattern=r"^(per_element|continuous_rows)$"
+    )
+    roof_group_gap_tolerance_m: float = Field(default=2.0, ge=0.0, le=30.0)
     solar_panels: bool = False
     grammar_version: str = Field(min_length=1)
     asset_library_version: str = Field(min_length=1)
@@ -155,6 +186,7 @@ class DesignDNA(DomainModel):
     presentation: PresentationStrategy = Field(default_factory=PresentationStrategy)
     site_design: SiteDesign = Field(default_factory=SiteDesign)
     buildings: tuple[BuildingDesign, ...]
+    roof_assemblies: tuple[RoofAssembly, ...] = ()
     grammar_version: str = Field(min_length=1)
     asset_library_version: str = Field(min_length=1)
 
@@ -168,4 +200,14 @@ class DesignDNA(DomainModel):
         ]
         if len(surface_ids) != len(set(surface_ids)):
             raise ValueError("facade surface IDs must be unique")
+        building_id_set = set(building_ids)
+        roof_ids = [
+            building_id
+            for assembly in self.roof_assemblies
+            for building_id in assembly.building_ids
+        ]
+        if len(roof_ids) != len(set(roof_ids)):
+            raise ValueError("a building cannot belong to multiple roof assemblies")
+        if missing := set(roof_ids) - building_id_set:
+            raise ValueError(f"roof assemblies reference missing buildings: {sorted(missing)}")
         return self

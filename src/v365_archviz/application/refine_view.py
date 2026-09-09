@@ -19,7 +19,7 @@ from v365_archviz.providers.contracts import (
     ViewConditioningInput,
 )
 
-PROMPT_VERSION = "geometry-first-vietnam-industrial-v4"
+PROMPT_VERSION = "geometry-first-vietnam-industrial-v9-neutral-semantic"
 DEFAULT_PROMPT = """Create a photorealistic professional architectural visualization of this
 Vietnamese industrial project. Treat the base render and auxiliary passes as immutable spatial
 geometry: preserve the exact camera, site boundary, road and sidewalk centerlines and widths,
@@ -27,11 +27,21 @@ gate/access positions, landscape-zone boundaries, footprint, massing, roof silho
 count, facade rhythm, glazing and every authored opening. Never remove, reroute, widen, narrow or
 invent roads, gates, yards, parking, buildings, doors, docks or landscape zones.
 
-Make the focus factory refined but buildable and restrained: realistic low-slope profiled-metal
-industrial roofs, gutters and downpipes; disciplined cladding modules; a durable plinth; limited
-accent bays; shaded office glazing and a practical entrance canopy. Avoid flat-box roof imagery,
-luxury-resort styling, parametric fantasy forms, excessive glass, arbitrary curves and decorative
+Make the focus factory refined but buildable and restrained: realistic symmetric low-slope
+profiled-metal industrial roofs fitted inside the approved LOD100 envelope, gutters and downpipes;
+disciplined cladding modules; a durable plinth; limited accent bays; shaded office glazing and a
+practical entrance canopy. Preserve each approved continuous roof assembly as one uninterrupted
+longitudinal roof; never subdivide it into repeated transverse roofs at source-element seams.
+Avoid flat-box roof imagery, luxury-resort styling, parametric fantasy forms, excessive glass,
+arbitrary curves and decorative
 features without construction logic. Use a coherent material palette across every view.
+
+COLOR-LOCK RULE: use only the exact approved Design DNA palette. Every factory roof must keep the
+same approved light-neutral metal finish in every view. Accent elements must use only the approved
+accent color. Do not introduce red, orange, purple, cyan, electric blue or a dark/black roof unless
+that exact color is explicitly present in the approved palette. In particular, red pixels in the
+semantic-ID image mean "focus factory" only: they are not a material or facade color and no trace
+of semantic red may survive in the photorealistic output.
 
 REFERENCE-USAGE RULE: any attached reference is a non-binding realism sample. Borrow only its
 photographic credibility, material response, construction-detail density, plausible finish and
@@ -44,17 +54,31 @@ panel joints, flashings and restrained signs of operation. Keep the project clea
 bid-presentation ready rather than artificially perfect or theatrically weathered. Entourage must
 be sparse, correctly scaled and operationally plausible for an industrial site.
 
+PHOTOREALISM RULE: the result must read as a professional full-frame architectural photograph,
+not a clean 3D illustration. Use physically plausible global illumination, contact shadows,
+light-neutral metal micro-roughness, glazing reflections, atmospheric perspective and restrained
+sensor-like detail. Asphalt and concrete require fine aggregate variation, realistic joints,
+drainage edges, curbs and very subtle operational wear without changing any authored road shape.
+Planting must have non-repeating species/height variation, believable density, ground contact and
+shadows; vehicles and people must remain correctly scaled. Keep the exact same sun direction,
+clear-morning weather, white balance, exposure family, material response and color grade across
+the entire six-view set. Avoid plastic vegetation, tiled/repeated trees, perfectly uniform paving,
+over-smoothed surfaces, HDR halos, excessive sharpening, miniature/tilt-shift appearance and
+generic CGI cleanliness.
+
 Convert authored landscape-zone geometry into continuous, climate-appropriate Vietnamese planting
 without changing its footprint. Keep traffic and fire-access routes fully legible and unobstructed.
 CONTEXT-BUILDING RULE: render a context building only where its geometry exists in the base render
-and its pixels are explicitly marked as context in the semantic-ID pass. If the approved context
-count is zero or no context pixels are visible, generate zero context buildings and leave the
-surrounding background empty. Never extrapolate, mirror, clone or fill empty background with blocks.
-For approved context geometry, use quiet pale translucent massing: preserve exact size and position,
-add no facade design, and keep attention on focus buildings.
+and its pixels are explicitly marked as context in the semantic-ID pass. Never extrapolate, mirror,
+clone or fill unmarked background with blocks. For approved context geometry, use quiet pale
+translucent massing: preserve exact size and position, add no facade design, and keep attention on
+focus buildings. Context-landscape pixels may become soft distant tree belts, but must remain
+visually secondary and may not spill into the protected project site.
 Add sparse entourage only where it cannot hide protected architecture or circulation.
 Use physically plausible daylight and materials, premium bid-presentation quality, no text, no
-logos, no aerial labels and no invented surrounding cityscape."""
+logos or aerial labels. Semantic-pass annotation colors must never leak into the final image;
+cyan, magenta or electric-blue edge fringes are prohibited unless explicitly present in the
+approved material palette."""
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,5 +1,50 @@
 {
   "$defs": {
+    "BoundingBox": {
+      "additionalProperties": false,
+      "properties": {
+        "maximum": {
+          "maxItems": 3,
+          "minItems": 3,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Maximum",
+          "type": "array"
+        },
+        "minimum": {
+          "maxItems": 3,
+          "minItems": 3,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Minimum",
+          "type": "array"
+        }
+      },
+      "required": [
+        "minimum",
+        "maximum"
+      ],
+      "title": "BoundingBox",
+      "type": "object"
+    },
     "BuildingDesign": {
       "additionalProperties": false,
       "properties": {
@@ -340,6 +385,39 @@
       "title": "PresentationStrategy",
       "type": "object"
     },
+    "RoofAssembly": {
+      "additionalProperties": false,
+      "description": "One continuous roof spanning one or more aligned LOD100 source blocks.",
+      "properties": {
+        "assembly_id": {
+          "minLength": 1,
+          "title": "Assembly Id",
+          "type": "string"
+        },
+        "bounding_box": {
+          "$ref": "#/$defs/BoundingBox"
+        },
+        "building_ids": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Building Ids",
+          "type": "array"
+        },
+        "roof": {
+          "$ref": "#/$defs/RoofDesign"
+        }
+      },
+      "required": [
+        "assembly_id",
+        "building_ids",
+        "bounding_box",
+        "roof"
+      ],
+      "title": "RoofAssembly",
+      "type": "object"
+    },
     "RoofDesign": {
       "additionalProperties": false,
       "properties": {
@@ -405,6 +483,24 @@
           "default": true,
           "title": "Preserve Transport Geometry",
           "type": "boolean"
+        },
+        "surrounding_context_count": {
+          "default": 0,
+          "maximum": 12,
+          "minimum": 0,
+          "title": "Surrounding Context Count",
+          "type": "integer"
+        },
+        "surrounding_context_mode": {
+          "default": "authored_only",
+          "pattern": "^(authored_only|procedural_perimeter)$",
+          "title": "Surrounding Context Mode",
+          "type": "string"
+        },
+        "surrounding_landscape_buffer": {
+          "default": false,
+          "title": "Surrounding Landscape Buffer",
+          "type": "boolean"
         }
       },
       "title": "SiteDesign",
@@ -451,6 +547,14 @@
       "minLength": 1,
       "title": "Project Id",
       "type": "string"
+    },
+    "roof_assemblies": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/RoofAssembly"
+      },
+      "title": "Roof Assemblies",
+      "type": "array"
     },
     "schema_version": {
       "default": "1.0.0",

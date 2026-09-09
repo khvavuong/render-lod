@@ -12,7 +12,8 @@ SHA, project hay visual reference cụ thể:
 - IfcOpenShell canonicalizer tạo canonical scene và NPZ mesh buffers;
 - semantic classification baseline cho shed, office, yard và utility;
 - immutable Design DNA revision cùng industrial grammar có tham số;
-- một Blender scene dùng chung, bốn camera cố định;
+- một Blender scene dùng chung, sáu camera thiết kế để đọc tổng thể, sân logistics,
+  hai mặt bên và phía sau;
 - RGB, clay, depth PNG/EXR, normal EXR, instance ID, semantic và edge passes;
 - Gemini Flash refinement có `store=false`, validation ảnh và generation manifest;
 - RVT 2026 envelope inspector, SHA-256 version pinning và preview extraction;
@@ -70,6 +71,15 @@ rỗng, hệ thống an toàn coi mọi building là focus thay vì tự đoán 
 Các đối tượng IFC có tên tiếng Việt như `đường`, `vỉa hè`, `cây xanh`, `cổng chính` được
 phân loại trước khi render và truyền sang image generator bằng semantic-ID pass.
 
+Mái dốc được fit **bên trong** envelope LOD100: ridge không vượt cao độ cực đại của khối.
+Với `roof_grouping_mode=continuous_rows`, các proxy đồng hàng và cách nhau trong ngưỡng
+`roof_group_gap_tolerance_m` được compile thành một `RoofAssembly`; renderer tạo một mái dọc
+liên tục cho toàn dãy thay vì một mái riêng trên từng proxy.
+`site_design.surrounding_context_mode=procedural_perimeter` cho phép tạo lớp bối cảnh mềm
+ngoài site khi model không cung cấp surrounding buildings. Các khối này có semantic riêng,
+chỉ hiển thị như massing trong suốt và không nhận facade grammar. Có thể đặt
+`authored_only` để cấm hoàn toàn bối cảnh suy diễn.
+
 ```bash
 make plan-design MODEL=/path/to/project.rvt BRIEF=/path/to/project-brief.json
 make render MODEL=/path/to/project.rvt BRIEF=/path/to/project-brief.json
@@ -90,11 +100,17 @@ make refine-view \
 make refine-viewset \
   MODEL=/path/to/project.rvt \
   BRIEF=/path/to/project-brief.json \
+  PROFILE=marketing_hero \
   REFERENCES="/path/to/reference-a.jpg /path/to/reference-b.png"
 make validate-viewset MODEL=/path/to/project.rvt BRIEF=/path/to/project-brief.json
 make evaluate-consistency MODEL=/path/to/project.rvt BRIEF=/path/to/project-brief.json
 make compose-board MODEL=/path/to/project.rvt BRIEF=/path/to/project-brief.json
 ```
+
+`PROFILE=marketing_hero` sinh `view-03` trước làm style anchor cho năm camera còn lại. Conditioning
+semantic được chuyển sang grayscale trung tính trước khi gửi provider để màu annotation không rò
+thành màu facade. `preview_fast` vẫn giữ chế độ từng view độc lập để thử nhanh, không dùng làm bộ
+ảnh duyệt cuối.
 
 Artifacts được content-address theo SHA của RVT:
 

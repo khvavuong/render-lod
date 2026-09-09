@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import base64
+import io
 import mimetypes
 from pathlib import Path
 from typing import Any
 
 import httpx
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from v365_archviz.config import Settings
 from v365_archviz.errors import ConfigurationError, ProviderError
@@ -39,6 +40,33 @@ def _image_block(path: Path) -> dict[str, str]:
         "type": "image",
         "mime_type": media_type,
         "data": base64.b64encode(path.read_bytes()).decode("ascii"),
+    }
+
+
+def _generated_image_block(image: GeneratedImage) -> dict[str, str]:
+    return {
+        "type": "image",
+        "mime_type": image.media_type,
+        "data": base64.b64encode(image.content).decode("ascii"),
+    }
+
+
+def _neutral_semantic_block(path: Path) -> dict[str, str]:
+    """Remove annotation hue while retaining every categorical boundary."""
+
+    if not path.is_file():
+        raise ProviderError(f"conditioning image does not exist: {path}")
+    try:
+        with Image.open(path) as source:
+            neutral = ImageOps.grayscale(source).convert("RGB")
+            buffer = io.BytesIO()
+            neutral.save(buffer, format="PNG")
+    except (UnidentifiedImageError, OSError) as exc:
+        raise ProviderError(f"semantic artifact is not a readable image: {path}") from exc
+    return {
+        "type": "image",
+        "mime_type": "image/png",
+        "data": base64.b64encode(buffer.getvalue()).decode("ascii"),
     }
 
 
@@ -96,7 +124,20 @@ class GeminiImageRenderer:
     def __exit__(self, *_: object) -> None:
         self.close()
 
-    def generate(self, request: ViewConditioningInput) -> GeneratedImage:
+    def _generate(
+        self,
+        request: ViewConditioningInput,
+        style_anchor: GeneratedImage | None = None,
+    ) -> GeneratedImage:
+        anchor_instruction = (
+            " The final attached image is a generated STYLE ANCHOR from another approved "
+            "camera of this exact project. Match only its facade language, material identity, "
+            "palette, daylight, atmosphere, vegetation treatment and photographic finish. "
+            "Do not copy its camera, composition, object positions or geometry; the current "
+            "base RGB and passes remain the sole spatial authority."
+            if style_anchor is not None
+            else ""
+        )
         labeled_prompt = (
             f"{request.prompt}\n\n"
             "The attached images are ordered as: base RGB, depth, instance ID, semantic ID, "
@@ -106,25 +147,32 @@ class GeminiImageRenderer:
             "non-binding realism samples only: use their photographic credibility, material "
             "response and construction-detail density. Do not copy their palette, facade motif, "
             "roof form, massing, site or landscape layout, surrounding land use, camera, logos, "
-            "labels, text, or project-specific objects. Semantic-ID legend: red = focus factory "
-            "shed, "
-            "blue = focus office, bright green = authored landscape zone, charcoal = road, "
-            "warm grey = sidewalk, cyan = authored roof, muted grey = context building. "
+            "labels, text, or project-specific objects. The semantic-ID image has intentionally "
+            "been converted to neutral grayscale: its tone boundaries are categorical masks, not "
+            "materials, lighting or desired output colors. Use it only together with the instance, "
+            "depth and edge passes to respect boundaries. No annotation tone or source semantic "
+            "hue may determine a facade color in the final image. "
             "Respect every semantic boundary exactly. A context building may be drawn only over "
             "muted-grey context pixels; grey background is empty space, not permission to invent "
-            "massing."
+            f"massing.{anchor_instruction}"
         )
-        paths = (
-            request.base_rgb,
-            request.depth,
-            request.instance_id,
-            request.semantic,
-            request.edges,
-            *request.reference_images,
-        )
+        input_images = [
+            _image_block(request.base_rgb),
+            _image_block(request.depth),
+            _image_block(request.instance_id),
+            _neutral_semantic_block(request.semantic),
+            _image_block(request.edges),
+            *map(_image_block, request.reference_images),
+        ]
+        input_blocks: list[dict[str, str]] = [
+            {"type": "text", "text": labeled_prompt},
+            *input_images,
+        ]
+        if style_anchor is not None:
+            input_blocks.append(_generated_image_block(style_anchor))
         payload = {
             "model": self._settings.gemini_image_model,
-            "input": [{"type": "text", "text": labeled_prompt}, *map(_image_block, paths)],
+            "input": input_blocks,
             "store": self._settings.gemini_store_interactions,
             "generation_config": {
                 "image_config": {
@@ -158,10 +206,29 @@ class GeminiImageRenderer:
             provider_request_id=request_id if isinstance(request_id, str) else None,
         )
 
-    def generate_view_set(self, request: ViewSetGenerationInput) -> GeneratedViewSet:
-        """Execute the ordered unit sequentially behind the provider-neutral view-set port."""
+    def generate(self, request: ViewConditioningInput) -> GeneratedImage:
+        return self._generate(request)
 
+    def generate_view_set(self, request: ViewSetGenerationInput) -> GeneratedViewSet:
+        """Generate a style-locked set for quality profiles and retain deterministic ordering."""
+
+        if request.profile not in {"base_pro", "marketing_hero"} or len(request.views) < 2:
+            views = tuple(
+                GeneratedView(view_id=view.view_id, image=self.generate(view))
+                for view in request.views
+            )
+            return GeneratedViewSet(request_id=request.request_id, views=views)
+
+        anchor_request = next(
+            (view for view in request.views if view.view_id == "view-03"), request.views[0]
+        )
+        anchor = self.generate(anchor_request)
+        generated_by_id = {anchor_request.view_id: anchor}
+        for view in request.views:
+            if view.view_id != anchor_request.view_id:
+                generated_by_id[view.view_id] = self._generate(view, style_anchor=anchor)
         views = tuple(
-            GeneratedView(view_id=view.view_id, image=self.generate(view)) for view in request.views
+            GeneratedView(view_id=view.view_id, image=generated_by_id[view.view_id])
+            for view in request.views
         )
         return GeneratedViewSet(request_id=request.request_id, views=views)

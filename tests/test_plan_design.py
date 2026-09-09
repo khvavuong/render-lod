@@ -1,9 +1,9 @@
 import json
 from pathlib import Path
 
-from v365_archviz.application.plan_design import PlanDesign
+from v365_archviz.application.plan_design import PlanDesign, _roof_groups
 from v365_archviz.domain.design import BuildingTreatment, DesignDNA
-from v365_archviz.domain.scene import CanonicalScene
+from v365_archviz.domain.scene import BoundingBox, CanonicalScene
 from v365_archviz.providers.ifc import _box_surfaces
 
 
@@ -54,10 +54,11 @@ def test_plans_reproducible_design_dna(tmp_path: Path, valid_scene: CanonicalSce
     assert first == second
     assert first.design_revision.startswith("R01-")
     assert len(first.buildings) == 2
+    assert len(first.roof_assemblies) == 1
     shed = next(item for item in first.buildings if item.building_id == "shed-1")
     office = next(item for item in first.buildings if item.building_id == "office-1")
-    assert shed.facades[0].loading_docks
-    assert office.facades[0].office_entrance is not None
+    assert sum(bool(facade.loading_docks) for facade in shed.facades) == 1
+    assert sum(facade.office_entrance is not None for facade in office.facades) == 1
     assert office.facades[0].articulation.office_glazing_ratio == 0.72
     assert first.material_palette.primary_hex == "#E7E5DF"
     design_path = tmp_path / "designs" / first.design_revision / "design_dna.json"
@@ -70,6 +71,29 @@ def test_plans_reproducible_design_dna(tmp_path: Path, valid_scene: CanonicalSce
     assert changed.design_revision != first.design_revision
     assert design_path.is_file()
     assert (tmp_path / "designs" / changed.design_revision / "design_dna.json").is_file()
+
+
+def test_groups_aligned_lod_blocks_into_two_continuous_roofs(
+    valid_scene: CanonicalScene,
+) -> None:
+    source = valid_scene.elements[0]
+    boxes = (
+        BoundingBox(minimum=(0, 0, 0), maximum=(40, 60, 11)),
+        BoundingBox(minimum=(40, 0, 0), maximum=(80, 60, 11)),
+        BoundingBox(minimum=(0, 100, 0), maximum=(40, 160, 11)),
+        BoundingBox(minimum=(47, 100, 0), maximum=(87, 160, 11)),
+    )
+    sheds = [
+        source.model_copy(
+            update={"scene_element_id": f"shed-{index}", "bounding_box": bounding_box}
+        )
+        for index, bounding_box in enumerate(boxes, start=1)
+    ]
+
+    groups = _roof_groups(sheds, "continuous_rows", gap_tolerance=10.0)
+
+    assert len(groups) == 2
+    assert sorted(len(group) for group in groups) == [2, 2]
 
 
 def test_explicit_focus_scope_turns_other_buildings_into_context(
@@ -121,3 +145,45 @@ def test_explicit_focus_scope_turns_other_buildings_into_context(
     assert len(shed.facades) == 4
     assert office.treatment is BuildingTreatment.CONTEXT
     assert office.facades == ()
+
+
+def test_places_operational_openings_on_one_courtyard_facade(
+    tmp_path: Path, valid_scene: CanonicalScene
+) -> None:
+    surfaces = tuple(
+        surface
+        for element in valid_scene.elements
+        for surface in _box_surfaces(
+            element.scene_element_id,
+            element.bounding_box,
+            element.semantic_role,
+        )
+    )
+    scene = valid_scene.model_copy(update={"surfaces": surfaces})
+    scene_path = tmp_path / "canonical_scene.json"
+    scene_path.write_text(scene.model_dump_json(), encoding="utf-8")
+    brief_path = tmp_path / "brief.json"
+    brief_path.write_text(
+        """{
+          "project_id": "test-project",
+          "design_language": {
+            "style": "restrained industrial", "primary_material": "metal",
+            "secondary_material": "metal", "office_material": "glass"
+          },
+          "environment": {
+            "time": "09:30", "weather": "clear", "sun_azimuth_deg": 135,
+            "sun_elevation_deg": 45, "white_balance_k": 5600
+          },
+          "panel_module_m": 1.2, "loading_docks_per_main_facade": 2,
+          "add_office_entrances": true, "roof_type": "gable",
+          "grammar_version": "v1", "asset_library_version": "v1"
+        }""",
+        encoding="utf-8",
+    )
+
+    design = PlanDesign().execute(scene_path, brief_path)
+    shed = next(item for item in design.buildings if item.building_id == "shed-1")
+    office = next(item for item in design.buildings if item.building_id == "office-1")
+
+    assert sum(bool(facade.loading_docks) for facade in shed.facades) == 1
+    assert sum(facade.office_entrance is not None for facade in office.facades) == 1

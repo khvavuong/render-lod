@@ -28,8 +28,9 @@ bố cục đường/cây xanh, bối cảnh sử dụng đất hay vật thể 
   che khuất kiến trúc hoặc lối xe chữa cháy.
 - Cây xanh chỉ phát triển trong vùng landscape đã được author; đường, cổng và luồng xe không
   được xê dịch hoặc bị cây/entourage cản trở.
-- Công trình context chỉ tồn tại khi được gán ID rõ trong brief; giữ đúng khối và vị trí, thể hiện
-  dưới dạng massing nhẹ/trong suốt, không nhận facade grammar của công trình focus.
+- Context lấy từ model phải được gán ID rõ trong brief. Khi model không có surrounding buildings,
+  brief có thể bật `procedural_perimeter`; lớp suy diễn này phải nằm ngoài site, có semantic riêng,
+  thể hiện dưới dạng massing nhẹ/trong suốt và không nhận facade grammar của công trình focus.
 
 ## Cơ sở tham khảo thiết kế
 

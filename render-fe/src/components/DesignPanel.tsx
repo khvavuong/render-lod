@@ -70,7 +70,15 @@ export function DesignPanel({ submitting, onSubmit }: DesignPanelProps) {
       return;
     }
     setModelError(undefined);
-    onSubmit({ ...values, modelFile });
+    onSubmit({
+      ...DEFAULT_FORM_VALUES,
+      ...values,
+      palette: {
+        ...DEFAULT_FORM_VALUES.palette,
+        ...values.palette,
+      },
+      modelFile,
+    });
   };
 
   return (
@@ -189,6 +197,7 @@ export function DesignPanel({ submitting, onSubmit }: DesignPanelProps) {
             items={[
               {
                 key: "presentation",
+                forceRender: true,
                 label: (
                   <SectionTitle
                     icon={<BulbOutlined />}

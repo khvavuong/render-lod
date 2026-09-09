@@ -59,6 +59,12 @@ def test_design_revision_and_view_set_are_idempotent(
     valid_scene: CanonicalScene,  # type: ignore[no-untyped-def]
 ) -> None:
     monkeypatch.setenv("V365_ARTIFACT_DIR", str(tmp_path))
+    monkeypatch.setenv("V365_ENABLE_LOCAL_WORKER", "1")
+    dispatched: list[str] = []
+    monkeypatch.setattr(
+        "v365_archviz.api._generation_dispatcher.submit",
+        lambda job_id: dispatched.append(job_id) or True,
+    )
     model_revision = "model-revision"
     scene_path = tmp_path / "scenes" / model_revision / "canonical_scene.json"
     scene_path.parent.mkdir(parents=True)
@@ -103,6 +109,7 @@ def test_design_revision_and_view_set_are_idempotent(
     assert first.json()["state"] == "rendering_passes"
     assert second.status_code == 202
     assert second.json()["created"] is False
+    assert dispatched == [first.json()["job_id"], first.json()["job_id"]]
     view_set_id = first.json()["view_set_id"]
     status_response = client.get(f"/v1/view-sets/{view_set_id}")
     assert status_response.status_code == 200

@@ -19,7 +19,7 @@ describe('V365 Render Studio', () => {
     expect(screen.getByText('Bảng màu vật liệu')).toBeInTheDocument();
     expect(screen.queryByLabelText('Model revision')).not.toBeInTheDocument();
     expect(screen.queryByText('Độ dốc mái')).not.toBeInTheDocument();
-    expect(screen.getByPlaceholderText(/sảnh đón chuyên nghiệp/)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/Mô tả ngắn/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Tạo phương án/ })).toBeInTheDocument();
   });
 });

@@ -67,4 +67,90 @@ describe('HttpStudioGateway', () => {
       state: 'rendering_passes',
     });
   });
+
+  it('formats FastAPI validation errors for the alert', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        jsonResponse(
+          {
+            detail: [
+              {
+                type: 'greater_than_equal',
+                loc: ['body', 'brief', 'facade_articulation', 'office_glazing_ratio'],
+                msg: 'Input should be greater than or equal to 0.25',
+              },
+            ],
+          },
+          422,
+        ),
+      ),
+    );
+
+    await expect(
+      new HttpStudioGateway().createDesign({
+        ...DEFAULT_FORM_VALUES,
+        projectId: 'factory-01',
+        modelFile: new File(['rvt-content'], 'factory.rvt'),
+      }),
+    ).rejects.toThrow(
+      'Dữ liệu chưa hợp lệ: brief.facade_articulation.office_glazing_ratio: Input should be greater than or equal to 0.25',
+    );
+  });
+
+  it('explains how to recover when the API is unavailable', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+
+    await expect(
+      new HttpStudioGateway().createDesign({
+        ...DEFAULT_FORM_VALUES,
+        projectId: 'factory-01',
+        modelFile: new File(['rvt-content'], 'factory.rvt'),
+      }),
+    ).rejects.toThrow('make api');
+  });
+
+  it('loads outputs immediately for an idempotent completed job', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ model_revision: 'model-revision-01', ready: true }, 201),
+      )
+      .mockResolvedValueOnce(jsonResponse({ design_revision: 'R01-design' }, 201))
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            job_id: 'job-01',
+            trace_id: 'trace-01',
+            view_set_id: 'viewset-01',
+            design_revision: 'R01-design',
+            state: 'completed',
+          },
+          202,
+        ),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          outputs: [
+            {
+              id: 'image-view-01',
+              kind: 'image',
+              title: 'VIEW-01',
+              url: '/v1/view-sets/viewset-01/outputs/image-view-01',
+            },
+          ],
+        }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await new HttpStudioGateway().createDesign({
+      ...DEFAULT_FORM_VALUES,
+      projectId: 'factory-01',
+      modelFile: new File(['rvt-content'], 'factory.rvt'),
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock.mock.calls[3][0]).toBe('/v1/view-sets/viewset-01/outputs');
+    expect(result.outputs).toHaveLength(1);
+  });
 });

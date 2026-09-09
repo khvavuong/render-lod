@@ -249,6 +249,11 @@ make fe-dev
 Vite chạy tại `http://localhost:5173` và proxy `/v1` sang FastAPI tại cổng 8000. Kiểm tra
 frontend bằng:
 
+Ở chế độ development, FastAPI tự đưa mỗi view set vào local worker đơn luồng. Worker chạy
+conditioning render, Gemini, QA, board/branding và Veo Lite ở nền; frontend theo dõi state qua
+polling. Có thể tắt video bằng `V365_GENERATE_VIDEO=0` hoặc tắt worker bằng
+`V365_ENABLE_LOCAL_WORKER=0` khi chỉ cần chạy control plane.
+
 ```bash
 make fe-test
 make fe-e2e-install

@@ -115,6 +115,7 @@ export type WorkflowState =
   | 'validating'
   | 'human_review'
   | 'composing_board'
+  | 'generating_video'
   | 'completed'
   | 'repairing'
   | 'failed';
@@ -137,6 +138,7 @@ export interface StudioJob {
   designRevision: string;
   state: WorkflowState;
   outputs: OutputArtifact[];
+  errorMessage?: string;
 }
 
 export interface StudioGateway {

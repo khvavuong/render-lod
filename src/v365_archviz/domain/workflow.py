@@ -105,5 +105,6 @@ class WorkflowState(str, Enum):
     REPAIRING = "repairing"
     HUMAN_REVIEW = "human_review"
     COMPOSING_BOARD = "composing_board"
+    GENERATING_VIDEO = "generating_video"
     COMPLETED = "completed"
     FAILED = "failed"

@@ -13,6 +13,11 @@ from v365_archviz.domain.scene import (
 from v365_archviz.providers.ifc import IDENTITY_4X4
 
 
+@pytest.fixture(autouse=True)
+def disable_local_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("V365_ENABLE_LOCAL_WORKER", "0")
+
+
 @pytest.fixture
 def valid_scene() -> CanonicalScene:
     source = SourceModelRef(

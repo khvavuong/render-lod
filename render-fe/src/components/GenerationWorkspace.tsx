@@ -9,7 +9,6 @@ import {
   VideoCameraOutlined,
 } from "@ant-design/icons";
 import {
-  Alert,
   Button,
   Empty,
   Image,
@@ -27,7 +26,6 @@ import type { OutputArtifact, StudioJob, WorkflowState } from "../types/studio";
 
 interface GenerationWorkspaceProps {
   job: StudioJob | null;
-  error: string | null;
   onRefresh: () => void;
 }
 
@@ -48,6 +46,7 @@ const STATE_META: Record<WorkflowState, { label: string; percent: number }> = {
   human_review: { label: "Chờ duyệt thiết kế", percent: 84 },
   repairing: { label: "Đang hiệu chỉnh", percent: 67 },
   composing_board: { label: "Đang hoàn thiện đầu ra", percent: 92 },
+  generating_video: { label: "Đang tạo video Veo", percent: 96 },
   completed: { label: "Đã hoàn tất", percent: 100 },
   failed: { label: "Không thành công", percent: 100 },
 };
@@ -133,7 +132,6 @@ function EmptyCanvas() {
 
 export function GenerationWorkspace({
   job,
-  error,
   onRefresh,
 }: GenerationWorkspaceProps) {
   const [filter, setFilter] = useState<"all" | "image" | "video">("all");
@@ -184,15 +182,6 @@ export function GenerationWorkspace({
           )}
         </Space>
       </div>
-
-      {error && (
-        <Alert
-          showIcon
-          type="error"
-          message="Không thể tiếp tục"
-          description={error}
-        />
-      )}
 
       {job && (
         <section className="job-overview">

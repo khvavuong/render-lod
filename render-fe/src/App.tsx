@@ -1,6 +1,6 @@
-import { ConfigProvider } from "antd";
+import { App as AntdApp, ConfigProvider, notification } from "antd";
 import viVN from "antd/locale/vi_VN";
-import type { CSSProperties } from "react";
+import { useEffect, type CSSProperties } from "react";
 
 import { DesignPanel } from "./components/DesignPanel";
 import { GenerationWorkspace } from "./components/GenerationWorkspace";
@@ -20,11 +20,27 @@ const layoutStyle = {
   "--header-height": `${HEADER_HEIGHT}px`,
 } as CSSProperties;
 
-export default function App({ gateway = studioApi }: AppProps) {
+function StudioShell({ gateway }: Required<AppProps>) {
   const { job, isSubmitting, error, submit, refresh } = useStudioJob(gateway);
+  const [notificationApi, notificationContext] = notification.useNotification();
+
+  useEffect(() => {
+    if (!error) {
+      notificationApi.destroy("studio-error");
+      return;
+    }
+    notificationApi.error({
+      key: "studio-error",
+      message: "Không thể tạo phương án diễn họa",
+      description: error,
+      placement: "topRight",
+      duration: 8,
+    });
+  }, [error, notificationApi]);
 
   return (
-    <ConfigProvider locale={viVN} theme={appTheme}>
+    <>
+      {notificationContext}
       <div className="app-shell v365-render-studio" style={layoutStyle}>
         <header className="app-header">
           <div className="brand-lockup">
@@ -36,13 +52,19 @@ export default function App({ gateway = studioApi }: AppProps) {
             submitting={isSubmitting}
             onSubmit={(values) => void submit(values)}
           />
-          <GenerationWorkspace
-            job={job}
-            error={error}
-            onRefresh={() => void refresh()}
-          />
+          <GenerationWorkspace job={job} onRefresh={() => void refresh()} />
         </div>
       </div>
+    </>
+  );
+}
+
+export default function App({ gateway = studioApi }: AppProps) {
+  return (
+    <ConfigProvider locale={viVN} theme={appTheme}>
+      <AntdApp>
+        <StudioShell gateway={gateway} />
+      </AntdApp>
     </ConfigProvider>
   );
 }

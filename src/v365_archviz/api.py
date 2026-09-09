@@ -25,6 +25,7 @@ from v365_archviz.domain.design import DesignBrief, DesignDNA
 from v365_archviz.domain.scene import CanonicalScene
 from v365_archviz.domain.workflow import GenerationProfile, WorkflowState
 from v365_archviz.errors import InvalidModelError
+from v365_archviz.providers.local_dispatcher import LocalGenerationDispatcher
 from v365_archviz.providers.local_jobs import LocalJobRepository
 from v365_archviz.providers.local_rvt import LocalRvtInspector
 
@@ -43,6 +44,8 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type", "X-Filename"],
 )
+
+_generation_dispatcher = LocalGenerationDispatcher()
 
 SAFE_IDENTIFIER_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
 _SAFE_IDENTIFIER = re.compile(SAFE_IDENTIFIER_PATTERN)
@@ -111,6 +114,8 @@ class ViewSetJobResponse(BaseModel):
     design_revision: str
     state: WorkflowState
     created: bool
+    error_code: str | None = None
+    error_message: str | None = None
 
 
 class ViewActionRequest(BaseModel):
@@ -331,6 +336,11 @@ def create_view_set(design_revision: str, request: CreateViewSetRequest) -> View
             artifact_refs=(str(design_path), str(design_path.parent / "view_set.json")),
         )
         _repository(settings).save(job)
+    if settings.local_worker_enabled and job.state not in {
+        WorkflowState.COMPLETED,
+        WorkflowState.FAILED,
+    }:
+        _generation_dispatcher.submit(job.job_id)
     return ViewSetJobResponse(
         job_id=job.job_id,
         trace_id=job.trace_id,
@@ -338,6 +348,8 @@ def create_view_set(design_revision: str, request: CreateViewSetRequest) -> View
         design_revision=job.design_revision,
         state=job.state,
         created=created.created,
+        error_code=job.error_code,
+        error_message=job.error_message,
     )
 
 
@@ -359,6 +371,8 @@ def get_view_set(view_set_id: str) -> ViewSetJobResponse:
         design_revision=job.design_revision,
         state=job.state,
         created=False,
+        error_code=job.error_code,
+        error_message=job.error_message,
     )
 
 
@@ -414,6 +428,8 @@ def _transition_view_set(view_set_id: str, target: WorkflowState) -> ViewSetJobR
         design_revision=updated.design_revision,
         state=updated.state,
         created=False,
+        error_code=updated.error_code,
+        error_message=updated.error_message,
     )
 
 

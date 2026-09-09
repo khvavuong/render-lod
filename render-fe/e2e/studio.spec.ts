@@ -79,7 +79,7 @@ test('configures a design and follows the generation output', async ({ page }) =
   await page.getByLabel('Mã dự án').fill('factory-e2e');
   await page.getByText('Nổi bật', { exact: true }).click();
   await page
-    .getByPlaceholder(/sảnh đón chuyên nghiệp/)
+    .getByPlaceholder(/Mô tả ngắn/)
     .fill('Ưu tiên mặt đứng tinh tế và ánh sáng tự nhiên.');
   await page.getByRole('button', { name: /Tạo phương án diễn họa/ }).click();
 
@@ -95,8 +95,54 @@ test('configures a design and follows the generation output', async ({ page }) =
         decor_level: 'expressive',
         creative_prompt: 'Ưu tiên mặt đứng tinh tế và ánh sáng tự nhiên.',
       },
+      environment: {
+        time: '09:30',
+      },
       roof_slope_deg: 7,
       add_office_entrances: true,
     },
   });
+});
+
+test('shows FastAPI validation failures as a notification', async ({ page }) => {
+  await page.route('**/v1/models', (route) =>
+    route.fulfill({
+      status: 201,
+      json: {
+        model_revision: 'model-revision-e2e',
+        file_name: 'factory.rvt',
+        size_bytes: 11,
+        ready: true,
+      },
+    }),
+  );
+  await page.route('**/v1/projects/*/design-revisions', (route) =>
+    route.fulfill({
+      status: 422,
+      json: {
+        detail: [
+          {
+            loc: ['body', 'brief', 'environment', 'time'],
+            msg: 'Field required',
+            type: 'missing',
+          },
+        ],
+      },
+    }),
+  );
+
+  await page.goto('/');
+  await page.locator('input[type="file"]').setInputFiles({
+    name: 'factory.rvt',
+    mimeType: 'application/octet-stream',
+    buffer: Buffer.from('rvt-content'),
+  });
+  await page.getByLabel('Mã dự án').fill('factory-e2e');
+  await page.getByRole('button', { name: /Tạo phương án diễn họa/ }).click();
+
+  const notice = page.locator('.ant-notification-notice-error');
+  await expect(notice).toBeVisible();
+  await expect(notice).toContainText('Không thể tạo phương án diễn họa');
+  await expect(notice).toContainText('brief.environment.time: Field required');
+  await expect(notice).not.toContainText('[object Object]');
 });

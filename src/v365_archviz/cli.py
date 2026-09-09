@@ -8,14 +8,17 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+from v365_archviz.application.assemble_video import AssembleVideo
 from v365_archviz.application.build_canonical_scene import BuildCanonicalScene
 from v365_archviz.application.build_correspondence import BuildCorrespondenceIndex
 from v365_archviz.application.evaluate_consistency import EvaluateConsistency
 from v365_archviz.application.extract_ifc import ExtractIfc
+from v365_archviz.application.generate_video import GenerateVideoShots
 from v365_archviz.application.inspect_model import InspectModel
 from v365_archviz.application.plan_cameras import PlanStandardCameras
 from v365_archviz.application.plan_design import PlanDesign
 from v365_archviz.application.plan_repairs import PlanRepairs
+from v365_archviz.application.plan_video import PlanVideo
 from v365_archviz.application.refine_view import DEFAULT_PROMPT, RefineView
 from v365_archviz.application.refine_viewset import RefineViewSet
 from v365_archviz.application.validate_viewset import ValidateGeneratedViewSet
@@ -26,6 +29,7 @@ from v365_archviz.errors import V365Error
 from v365_archviz.providers.aps import ApsModelDerivativeClient
 from v365_archviz.providers.gemini import GeminiImageRenderer
 from v365_archviz.providers.local_rvt import LocalRvtInspector
+from v365_archviz.providers.veo import VeoVideoRenderer
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -127,6 +131,27 @@ def _parser() -> argparse.ArgumentParser:
         help="optional JSON object mapping view IDs to completed repair attempts",
     )
     repairs.add_argument("--output", type=Path)
+    video_plan = subcommands.add_parser(
+        "plan-video", help="create a cost-bounded Veo motion plan from an approved view set"
+    )
+    video_plan.add_argument("generated_root", type=Path)
+    video_plan.add_argument("--view-set", type=Path, required=True)
+    video_plan.add_argument("--output", type=Path, help="video artifact root")
+    video_generate = subcommands.add_parser(
+        "generate-video-shots", help="generate or resume image-to-video shots with Veo"
+    )
+    video_generate.add_argument("plan", type=Path)
+    video_generate.add_argument("--output", type=Path)
+    video_generate.add_argument(
+        "--view", action="append", default=[], help="generate only this view; repeat as needed"
+    )
+    video_assemble = subcommands.add_parser(
+        "assemble-video", help="normalize and merge all planned shots into a silent showreel"
+    )
+    video_assemble.add_argument("plan", type=Path)
+    video_assemble.add_argument("--generated-root", type=Path)
+    video_assemble.add_argument("--output", type=Path)
+    video_assemble.add_argument("--transition", type=float, default=0.35)
     return parser
 
 
@@ -400,6 +425,76 @@ def main(argv: Sequence[str] | None = None) -> int:
                         "plan": str(repair_result.plan_path),
                         "request_count": len(repair_result.requests),
                         "exhausted_view_ids": repair_result.exhausted_view_ids,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return 0
+        if args.command == "plan-video":
+            settings = Settings.from_env()
+            video_plan_artifacts = PlanVideo().execute(
+                args.generated_root,
+                args.view_set,
+                args.output or settings.artifact_dir / "videos",
+                settings,
+            )
+            print(
+                json.dumps(
+                    {
+                        "plan_id": video_plan_artifacts.plan.plan_id,
+                        "plan": str(video_plan_artifacts.plan_path),
+                        "shot_count": len(video_plan_artifacts.plan.shots),
+                        "estimated_cost_usd": video_plan_artifacts.plan.estimated_cost_usd,
+                        "budget_usd": video_plan_artifacts.plan.budget_usd,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return 0
+        if args.command == "generate-video-shots":
+            settings = Settings.from_env()
+            output = args.output or args.plan.parent
+            with VeoVideoRenderer(settings) as renderer:
+                video_generation_artifacts = GenerateVideoShots().execute(
+                    renderer,
+                    args.plan,
+                    output,
+                    selected_view_ids=tuple(args.view),
+                    poll_interval_seconds=settings.veo_poll_interval_seconds,
+                    timeout_seconds=settings.veo_timeout_seconds,
+                )
+            print(
+                json.dumps(
+                    {
+                        "manifest": str(video_generation_artifacts.manifest_path),
+                        "completed_shot_ids": video_generation_artifacts.completed_shot_ids,
+                        "cached_shot_ids": video_generation_artifacts.cached_shot_ids,
+                        "estimated_new_spend_usd": (
+                            video_generation_artifacts.estimated_new_spend_usd
+                        ),
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return 0
+        if args.command == "assemble-video":
+            generated_root = args.generated_root or args.plan.parent
+            output = args.output or generated_root / "showreel.mp4"
+            assembled_artifacts = AssembleVideo().execute(
+                args.plan,
+                generated_root,
+                output,
+                transition_seconds=args.transition,
+            )
+            print(
+                json.dumps(
+                    {
+                        "video": str(assembled_artifacts.video_path),
+                        "qa_report": str(assembled_artifacts.report_path),
+                        "duration_seconds": assembled_artifacts.duration_seconds,
                     },
                     ensure_ascii=False,
                     indent=2,

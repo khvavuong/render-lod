@@ -10,6 +10,7 @@ from v365_archviz.artifacts import atomic_write
 from v365_archviz.domain.design import DesignBrief, DesignDNA
 from v365_archviz.domain.qa import ConsistencyReport, RepairRequest
 from v365_archviz.domain.scene import CanonicalScene
+from v365_archviz.domain.video import VideoPlan
 from v365_archviz.domain.workflow import ViewSet, ViewSetGenerationRequest
 
 
@@ -29,6 +30,7 @@ def main() -> None:
         "view_set_generation_request.schema.json": ViewSetGenerationRequest,
         "consistency_report.schema.json": ConsistencyReport,
         "repair_request.schema.json": RepairRequest,
+        "video_plan.schema.json": VideoPlan,
     }
     drifted: list[str] = []
     for file_name, model in models.items():

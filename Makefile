@@ -19,11 +19,17 @@ RENDER_DIR ?= $(ARTIFACT_DIR)/renders/$(REVISION)/$(DESIGN_REVISION)
 GENERATED_DIR ?= $(ARTIFACT_DIR)/generated/$(REVISION)/$(DESIGN_REVISION)
 VIEWS ?= view-01 view-02 view-03 view-04 view-05 view-06
 PROFILE ?= preview_fast
+VIDEO_PLAN ?= $(shell find "$(ARTIFACT_DIR)/videos/$(REVISION)/$(DESIGN_REVISION)" \
+	-mindepth 2 -maxdepth 2 -name video_plan.json -print 2>/dev/null | sort | tail -1)
+VIDEO_ROOT ?= $(dir $(VIDEO_PLAN))
+VIDEO_VIEWS ?=
+VIDEO_VIEW_ARGS = $(foreach video_view,$(VIDEO_VIEWS),--view "$(video_view)")
 REFERENCE_ARGS = $(foreach reference,$(REFERENCES),--reference-image "$(reference)")
 
 .PHONY: install test lint typecheck require-model require-brief require-design inspect extract-ifc \
 	canonicalize plan-design plan-cameras renderer-image render refine-view refine-viewset \
-	build-correspondence validate-viewset evaluate-consistency plan-repairs compose-board api
+	build-correspondence validate-viewset evaluate-consistency plan-repairs compose-board api \
+	plan-video generate-video-shots assemble-video
 
 install:
 	$(PYTHON) -m pip install -e ".[dev]"
@@ -116,6 +122,20 @@ plan-repairs: evaluate-consistency
 compose-board: require-model require-design
 	$(PYTHON) scripts/compose_viewset_board.py "$(GENERATED_DIR)" \
 		"$(GENERATED_DIR)/viewset_board.jpg"
+
+plan-video: require-model require-design
+	$(PYTHON) -m v365_archviz plan-video "$(GENERATED_DIR)" \
+		--view-set "$(VIEW_SET)" --output "$(ARTIFACT_DIR)/videos"
+
+generate-video-shots: require-model require-design
+	@test -n "$(VIDEO_PLAN)" || { echo "VIDEO_PLAN is required; run make plan-video first"; exit 2; }
+	$(PYTHON) -m v365_archviz generate-video-shots "$(VIDEO_PLAN)" \
+		--output "$(VIDEO_ROOT)" $(VIDEO_VIEW_ARGS)
+
+assemble-video: require-model require-design
+	@test -n "$(VIDEO_PLAN)" || { echo "VIDEO_PLAN is required; run make plan-video first"; exit 2; }
+	$(PYTHON) -m v365_archviz assemble-video "$(VIDEO_PLAN)" \
+		--generated-root "$(VIDEO_ROOT)" --output "$(VIDEO_ROOT)/showreel.mp4"
 
 api:
 	$(PYTHON) -m uvicorn v365_archviz.api:app --reload

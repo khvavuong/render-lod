@@ -112,6 +112,30 @@ semantic được chuyển sang grayscale trung tính trước khi gửi provide
 thành màu facade. `preview_fast` vẫn giữ chế độ từng view độc lập để thử nhanh, không dùng làm bộ
 ảnh duyệt cuối.
 
+## Video showreel bằng Veo 3.1 Lite
+
+Video pipeline dùng từng ảnh đã duyệt làm first frame, tạo sáu shot độc lập 720p/4 giây rồi
+ghép bằng FFmpeg. Prompt video chỉ điều khiển camera/chuyển động nhỏ và khóa hình học theo ảnh
+nguồn. Mỗi operation được lưu ngay sau khi submit để có thể resume; kết quả được cache theo nội
+dung ảnh, prompt và model. Mặc định ngân sách cứng là 1,20 USD cho sáu shot và mỗi request chỉ
+sinh một sample.
+
+```bash
+make plan-video MODEL=/path/to/project.rvt BRIEF=/path/to/project-brief.json
+
+# Pilot một shot trước (~0,20 USD ở mức giá cấu hình mặc định)
+make generate-video-shots MODEL=/path/to/project.rvt BRIEF=/path/to/project-brief.json \
+  VIDEO_VIEWS="view-06"
+
+# Sau khi duyệt pilot, chạy các shot còn lại và ghép video không âm thanh
+make generate-video-shots MODEL=/path/to/project.rvt BRIEF=/path/to/project-brief.json
+make assemble-video MODEL=/path/to/project.rvt BRIEF=/path/to/project-brief.json
+```
+
+Veo hiện sinh audio mặc định; pipeline chủ động bỏ audio ở bước assembly. File QA xác nhận video
+cuối không có audio, đúng 1280×720, 24 fps và chứa đủ các shot. Không chạy lại shot đã cache nếu
+ảnh nguồn và cấu hình không đổi.
+
 Artifacts được content-address theo SHA của RVT:
 
 ```text
@@ -145,6 +169,15 @@ Artifacts được content-address theo SHA của RVT:
     ├── viewset_board.jpg
     └── <view-id>/
         ├── refined.jpg
+        └── generation_manifest.json
+└── videos/<model-revision>/<design-revision>/<video-plan-id>/
+    ├── video_plan.json
+    ├── video_generation_manifest.json
+    ├── showreel.mp4
+    ├── showreel.qa.json
+    └── shot-XX/
+        ├── raw.mp4
+        ├── technical_qa.json
         └── generation_manifest.json
 ```
 

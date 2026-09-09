@@ -1,0 +1,140 @@
+{
+  "$defs": {
+    "VideoShot": {
+      "additionalProperties": false,
+      "properties": {
+        "aspect_ratio": {
+          "pattern": "^(16:9|9:16)$",
+          "title": "Aspect Ratio",
+          "type": "string"
+        },
+        "duration_seconds": {
+          "title": "Duration Seconds",
+          "type": "integer"
+        },
+        "negative_prompt": {
+          "minLength": 1,
+          "title": "Negative Prompt",
+          "type": "string"
+        },
+        "prompt": {
+          "minLength": 1,
+          "title": "Prompt",
+          "type": "string"
+        },
+        "resolution": {
+          "pattern": "^(720p|1080p)$",
+          "title": "Resolution",
+          "type": "string"
+        },
+        "seed": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "title": "Seed",
+          "type": "integer"
+        },
+        "shot_id": {
+          "pattern": "^shot-\\d{2}$",
+          "title": "Shot Id",
+          "type": "string"
+        },
+        "source_image_ref": {
+          "minLength": 1,
+          "title": "Source Image Ref",
+          "type": "string"
+        },
+        "view_id": {
+          "pattern": "^view-\\d{2}$",
+          "title": "View Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "shot_id",
+        "view_id",
+        "source_image_ref",
+        "prompt",
+        "negative_prompt",
+        "duration_seconds",
+        "aspect_ratio",
+        "resolution",
+        "seed"
+      ],
+      "title": "VideoShot",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "budget_usd": {
+      "exclusiveMinimum": 0,
+      "title": "Budget Usd",
+      "type": "number"
+    },
+    "design_revision": {
+      "minLength": 1,
+      "title": "Design Revision",
+      "type": "string"
+    },
+    "model_revision": {
+      "minLength": 1,
+      "title": "Model Revision",
+      "type": "string"
+    },
+    "plan_id": {
+      "minLength": 1,
+      "title": "Plan Id",
+      "type": "string"
+    },
+    "price_per_second_usd": {
+      "exclusiveMinimum": 0,
+      "title": "Price Per Second Usd",
+      "type": "number"
+    },
+    "project_id": {
+      "minLength": 1,
+      "title": "Project Id",
+      "type": "string"
+    },
+    "provider": {
+      "default": "gemini-api",
+      "title": "Provider",
+      "type": "string"
+    },
+    "provider_model": {
+      "minLength": 1,
+      "title": "Provider Model",
+      "type": "string"
+    },
+    "schema_version": {
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "shots": {
+      "items": {
+        "$ref": "#/$defs/VideoShot"
+      },
+      "title": "Shots",
+      "type": "array"
+    },
+    "view_set_id": {
+      "minLength": 1,
+      "title": "View Set Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "plan_id",
+    "project_id",
+    "model_revision",
+    "design_revision",
+    "view_set_id",
+    "provider_model",
+    "price_per_second_usd",
+    "budget_usd",
+    "shots"
+  ],
+  "title": "VideoPlan",
+  "type": "object"
+}

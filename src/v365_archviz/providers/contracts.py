@@ -84,6 +84,39 @@ class ViewSetGenerativeRenderer(GenerativeRenderer, Protocol):
     def generate_view_set(self, request: ViewSetGenerationInput) -> GeneratedViewSet: ...
 
 
+@dataclass(frozen=True)
+class VideoGenerationInput:
+    shot_id: str
+    source_image: Path
+    prompt: str
+    negative_prompt: str
+    duration_seconds: int
+    aspect_ratio: str
+    resolution: str
+    seed: int
+
+
+@dataclass(frozen=True)
+class VideoOperation:
+    name: str
+    done: bool = False
+    download_uri: str | None = None
+    error_message: str | None = None
+
+
+class VideoGenerationProvider(Protocol):
+    """Start, resume and download one asynchronous image-to-video operation."""
+
+    @property
+    def name(self) -> str: ...
+
+    def start(self, request: VideoGenerationInput) -> VideoOperation: ...
+
+    def get(self, operation_name: str) -> VideoOperation: ...
+
+    def download(self, operation: VideoOperation) -> bytes: ...
+
+
 class JobRepository(Protocol):
     """Durable metadata port; adapters may use local files or a database."""
 

@@ -59,10 +59,9 @@ def _corridor_cross_coordinate(design: DesignDNA | None, long_axis: int, fallbac
     ordered = sorted(
         design.roof_assemblies,
         key=lambda assembly: (
-            assembly.bounding_box.minimum[cross_axis]
-            + assembly.bounding_box.maximum[cross_axis]
-        )
-        / 2,
+            (assembly.bounding_box.minimum[cross_axis] + assembly.bounding_box.maximum[cross_axis])
+            / 2
+        ),
     )
     candidates: list[tuple[float, float]] = []
     for lower, upper in pairwise(ordered):

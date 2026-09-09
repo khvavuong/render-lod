@@ -31,6 +31,13 @@ class Settings:
     aps_base_url: str
     aps_region: str
     aps_bucket_key: str | None
+    veo_model: str = "veo-3.1-lite-generate-preview"
+    veo_resolution: str = "720p"
+    veo_duration_seconds: int = 4
+    veo_price_per_second_usd: float = 0.05
+    video_budget_usd: float = 1.20
+    veo_poll_interval_seconds: float = 10.0
+    veo_timeout_seconds: float = 900.0
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -44,6 +51,13 @@ class Settings:
             gemini_store_interactions=_as_bool(
                 os.getenv("GEMINI_STORE_INTERACTIONS"), default=False
             ),
+            veo_model=os.getenv("VEO_MODEL", "veo-3.1-lite-generate-preview"),
+            veo_resolution=os.getenv("VEO_RESOLUTION", "720p"),
+            veo_duration_seconds=int(os.getenv("VEO_DURATION_SECONDS", "4")),
+            veo_price_per_second_usd=float(os.getenv("VEO_PRICE_PER_SECOND_USD", "0.05")),
+            video_budget_usd=float(os.getenv("VIDEO_BUDGET_USD", "1.20")),
+            veo_poll_interval_seconds=float(os.getenv("VEO_POLL_INTERVAL_SECONDS", "10")),
+            veo_timeout_seconds=float(os.getenv("VEO_TIMEOUT_SECONDS", "900")),
             aps_client_id=os.getenv("APS_CLIENT_ID"),
             aps_client_secret=os.getenv("APS_CLIENT_SECRET"),
             aps_base_url=os.getenv("APS_BASE_URL", "https://developer.api.autodesk.com").rstrip(

@@ -26,10 +26,10 @@ VIDEO_VIEWS ?=
 VIDEO_VIEW_ARGS = $(foreach video_view,$(VIDEO_VIEWS),--view "$(video_view)")
 REFERENCE_ARGS = $(foreach reference,$(REFERENCES),--reference-image "$(reference)")
 
-.PHONY: install test lint typecheck require-model require-brief require-design inspect extract-ifc \
+.PHONY: install test lint typecheck fe-install fe-dev fe-test fe-e2e-install fe-e2e fe-build require-model require-brief require-design inspect extract-ifc \
 	canonicalize plan-design plan-cameras renderer-image render refine-view refine-viewset \
 	build-correspondence validate-viewset evaluate-consistency plan-repairs compose-board api \
-	plan-video generate-video-shots assemble-video
+	plan-video generate-video-shots assemble-video brand-deliverables
 
 install:
 	$(PYTHON) -m pip install -e ".[dev]"
@@ -42,6 +42,25 @@ lint:
 
 typecheck:
 	$(PYTHON) -m mypy
+
+fe-install:
+	npm --prefix render-fe install
+
+fe-dev:
+	npm --prefix render-fe run dev
+
+fe-test:
+	npm --prefix render-fe run lint
+	npm --prefix render-fe run test
+
+fe-e2e-install:
+	npm --prefix render-fe exec -- playwright install chromium
+
+fe-e2e:
+	npm --prefix render-fe run test:e2e
+
+fe-build:
+	npm --prefix render-fe run build
 
 require-model:
 	@test -n "$(MODEL)" || { echo "MODEL is required, e.g. MODEL=path/to/model.rvt"; exit 2; }
@@ -136,6 +155,11 @@ assemble-video: require-model require-design
 	@test -n "$(VIDEO_PLAN)" || { echo "VIDEO_PLAN is required; run make plan-video first"; exit 2; }
 	$(PYTHON) -m v365_archviz assemble-video "$(VIDEO_PLAN)" \
 		--generated-root "$(VIDEO_ROOT)" --output "$(VIDEO_ROOT)/showreel.mp4"
+
+brand-deliverables: require-model require-design
+	$(PYTHON) -m v365_archviz brand-deliverables "$(GENERATED_DIR)" \
+		--board "$(GENERATED_DIR)/viewset_board.jpg" \
+		$(if $(VIDEO_ROOT),--video "$(VIDEO_ROOT)/showreel.mp4")
 
 api:
 	$(PYTHON) -m uvicorn v365_archviz.api:app --reload

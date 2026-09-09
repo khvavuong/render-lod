@@ -13,6 +13,13 @@ def test_health_endpoint() -> None:
     assert response.json()["status"] == "ok"
 
 
+def test_brand_logo_is_served_as_png() -> None:
+    response = client.get("/v1/brand/logo")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+
+
 def test_capabilities_never_expose_credentials(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setenv("GEMINI_API_KEY", "secret-value")
     response = client.get("/v1/system/capabilities")
@@ -32,6 +39,10 @@ def test_design_revision_and_view_set_are_idempotent(
     scene_path = tmp_path / "scenes" / model_revision / "canonical_scene.json"
     scene_path.parent.mkdir(parents=True)
     scene_path.write_text(valid_scene.model_dump_json(), encoding="utf-8")
+
+    model_response = client.get("/v1/models/latest")
+    assert model_response.status_code == 200
+    assert model_response.json()["model_revision"] == model_revision
     brief = {
         "project_id": "project-1",
         "design_language": {
@@ -73,6 +84,28 @@ def test_design_revision_and_view_set_are_idempotent(
     assert status_response.status_code == 200
     assert status_response.json()["job_id"] == first.json()["job_id"]
     assert (tmp_path / "metadata" / "jobs" / f"{first.json()['job_id']}.json").is_file()
+
+    generated = tmp_path / "generated" / model_revision / design_revision
+    image_path = generated / "view-01" / "refined.jpg"
+    image_path.parent.mkdir(parents=True)
+    image_path.write_bytes(b"generated-image")
+    (generated / "viewset_board.jpg").write_bytes(b"viewset-board")
+    video = tmp_path / "videos" / model_revision / design_revision / "video-plan" / "showreel.mp4"
+    video.parent.mkdir(parents=True)
+    video.write_bytes(b"showreel")
+
+    output_response = client.get(f"/v1/view-sets/{view_set_id}/outputs")
+    assert output_response.status_code == 200
+    assert [item["id"] for item in output_response.json()["outputs"]] == [
+        "image-view-01",
+        "board",
+        "video",
+    ]
+    image_response = client.get(
+        f"/v1/view-sets/{view_set_id}/outputs/image-view-01"
+    )
+    assert image_response.status_code == 200
+    assert image_response.content == b"generated-image"
 
 
 def test_api_rejects_revision_path_traversal(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]

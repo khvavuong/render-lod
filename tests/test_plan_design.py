@@ -40,6 +40,12 @@ def test_plans_reproducible_design_dna(tmp_path: Path, valid_scene: CanonicalSce
           "panel_module_m": 1.2,
           "loading_docks_per_main_facade": 2,
           "add_office_entrances": true,
+          "design_preferences": {
+            "style_preset": "sustainable_industrial",
+            "decor_level": "subtle",
+            "requested_office_storeys": 3,
+            "creative_prompt": "A calm, climate-responsive arrival facade."
+          },
           "roof_type": "preserve source",
           "solar_panels": false,
           "grammar_version": "test-v1",
@@ -61,6 +67,11 @@ def test_plans_reproducible_design_dna(tmp_path: Path, valid_scene: CanonicalSce
     assert sum(facade.office_entrance is not None for facade in office.facades) == 1
     assert office.facades[0].articulation.office_glazing_ratio == 0.72
     assert first.material_palette.primary_hex == "#E7E5DF"
+    assert first.design_preferences.style_preset.value == "sustainable_industrial"
+    assert first.design_preferences.requested_office_storeys == 3
+    assert first.design_preferences.creative_prompt == (
+        "A calm, climate-responsive arrival facade."
+    )
     design_path = tmp_path / "designs" / first.design_revision / "design_dna.json"
     assert DesignDNA.model_validate_json(design_path.read_text(encoding="utf-8")) == first
 

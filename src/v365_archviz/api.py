@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from v365_archviz import __version__
@@ -20,10 +22,19 @@ from v365_archviz.domain.scene import CanonicalScene
 from v365_archviz.domain.workflow import GenerationProfile, WorkflowState
 from v365_archviz.providers.local_jobs import LocalJobRepository
 
+OutputKind = Literal["image", "board", "video"]
+
 app = FastAPI(
     title="V365 ArchViz Control Plane",
     version=__version__,
     description="Geometry-first multi-view architectural visualization API",
+)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
 )
 
 SAFE_IDENTIFIER_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
@@ -43,6 +54,12 @@ class CapabilityResponse(BaseModel):
     local_rvt_inspection: bool
     aps_geometry_extraction: bool
     gemini_image_generation: bool
+
+
+class ActiveModelResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    model_revision: str = Field(pattern=SAFE_IDENTIFIER_PATTERN)
 
 
 class CreateDesignRevisionRequest(BaseModel):
@@ -86,6 +103,22 @@ class ViewActionRequest(BaseModel):
     view_set_id: str = Field(pattern=SAFE_IDENTIFIER_PATTERN)
 
 
+class OutputArtifactResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    kind: OutputKind
+    title: str
+    url: str
+    view_id: str | None = None
+
+
+class ViewSetOutputsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    outputs: tuple[OutputArtifactResponse, ...]
+
+
 def _settings() -> Settings:
     return Settings.from_env()
 
@@ -106,6 +139,29 @@ def _require_safe_identifier(value: str, label: str) -> None:
         )
 
 
+def _output_files(view_set_id: str) -> dict[str, tuple[Path, OutputKind, str, str | None]]:
+    try:
+        job = _repository(_settings()).get_by_view_set(view_set_id)
+    except OSError as exc:
+        raise HTTPException(status_code=404, detail="view set not found") from exc
+    settings = _settings()
+    generated = settings.artifact_dir / "generated" / job.model_revision / job.design_revision
+    files: dict[str, tuple[Path, OutputKind, str, str | None]] = {}
+    for view_dir in sorted(generated.glob("view-*")):
+        candidates = tuple(view_dir.glob("refined.*"))
+        if len(candidates) == 1 and candidates[0].is_file():
+            asset_id = f"image-{view_dir.name}"
+            files[asset_id] = (candidates[0], "image", view_dir.name.upper(), view_dir.name)
+    board = generated / "viewset_board.jpg"
+    if board.is_file():
+        files["board"] = (board, "board", "Bộ 6 góc nhìn", None)
+    video_root = settings.artifact_dir / "videos" / job.model_revision / job.design_revision
+    videos = sorted(video_root.glob("*/showreel.mp4"), key=lambda path: path.stat().st_mtime)
+    if videos:
+        files["video"] = (videos[-1], "video", "Video trình diễn", None)
+    return files
+
+
 @app.get("/healthz", response_model=HealthResponse, tags=["system"])
 def health() -> HealthResponse:
     return HealthResponse(version=__version__)
@@ -119,6 +175,24 @@ def capabilities() -> CapabilityResponse:
         aps_geometry_extraction=settings.aps_configured,
         gemini_image_generation=settings.gemini_configured,
     )
+
+
+@app.get("/v1/models/latest", response_model=ActiveModelResponse, tags=["models"])
+def latest_model() -> ActiveModelResponse:
+    scenes = _settings().artifact_dir / "scenes"
+    candidates = tuple(scenes.glob("*/canonical_scene.json"))
+    if not candidates:
+        raise HTTPException(status_code=404, detail="no canonical model is available")
+    latest = max(candidates, key=lambda path: path.stat().st_mtime_ns)
+    return ActiveModelResponse(model_revision=latest.parent.name)
+
+
+@app.get("/v1/brand/logo", response_class=FileResponse, tags=["system"])
+def brand_logo() -> FileResponse:
+    logo = Path(__file__).resolve().parents[2] / "resource" / "logo" / "logo_vertical.png"
+    if not logo.is_file():
+        raise HTTPException(status_code=404, detail="brand logo not found")
+    return FileResponse(logo)
 
 
 @app.post(
@@ -219,6 +293,41 @@ def get_view_set(view_set_id: str) -> ViewSetJobResponse:
         state=job.state,
         created=False,
     )
+
+
+@app.get(
+    "/v1/view-sets/{view_set_id}/outputs",
+    response_model=ViewSetOutputsResponse,
+    tags=["generation"],
+)
+def get_view_set_outputs(view_set_id: str) -> ViewSetOutputsResponse:
+    _require_safe_identifier(view_set_id, "view_set_id")
+    outputs = tuple(
+        OutputArtifactResponse(
+            id=asset_id,
+            kind=kind,
+            title=title,
+            view_id=view_id,
+            url=f"/v1/view-sets/{view_set_id}/outputs/{asset_id}",
+        )
+        for asset_id, (_, kind, title, view_id) in _output_files(view_set_id).items()
+    )
+    return ViewSetOutputsResponse(outputs=outputs)
+
+
+@app.get(
+    "/v1/view-sets/{view_set_id}/outputs/{asset_id}",
+    response_class=FileResponse,
+    tags=["generation"],
+)
+def download_view_set_output(view_set_id: str, asset_id: str) -> FileResponse:
+    _require_safe_identifier(view_set_id, "view_set_id")
+    _require_safe_identifier(asset_id, "asset_id")
+    artifact = _output_files(view_set_id).get(asset_id)
+    if artifact is None:
+        raise HTTPException(status_code=404, detail="output artifact not found")
+    path, _, _, _ = artifact
+    return FileResponse(path, filename=path.name)
 
 
 def _transition_view_set(view_set_id: str, target: WorkflowState) -> ViewSetJobResponse:

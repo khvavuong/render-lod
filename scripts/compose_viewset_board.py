@@ -8,6 +8,8 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
+from v365_archviz.application.brand_watermark import BrandWatermark
+
 
 def _image_for(view_directory: Path, image_name: str | None = None) -> Path:
     if image_name:
@@ -15,6 +17,9 @@ def _image_for(view_directory: Path, image_name: str | None = None) -> Path:
         if not image.is_file():
             raise ValueError(f"expected {image_name} in {view_directory}")
         return image
+    provider_sources = sorted(view_directory.glob("provider_source.*"))
+    if len(provider_sources) == 1:
+        return provider_sources[0]
     candidates = sorted(view_directory.glob("refined.*"))
     if len(candidates) != 1:
         raise ValueError(f"expected one refined image in {view_directory}")
@@ -68,7 +73,9 @@ def main() -> None:
         board.paste(image, (left, top + header_height))
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    board.save(args.output, quality=92)
+    source_output = args.output.with_name(f"unbranded_{args.output.name}")
+    board.save(source_output, quality=92)
+    BrandWatermark().apply_image(source_output, args.output)
 
 
 if __name__ == "__main__":

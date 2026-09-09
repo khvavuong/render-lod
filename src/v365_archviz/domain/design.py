@@ -77,6 +77,30 @@ class BuildingTreatment(str, Enum):
     CONTEXT = "context"
 
 
+class StylePreset(str, Enum):
+    CONTEMPORARY_INDUSTRIAL = "contemporary_industrial"
+    MINIMAL_INDUSTRIAL = "minimal_industrial"
+    CORPORATE_INDUSTRIAL = "corporate_industrial"
+    SUSTAINABLE_INDUSTRIAL = "sustainable_industrial"
+    REFINED_HIGH_TECH = "refined_high_tech"
+
+
+class DecorLevel(str, Enum):
+    MINIMAL = "minimal"
+    SUBTLE = "subtle"
+    BALANCED = "balanced"
+    EXPRESSIVE = "expressive"
+
+
+class DesignPreferences(DomainModel):
+    """User-facing intent that may refine finishes but never override LOD geometry."""
+
+    style_preset: StylePreset = StylePreset.CONTEMPORARY_INDUSTRIAL
+    decor_level: DecorLevel = DecorLevel.BALANCED
+    requested_office_storeys: int | None = Field(default=None, ge=1, le=8)
+    creative_prompt: str | None = Field(default=None, max_length=1000)
+
+
 class BuildingDesign(DomainModel):
     building_id: str = Field(min_length=1)
     treatment: BuildingTreatment = BuildingTreatment.FOCUS
@@ -146,6 +170,7 @@ class DesignBrief(DomainModel):
     facade_articulation: FacadeArticulation = Field(default_factory=FacadeArticulation)
     presentation: PresentationStrategy = Field(default_factory=PresentationStrategy)
     site_design: SiteDesign = Field(default_factory=SiteDesign)
+    design_preferences: DesignPreferences = Field(default_factory=DesignPreferences)
     focus_building_ids: tuple[str, ...] = ()
     context_building_ids: tuple[str, ...] = ()
     panel_module_m: PositiveMeters = Field(ge=0.8, le=1.5)
@@ -185,6 +210,7 @@ class DesignDNA(DomainModel):
     material_palette: MaterialPalette = Field(default_factory=MaterialPalette)
     presentation: PresentationStrategy = Field(default_factory=PresentationStrategy)
     site_design: SiteDesign = Field(default_factory=SiteDesign)
+    design_preferences: DesignPreferences = Field(default_factory=DesignPreferences)
     buildings: tuple[BuildingDesign, ...]
     roof_assemblies: tuple[RoofAssembly, ...] = ()
     grammar_version: str = Field(min_length=1)

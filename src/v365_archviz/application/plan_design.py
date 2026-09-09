@@ -300,6 +300,7 @@ class PlanDesign:
             material_palette=brief.material_palette,
             presentation=brief.presentation,
             site_design=brief.site_design,
+            design_preferences=brief.design_preferences,
             buildings=tuple(buildings),
             roof_assemblies=roof_assemblies,
             grammar_version=brief.grammar_version,

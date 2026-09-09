@@ -57,6 +57,12 @@
     "surrounding_context_count": 6,
     "surrounding_landscape_buffer": true
   },
+  "design_preferences": {
+    "style_preset": "contemporary_industrial",
+    "decor_level": "balanced",
+    "requested_office_storeys": 2,
+    "creative_prompt": null
+  },
   "grammar_version": "baseline-grammar-v2-continuous-roof",
   "asset_library_version": "baseline-assets-v1"
 }

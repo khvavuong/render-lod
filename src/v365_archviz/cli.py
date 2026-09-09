@@ -9,6 +9,8 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from v365_archviz.application.assemble_video import AssembleVideo
+from v365_archviz.application.brand_deliverables import BrandDeliverables
+from v365_archviz.application.brand_watermark import BrandWatermark
 from v365_archviz.application.build_canonical_scene import BuildCanonicalScene
 from v365_archviz.application.build_correspondence import BuildCorrespondenceIndex
 from v365_archviz.application.evaluate_consistency import EvaluateConsistency
@@ -152,6 +154,12 @@ def _parser() -> argparse.ArgumentParser:
     video_assemble.add_argument("--generated-root", type=Path)
     video_assemble.add_argument("--output", type=Path)
     video_assemble.add_argument("--transition", type=float, default=0.35)
+    brand = subcommands.add_parser(
+        "brand-deliverables", help="apply the configured logo to images, board and video"
+    )
+    brand.add_argument("generated_root", type=Path)
+    brand.add_argument("--board", type=Path)
+    brand.add_argument("--video", type=Path)
     return parser
 
 
@@ -180,6 +188,7 @@ def _refinement_prompt(
     palette = design.material_palette
     presentation = design.presentation
     site_design = design.site_design
+    preferences = design.design_preferences
     roof_types = sorted({building.roof.roof_type for building in design.buildings})
     focus_count = sum(building.treatment.value == "focus" for building in design.buildings)
     context_count = sum(building.treatment.value == "context" for building in design.buildings)
@@ -221,6 +230,13 @@ def _refinement_prompt(
         f"- surrounding context mode: {site_design.surrounding_context_mode}; "
         f"perimeter massing count: {site_design.surrounding_context_count}\n"
         f"- surrounding landscape buffer: {site_design.surrounding_landscape_buffer}"
+        f"\n- user style preset: {preferences.style_preset.value}"
+        f"\n- user decor level: {preferences.decor_level.value}"
+        f"\n- requested office storeys: {preferences.requested_office_storeys or 'model-derived'}; "
+        "express only as facade rhythm inside the existing LOD100 envelope; never add height, "
+        "mass or floor plates"
+        f"\n- additional creative direction: {preferences.creative_prompt or 'none'}; treat as a "
+        "soft visual preference that cannot override geometry, access, roof or palette constraints"
     )
     return design, prompt
 
@@ -314,6 +330,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     design_revision=(
                         loaded_design.design_revision if loaded_design is not None else None
                     ),
+                    watermark=BrandWatermark(),
                 )
             print(
                 json.dumps(
@@ -341,6 +358,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     prompt,
                     tuple(args.reference_image),
                     GenerationProfile(args.profile),
+                    watermark=BrandWatermark(),
                 )
             print(
                 json.dumps(
@@ -488,6 +506,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 generated_root,
                 output,
                 transition_seconds=args.transition,
+                watermark=BrandWatermark(),
             )
             print(
                 json.dumps(
@@ -495,6 +514,26 @@ def main(argv: Sequence[str] | None = None) -> int:
                         "video": str(assembled_artifacts.video_path),
                         "qa_report": str(assembled_artifacts.report_path),
                         "duration_seconds": assembled_artifacts.duration_seconds,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return 0
+        if args.command == "brand-deliverables":
+            branded = BrandDeliverables().execute(
+                BrandWatermark(),
+                args.generated_root,
+                board_path=args.board,
+                video_path=args.video,
+            )
+            print(
+                json.dumps(
+                    {
+                        "image_count": len(branded.image_paths),
+                        "board": str(branded.board_path) if branded.board_path else None,
+                        "video": str(branded.video_path) if branded.video_path else None,
+                        "manifest": str(branded.manifest_path),
                     },
                     ensure_ascii=False,
                     indent=2,

@@ -7,6 +7,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+from v365_archviz.application.brand_watermark import BrandWatermark
 from v365_archviz.application.refine_view import PROMPT_VERSION, RefineView
 from v365_archviz.artifacts import atomic_write
 from v365_archviz.domain.design import DesignDNA
@@ -83,6 +84,7 @@ class RefineViewSet:
         prompt: str,
         reference_images: tuple[Path, ...] = (),
         profile: GenerationProfile = GenerationProfile.PREVIEW_FAST,
+        watermark: BrandWatermark | None = None,
     ) -> RefinedViewSetArtifacts:
         view_set = ViewSet.model_validate_json(view_set_path.read_text(encoding="utf-8"))
         design = DesignDNA.model_validate_json(design_dna_path.read_text(encoding="utf-8"))
@@ -139,6 +141,7 @@ class RefineViewSet:
                 project_id=design.project_id,
                 design_revision=design.design_revision,
                 generated_image=result.image,
+                watermark=watermark,
             )
             for result in generated.views
         )

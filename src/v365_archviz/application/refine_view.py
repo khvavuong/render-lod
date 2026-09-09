@@ -11,6 +11,7 @@ from pathlib import Path
 
 from PIL import Image, UnidentifiedImageError
 
+from v365_archviz.application.brand_watermark import BrandWatermark
 from v365_archviz.artifacts import atomic_write
 from v365_archviz.errors import InvalidModelError, ProviderError
 from v365_archviz.providers.contracts import (
@@ -114,6 +115,7 @@ class RefineView:
         project_id: str | None = None,
         design_revision: str | None = None,
         generated_image: GeneratedImage | None = None,
+        watermark: BrandWatermark | None = None,
     ) -> RefinedViewArtifacts:
         view_directory = render_root / view_id
         inputs = {
@@ -150,8 +152,13 @@ class RefineView:
         extension = mimetypes.guess_extension(generated.media_type) or ".png"
         target = output_directory / view_id
         image_path = target / f"refined{extension}"
+        provider_source_path = target / f"provider_source{extension}"
         manifest_path = target / "generation_manifest.json"
-        atomic_write(image_path, generated.content)
+        if watermark is None:
+            atomic_write(image_path, generated.content)
+        else:
+            atomic_write(provider_source_path, generated.content)
+            watermark.apply_image(provider_source_path, image_path)
         manifest = {
             "schema_version": "1.0.0",
             "view_id": view_id,
@@ -169,7 +176,9 @@ class RefineView:
             },
             "output": {
                 "media_type": generated.media_type,
-                "sha256": hashlib.sha256(generated.content).hexdigest(),
+                "provider_source_sha256": hashlib.sha256(generated.content).hexdigest(),
+                "sha256": _sha256(image_path),
+                "brand_watermark": watermark is not None,
             },
         }
         atomic_write(

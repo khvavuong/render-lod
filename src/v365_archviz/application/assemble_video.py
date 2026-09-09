@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from v365_archviz.application.brand_watermark import BrandWatermark
 from v365_archviz.artifacts import atomic_write
 from v365_archviz.domain.video import VideoPlan
 from v365_archviz.errors import ConfigurationError, InvalidModelError, ProviderError
@@ -56,6 +57,7 @@ class AssembleVideo:
         output_path: Path,
         *,
         transition_seconds: float = 0.35,
+        watermark: BrandWatermark | None = None,
     ) -> AssembledVideoArtifacts:
         plan = VideoPlan.model_validate_json(plan_path.read_text(encoding="utf-8"))
         if not 0 <= transition_seconds < min(shot.duration_seconds for shot in plan.shots):
@@ -99,6 +101,11 @@ class AssembleVideo:
             offset += plan.shots[index].duration_seconds - transition_seconds
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
+        assembly_path = (
+            output_path.with_name(f"unbranded_{output_path.name}")
+            if watermark is not None
+            else output_path
+        )
         command.extend(
             [
                 "-filter_complex",
@@ -116,12 +123,15 @@ class AssembleVideo:
                 "yuv420p",
                 "-movflags",
                 "+faststart",
-                str(output_path),
+                str(assembly_path),
             ]
         )
         result = subprocess.run(command, check=False, capture_output=True, text=True)
         if result.returncode != 0:
             raise ProviderError(f"ffmpeg assembly failed: {result.stderr.strip()}")
+
+        if watermark is not None:
+            watermark.apply_video(assembly_path, output_path)
 
         final_probe = probe_video(output_path)
         final_streams = final_probe.get("streams", [])
@@ -145,6 +155,8 @@ class AssembleVideo:
             "height": 720,
             "frame_rate": 24,
             "audio_stream_count": audio_count,
+            "brand_watermark": watermark is not None,
+            "unbranded_source": str(assembly_path) if watermark is not None else None,
             "source_probes": probes,
             "output_probe": final_probe,
         }

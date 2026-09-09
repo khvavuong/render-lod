@@ -84,6 +84,16 @@
       "title": "BuildingTreatment",
       "type": "string"
     },
+    "DecorLevel": {
+      "enum": [
+        "minimal",
+        "subtle",
+        "balanced",
+        "expressive"
+      ],
+      "title": "DecorLevel",
+      "type": "string"
+    },
     "DesignLanguage": {
       "additionalProperties": false,
       "properties": {
@@ -127,6 +137,49 @@
         "office_material"
       ],
       "title": "DesignLanguage",
+      "type": "object"
+    },
+    "DesignPreferences": {
+      "additionalProperties": false,
+      "description": "User-facing intent that may refine finishes but never override LOD geometry.",
+      "properties": {
+        "creative_prompt": {
+          "anyOf": [
+            {
+              "maxLength": 1000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Creative Prompt"
+        },
+        "decor_level": {
+          "$ref": "#/$defs/DecorLevel",
+          "default": "balanced"
+        },
+        "requested_office_storeys": {
+          "anyOf": [
+            {
+              "maximum": 8,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Requested Office Storeys"
+        },
+        "style_preset": {
+          "$ref": "#/$defs/StylePreset",
+          "default": "contemporary_industrial"
+        }
+      },
+      "title": "DesignPreferences",
       "type": "object"
     },
     "Entrance": {
@@ -505,6 +558,17 @@
       },
       "title": "SiteDesign",
       "type": "object"
+    },
+    "StylePreset": {
+      "enum": [
+        "contemporary_industrial",
+        "minimal_industrial",
+        "corporate_industrial",
+        "sustainable_industrial",
+        "refined_high_tech"
+      ],
+      "title": "StylePreset",
+      "type": "string"
     }
   },
   "additionalProperties": false,
@@ -523,6 +587,9 @@
     },
     "design_language": {
       "$ref": "#/$defs/DesignLanguage"
+    },
+    "design_preferences": {
+      "$ref": "#/$defs/DesignPreferences"
     },
     "design_revision": {
       "minLength": 1,

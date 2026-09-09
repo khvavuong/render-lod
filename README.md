@@ -136,6 +136,20 @@ Veo hiện sinh audio mặc định; pipeline chủ động bỏ audio ở bư�
 cuối không có audio, đúng 1280×720, 24 fps và chứa đủ các shot. Không chạy lại shot đã cache nếu
 ảnh nguồn và cấu hình không đổi.
 
+## Branding đầu ra
+
+Mọi ảnh VIEW, board sáu góc và showreel được hậu xử lý qua `BrandWatermark`. Logo cố định
+`resource/logo/logo_vertical.png` nằm ở góc trái trên, rộng 5,6% khung hình, có lề 2% và alpha
+50%. Artifact chưa gắn logo được giữ riêng (`provider_source.*` hoặc `unbranded_*`) để chạy lại
+không chồng watermark và có thể thay đổi cấu hình mà không giảm chất lượng.
+
+```bash
+make brand-deliverables MODEL=/path/to/project.rvt BRIEF=/path/to/project-brief.json
+```
+
+Các thông số branding là hằng số trong `application/brand_watermark.py`, không phụ thuộc biến
+môi trường.
+
 Artifacts được content-address theo SHA của RVT:
 
 ```text
@@ -203,12 +217,47 @@ Các endpoint control plane hiện có:
 
 - `GET /healthz`
 - `GET /v1/system/capabilities`
+- `GET /v1/models/latest`
+- `GET /v1/brand/logo`
 - `POST /v1/projects/{project_id}/design-revisions`
 - `POST /v1/design-revisions/{design_revision}/view-sets`
 - `GET /v1/view-sets/{view_set_id}`
+- `GET /v1/view-sets/{view_set_id}/outputs`
+- `GET /v1/view-sets/{view_set_id}/outputs/{asset_id}`
 - `POST /v1/views/{view_id}/approve`
 - `POST /v1/views/{view_id}/repair`
 - OpenAPI UI: `/docs`
+
+## Render Studio frontend
+
+Frontend React + Ant Design nằm trong `render-fe/`. Giao diện hai panel compile phong cách,
+palette, mức decor, tầng văn phòng, mái, loading dock, cảnh quan và prompt tự do thành
+`DesignBrief` có version. Số tầng và prompt là ưu tiên thiết kế mềm; các khóa bảo toàn hình học,
+đường giao thông và ranh cây xanh luôn được bật trong payload. Panel đầu ra poll trạng thái job,
+hiển thị sáu view, board và showreel trực tiếp từ artifact API.
+
+Chạy backend và frontend ở hai terminal:
+
+```bash
+make api
+make fe-install
+make fe-dev
+```
+
+Vite chạy tại `http://localhost:5173` và proxy `/v1` sang FastAPI tại cổng 8000. Kiểm tra
+frontend bằng:
+
+```bash
+make fe-test
+make fe-e2e-install
+make fe-e2e
+make fe-build
+```
+
+`fe-e2e` chạy luồng trình duyệt Chromium bằng Playwright với API được cô lập, vì vậy không gọi
+Gemini/Veo và không phát sinh chi phí. Khi dùng giao diện thật, nhập mã dự án, chọn phong cách,
+mức chi tiết, màu sắc và bối cảnh, thêm yêu cầu tự do nếu cần rồi bấm **Tạo phương án diễn họa**.
+Frontend tự khóa model canonical mới nhất, sau đó theo dõi job và cập nhật ảnh/video ở panel phải.
 
 ## Quality gates
 

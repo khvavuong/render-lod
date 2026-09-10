@@ -3,7 +3,16 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from v365_archviz.api import app
+from v365_archviz.domain.jobs import GenerationJob
 from v365_archviz.domain.scene import CanonicalScene
+from v365_archviz.domain.workflow import (
+    Camera,
+    GenerationProfile,
+    ViewRole,
+    ViewSet,
+    WorkflowState,
+)
+from v365_archviz.providers.local_jobs import LocalJobRepository
 
 client = TestClient(app)
 
@@ -149,3 +158,85 @@ def test_api_rejects_revision_path_traversal(tmp_path, monkeypatch) -> None:  # 
 
     assert response.status_code == 422
     assert not (tmp_path.parent / "canonical_scene.json").exists()
+
+
+def test_video_generation_is_an_explicit_idempotent_job(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("V365_ARTIFACT_DIR", str(tmp_path))
+    monkeypatch.setenv("V365_ENABLE_LOCAL_WORKER", "1")
+    dispatched: list[str] = []
+    monkeypatch.setattr(
+        "v365_archviz.api._video_dispatcher.submit",
+        lambda job_id: dispatched.append(job_id) or True,
+    )
+    image_job = GenerationJob.create(
+        job_id="image-job",
+        idempotency_key="image-key",
+        project_id="project",
+        model_revision="model",
+        design_revision="design",
+        view_set_id="viewset",
+        profile=GenerationProfile.MARKETING_HERO,
+        initial_state=WorkflowState.COMPLETED,
+    )
+    repository = LocalJobRepository(tmp_path / "metadata")
+    repository.create_or_get(image_job)
+    generated = tmp_path / "generated" / "model" / "design"
+    generated.mkdir(parents=True)
+    (generated / "viewset_generation_manifest.json").write_text("{}", encoding="utf-8")
+    (generated / "viewset_board.jpg").write_bytes(b"board")
+    cameras = tuple(
+        Camera(
+            view_id=f"view-{index:02d}",
+            role=ViewRole.OVERALL,
+            position=(10.0, 10.0, 10.0),
+            target=(0.0, 0.0, 0.0),
+            focal_length_mm=35,
+            sensor_width_mm=36,
+            aspect_ratio="16:9",
+        )
+        for index in range(1, 7)
+    )
+    view_set_path = tmp_path / "scenes" / "model" / "designs" / "design" / "view_set.json"
+    view_set_path.parent.mkdir(parents=True)
+    view_set_path.write_text(
+        ViewSet(
+            view_set_id="viewset", design_revision="design", cameras=cameras
+        ).model_dump_json(),
+        encoding="utf-8",
+    )
+    for camera in cameras:
+        source = generated / camera.view_id / "provider_source.jpg"
+        source.parent.mkdir(parents=True)
+        source.write_bytes(b"image")
+
+    first = client.post("/v1/view-sets/viewset/video-jobs")
+    second = client.post("/v1/view-sets/viewset/video-jobs")
+
+    assert first.status_code == 202
+    assert first.json()["created"] is True
+    assert first.json()["state"] == "queued"
+    assert first.json()["estimated_cost_usd"] == 1.2
+    assert second.status_code == 202
+    assert second.json()["created"] is False
+    assert dispatched == [first.json()["video_job_id"], first.json()["video_job_id"]]
+    assert repository.get("image-job").state is WorkflowState.COMPLETED
+
+
+def test_video_job_rejects_an_incomplete_image_set(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("V365_ARTIFACT_DIR", str(tmp_path))
+    image_job = GenerationJob.create(
+        job_id="image-job",
+        idempotency_key="image-key",
+        project_id="project",
+        model_revision="model",
+        design_revision="design",
+        view_set_id="viewset",
+        profile=GenerationProfile.MARKETING_HERO,
+        initial_state=WorkflowState.GENERATING_VIEWSET,
+    )
+    LocalJobRepository(tmp_path / "metadata").create_or_get(image_job)
+
+    response = client.post("/v1/view-sets/viewset/video-jobs")
+
+    assert response.status_code == 409
+    assert "must complete" in response.json()["detail"]

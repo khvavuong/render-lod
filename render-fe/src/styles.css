@@ -109,6 +109,13 @@ button, input, textarea { font: inherit; }
 .progress-copy > :first-child { color: var(--ant-color-primary); }
 .progress-copy span { display: block; }
 .output-heading { margin: 8px 0 16px; }
+.video-job-status {
+  margin: 0 0 16px;
+  padding: 12px 16px;
+  background: var(--ant-color-primary-bg);
+  border: 1px solid var(--ant-color-primary-border);
+  border-radius: var(--ant-border-radius);
+}
 
 .artifact-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
 .artifact-card {

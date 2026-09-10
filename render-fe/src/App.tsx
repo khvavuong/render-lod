@@ -21,7 +21,17 @@ const layoutStyle = {
 } as CSSProperties;
 
 function StudioShell({ gateway }: Required<AppProps>) {
-  const { job, isSubmitting, error, submit, refresh } = useStudioJob(gateway);
+  const {
+    job,
+    videoJob,
+    isSubmitting,
+    isSubmittingVideo,
+    error,
+    errorTitle,
+    submit,
+    refresh,
+    generateVideo,
+  } = useStudioJob(gateway);
   const [notificationApi, notificationContext] = notification.useNotification();
 
   useEffect(() => {
@@ -31,12 +41,12 @@ function StudioShell({ gateway }: Required<AppProps>) {
     }
     notificationApi.error({
       key: "studio-error",
-      message: "Không thể tạo phương án diễn họa",
+      message: errorTitle,
       description: error,
       placement: "topRight",
       duration: 8,
     });
-  }, [error, notificationApi]);
+  }, [error, errorTitle, notificationApi]);
 
   return (
     <>
@@ -52,7 +62,13 @@ function StudioShell({ gateway }: Required<AppProps>) {
             submitting={isSubmitting}
             onSubmit={(values) => void submit(values)}
           />
-          <GenerationWorkspace job={job} onRefresh={() => void refresh()} />
+          <GenerationWorkspace
+            job={job}
+            videoJob={videoJob}
+            submittingVideo={isSubmittingVideo}
+            onGenerateVideo={() => void generateVideo()}
+            onRefresh={() => void refresh()}
+          />
         </div>
       </div>
     </>

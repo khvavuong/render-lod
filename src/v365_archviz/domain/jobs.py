@@ -49,7 +49,7 @@ _ALLOWED_TRANSITIONS: dict[WorkflowState, frozenset[WorkflowState]] = {
         {WorkflowState.COMPOSING_BOARD, WorkflowState.REPAIRING, WorkflowState.FAILED}
     ),
     WorkflowState.COMPOSING_BOARD: frozenset(
-        {WorkflowState.GENERATING_VIDEO, WorkflowState.COMPLETED, WorkflowState.FAILED}
+        {WorkflowState.COMPLETED, WorkflowState.FAILED}
     ),
     WorkflowState.GENERATING_VIDEO: frozenset(
         {WorkflowState.COMPLETED, WorkflowState.FAILED}

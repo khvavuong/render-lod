@@ -153,4 +153,32 @@ describe('HttpStudioGateway', () => {
     expect(fetchMock.mock.calls[3][0]).toBe('/v1/view-sets/viewset-01/outputs');
     expect(result.outputs).toHaveLength(1);
   });
+
+  it('starts video through a separate opt-in endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(
+        {
+          video_job_id: 'video-job-01',
+          view_set_id: 'viewset-01',
+          state: 'queued',
+          created: true,
+          estimated_cost_usd: 1.2,
+          output_url: null,
+        },
+        202,
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await new HttpStudioGateway().createVideo('viewset-01');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe('/v1/view-sets/viewset-01/video-jobs');
+    expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe('POST');
+    expect(result).toMatchObject({
+      videoJobId: 'video-job-01',
+      state: 'queued',
+      estimatedCostUsd: 1.2,
+    });
+  });
 });

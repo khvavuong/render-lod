@@ -5,25 +5,21 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from v365_archviz.application.assemble_video import AssembleVideo
 from v365_archviz.application.brand_deliverables import BrandDeliverables
 from v365_archviz.application.brand_watermark import BrandWatermark
 from v365_archviz.application.build_correspondence import BuildCorrespondenceIndex
 from v365_archviz.application.compose_viewset_board import ComposeViewSetBoard
 from v365_archviz.application.evaluate_consistency import EvaluateConsistency
-from v365_archviz.application.generate_video import GenerateVideoShots
-from v365_archviz.application.plan_video import PlanVideo
 from v365_archviz.application.refine_viewset import RefineViewSet
 from v365_archviz.application.refinement_prompt import build_refinement_prompt
 from v365_archviz.application.validate_viewset import ValidateGeneratedViewSet
 from v365_archviz.config import Settings
 from v365_archviz.domain.jobs import GenerationJob
-from v365_archviz.domain.workflow import ViewSet, WorkflowState
+from v365_archviz.domain.workflow import Camera, ViewSet, WorkflowState
 from v365_archviz.errors import V365Error
 from v365_archviz.providers.docker_conditioning import DockerConditioningRenderer
 from v365_archviz.providers.gemini import GeminiImageRenderer
 from v365_archviz.providers.local_jobs import LocalJobRepository
-from v365_archviz.providers.veo import VeoVideoRenderer
 
 logger = logging.getLogger(__name__)
 
@@ -135,52 +131,15 @@ class RunGenerationJob:
             job = self._advance(
                 repository,
                 job,
-                (
-                    WorkflowState.GENERATING_VIDEO
-                    if settings.video_generation_enabled
-                    else WorkflowState.COMPLETED
-                ),
+                WorkflowState.COMPLETED,
                 branded.manifest_path,
                 paths.board,
             )
 
+        # Jobs persisted by versions that coupled image and video generation must stop here.
+        # The separate video endpoint is now the only path allowed to incur Veo cost.
         if job.state is WorkflowState.GENERATING_VIDEO:
-            video_plan = PlanVideo().execute(
-                paths.generated_root,
-                paths.view_set,
-                settings.artifact_dir / "videos",
-                settings,
-            )
-            video_root = video_plan.plan_path.parent
-            with VeoVideoRenderer(settings) as renderer:
-                generated_video = GenerateVideoShots().execute(
-                    renderer,
-                    video_plan.plan_path,
-                    video_root,
-                    poll_interval_seconds=settings.veo_poll_interval_seconds,
-                    timeout_seconds=settings.veo_timeout_seconds,
-                )
-            assembled = AssembleVideo().execute(
-                video_plan.plan_path,
-                video_root,
-                video_root / "showreel.mp4",
-            )
-            branded = BrandDeliverables().execute(
-                BrandWatermark(),
-                paths.generated_root,
-                board_path=paths.board,
-                video_path=assembled.video_path,
-            )
-            job = self._advance(
-                repository,
-                job,
-                WorkflowState.COMPLETED,
-                video_plan.plan_path,
-                generated_video.manifest_path,
-                assembled.report_path,
-                assembled.video_path,
-                branded.manifest_path,
-            )
+            job = self._advance(repository, job, WorkflowState.COMPLETED)
         return job
 
     @staticmethod
@@ -198,11 +157,24 @@ class RunGenerationJob:
     @staticmethod
     def _conditioning_complete(render_root: Path, view_set: ViewSet) -> bool:
         names = ("base_rgb.png", "depth.png", "instance_id.png", "semantic.png", "edges.png")
-        return all(
+        passes_exist = all(
             (render_root / camera.view_id / name).is_file()
             for camera in view_set.cameras
             for name in names
         )
+        if not passes_exist:
+            return False
+        for camera in view_set.cameras:
+            camera_path = render_root / camera.view_id / "camera.json"
+            try:
+                rendered_camera = Camera.model_validate_json(
+                    camera_path.read_text(encoding="utf-8")
+                )
+            except (OSError, ValueError):
+                return False
+            if rendered_camera != camera:
+                return False
+        return True
 
     @staticmethod
     def _safe_error(exc: Exception) -> str:

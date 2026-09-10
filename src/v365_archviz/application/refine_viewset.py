@@ -43,9 +43,11 @@ VIEW_DIRECTIVES = {
         "and show its access frontage; do not copy the close-hero camera."
     ),
     ViewRole.LOADING_DETAIL: (
-        "VIEW PURPOSE — HUMAN EYE LEVEL: keep the camera at pedestrian eye height inside the "
-        "authored circulation space. Show realistic scale and access without converting it to a "
-        "drone view."
+        "VIEW PURPOSE — EXTERIOR HUMAN EYE LEVEL: keep the camera at pedestrian eye height in "
+        "the open-air authored circulation space, outside every building envelope. The sky and "
+        "exterior facade must remain visible. Never reinterpret this as an interior, covered hall, "
+        "warehouse interior or courtyard. Show realistic scale and access without converting it "
+        "to a drone view."
     ),
 }
 

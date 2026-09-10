@@ -12,6 +12,7 @@ import {
   Button,
   Empty,
   Image,
+  Popconfirm,
   Progress,
   Segmented,
   Space,
@@ -22,10 +23,19 @@ import {
 } from "antd";
 import { useMemo, useState } from "react";
 
-import type { OutputArtifact, StudioJob, WorkflowState } from "../types/studio";
+import type {
+  OutputArtifact,
+  StudioJob,
+  StudioVideoJob,
+  VideoJobState,
+  WorkflowState,
+} from "../types/studio";
 
 interface GenerationWorkspaceProps {
   job: StudioJob | null;
+  videoJob: StudioVideoJob | null;
+  submittingVideo: boolean;
+  onGenerateVideo: () => void;
   onRefresh: () => void;
 }
 
@@ -49,6 +59,15 @@ const STATE_META: Record<WorkflowState, { label: string; percent: number }> = {
   generating_video: { label: "Đang tạo video Veo", percent: 96 },
   completed: { label: "Đã hoàn tất", percent: 100 },
   failed: { label: "Không thành công", percent: 100 },
+};
+
+const VIDEO_STATE_LABEL: Record<VideoJobState, string> = {
+  queued: "Đang chờ tạo video",
+  planning: "Đang lập 6 shot",
+  generating: "Đang tạo 6 shot bằng Veo",
+  assembling: "Đang ghép video và chèn logo",
+  completed: "Video đã hoàn tất",
+  failed: "Tạo video không thành công",
 };
 
 function ArtifactCard({ artifact }: { artifact: OutputArtifact }) {
@@ -132,6 +151,9 @@ function EmptyCanvas() {
 
 export function GenerationWorkspace({
   job,
+  videoJob,
+  submittingVideo,
+  onGenerateVideo,
   onRefresh,
 }: GenerationWorkspaceProps) {
   const [filter, setFilter] = useState<"all" | "image" | "video">("all");
@@ -148,6 +170,10 @@ export function GenerationWorkspace({
     [filter, job],
   );
   const active = Boolean(job && !["completed", "failed"].includes(job.state));
+  const hasVideo = Boolean(job?.outputs.some((item) => item.kind === "video"));
+  const videoActive = Boolean(
+    videoJob && !["completed", "failed"].includes(videoJob.state),
+  );
 
   return (
     <main className="generation-workspace">
@@ -212,7 +238,40 @@ export function GenerationWorkspace({
             { label: "Video", value: "video", icon: <PlayCircleOutlined /> },
           ]}
         />
+        {job?.state === "completed" && !hasVideo && (
+          <Popconfirm
+            title="Tạo video trình diễn?"
+            description="Hệ thống sẽ dùng Veo tạo đủ 6 shot, sau đó tự ghép, bỏ audio và chèn logo. Thao tác này phát sinh chi phí riêng."
+            okText="Tạo video"
+            cancelText="Để sau"
+            placement="bottomRight"
+            onConfirm={onGenerateVideo}
+            disabled={videoActive || submittingVideo}
+          >
+            <Button
+              type="primary"
+              icon={<VideoCameraOutlined />}
+              loading={videoActive || submittingVideo}
+            >
+              {videoActive ? "Đang tạo video" : "Tạo video trình diễn"}
+            </Button>
+          </Popconfirm>
+        )}
       </div>
+
+      {videoJob && (
+        <section className="video-job-status" aria-live="polite">
+          <Space>
+            {videoActive ? <Spin size="small" /> : <VideoCameraOutlined />}
+            <Typography.Text strong>
+              {VIDEO_STATE_LABEL[videoJob.state]}
+            </Typography.Text>
+            <Typography.Text type="secondary">
+              Dự toán tối đa ${videoJob.estimatedCostUsd.toFixed(2)} · Job {videoJob.videoJobId}
+            </Typography.Text>
+          </Space>
+        </section>
+      )}
 
       {outputs.length ? (
         <div className="artifact-grid">
@@ -249,7 +308,7 @@ export function GenerationWorkspace({
               },
               {
                 color: meta.percent === 100 ? "green" : "gray",
-                children: "Board, branding và showreel",
+                children: "Board và branding ảnh",
               },
             ]}
           />

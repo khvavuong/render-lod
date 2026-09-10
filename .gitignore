@@ -13,3 +13,6 @@ build/
 .artifacts/
 .idea/
 .vscode/
+.tools/
+automation/**/bin/
+automation/**/obj/

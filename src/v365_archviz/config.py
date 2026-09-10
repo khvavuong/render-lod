@@ -32,7 +32,6 @@ class Settings:
     aps_region: str
     aps_bucket_key: str | None
     local_worker_enabled: bool = True
-    video_generation_enabled: bool = True
     veo_model: str = "veo-3.1-lite-generate-preview"
     veo_resolution: str = "720p"
     veo_duration_seconds: int = 4
@@ -69,9 +68,6 @@ class Settings:
             aps_bucket_key=os.getenv("APS_BUCKET_KEY"),
             local_worker_enabled=_as_bool(
                 os.getenv("V365_ENABLE_LOCAL_WORKER"), default=True
-            ),
-            video_generation_enabled=_as_bool(
-                os.getenv("V365_GENERATE_VIDEO"), default=True
             ),
         )
 

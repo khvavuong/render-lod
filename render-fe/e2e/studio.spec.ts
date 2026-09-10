@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 
 test('configures a design and follows the generation output', async ({ page }) => {
   let submittedBrief: Record<string, unknown> | undefined;
+  let videoRequested = false;
 
   await page.route('**/v1/models', async (route) => {
     expect(route.request().method()).toBe('POST');
@@ -58,6 +59,20 @@ test('configures a design and follows the generation output', async ({ page }) =
       },
     }),
   );
+  await page.route('**/v1/view-sets/viewset-e2e/video-jobs', (route) => {
+    videoRequested = true;
+    return route.fulfill({
+      status: 202,
+      json: {
+        video_job_id: 'video-job-e2e',
+        view_set_id: 'viewset-e2e',
+        state: 'queued',
+        created: true,
+        estimated_cost_usd: 1.2,
+        output_url: null,
+      },
+    });
+  });
 
   await page.goto('/');
 
@@ -86,6 +101,12 @@ test('configures a design and follows the generation output', async ({ page }) =
   await expect(page.getByText('Đang dựng geometry passes').first()).toBeVisible();
   await expect(page.getByText('Đã hoàn tất').first()).toBeVisible({ timeout: 8_000 });
   await expect(page.getByText('VIEW-01', { exact: true }).last()).toBeVisible();
+  expect(videoRequested).toBe(false);
+
+  await page.getByRole('button', { name: 'Tạo video trình diễn' }).click();
+  await page.getByRole('button', { name: 'Tạo video', exact: true }).click();
+  await expect(page.getByText('Đang chờ tạo video')).toBeVisible();
+  expect(videoRequested).toBe(true);
 
   expect(submittedBrief).toMatchObject({
     model_revision: 'model-revision-e2e',

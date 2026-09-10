@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ApplicationPackage SchemaVersion="1.0"
+                    AutodeskProduct="Revit"
+                    ProductType="Application"
+                    Name="V365 Revit View Extractor"
+                    AppVersion="1.0.0">
+  <CompanyDetails Name="V365" />
+  <Components Description="Revit 2026">
+    <RuntimeRequirements OS="Win64" Platform="Revit" SeriesMin="R2026" SeriesMax="R2026" />
+    <ComponentEntry AppName="V365 Revit View Extractor"
+                    ModuleName="./Contents/V365RevitViewExtractor.addin"
+                    AppDescription="Lists 3D views and exports a selected view to IFC." />
+  </Components>
+</ApplicationPackage>

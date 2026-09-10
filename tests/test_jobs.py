@@ -23,6 +23,23 @@ def test_job_transition_rejects_skipping_required_stage() -> None:
         job.transition(WorkflowState.GENERATING_VIEWSET)
 
 
+def test_image_job_completes_after_board_without_entering_video_flow() -> None:
+    job = GenerationJob.create(
+        job_id="job-images",
+        idempotency_key="key-images",
+        project_id="project",
+        model_revision="model",
+        design_revision="design",
+        view_set_id="views",
+        profile=GenerationProfile.MARKETING_HERO,
+        initial_state=WorkflowState.COMPOSING_BOARD,
+    )
+
+    assert job.transition(WorkflowState.COMPLETED).state is WorkflowState.COMPLETED
+    with pytest.raises(ValueError, match="invalid workflow transition"):
+        job.transition(WorkflowState.GENERATING_VIDEO)
+
+
 def test_repository_deduplicates_generation_job(tmp_path: Path) -> None:
     repository = LocalJobRepository(tmp_path / "metadata")
     view_set = ViewSet(

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RevitAddIns>
+  <AddIn Type="DBApplication">
+    <Name>V365 Revit View Extractor</Name>
+    <Assembly>V365RevitViewExtractor.dll</Assembly>
+    <AddInId>32E54C10-C1E4-4AFB-AFE2-508DFF82D948</AddInId>
+    <FullClassName>V365.RevitViewExtractor.App</FullClassName>
+    <VendorId>V365</VendorId>
+    <VendorDescription>V365 geometry-first architectural visualization</VendorDescription>
+  </AddIn>
+</RevitAddIns>

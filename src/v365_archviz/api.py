@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from v365_archviz import __version__
 from v365_archviz.application.create_generation_job import CreateGenerationJob
+from v365_archviz.application.create_video_job import CreateVideoJob
 from v365_archviz.application.inspect_model import InspectModel
 from v365_archviz.application.plan_cameras import PlanStandardCameras
 from v365_archviz.application.plan_design import PlanDesign
@@ -23,11 +24,14 @@ from v365_archviz.artifacts import atomic_write
 from v365_archviz.config import Settings
 from v365_archviz.domain.design import DesignBrief, DesignDNA
 from v365_archviz.domain.scene import CanonicalScene
-from v365_archviz.domain.workflow import GenerationProfile, WorkflowState
+from v365_archviz.domain.video_jobs import VideoJob, VideoJobState
+from v365_archviz.domain.workflow import GenerationProfile, ViewSet, WorkflowState
 from v365_archviz.errors import InvalidModelError
 from v365_archviz.providers.local_dispatcher import LocalGenerationDispatcher
 from v365_archviz.providers.local_jobs import LocalJobRepository
 from v365_archviz.providers.local_rvt import LocalRvtInspector
+from v365_archviz.providers.local_video_dispatcher import LocalVideoDispatcher
+from v365_archviz.providers.local_video_jobs import LocalVideoJobRepository
 
 OutputKind = Literal["image", "board", "video"]
 MAX_RVT_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024
@@ -46,6 +50,7 @@ app.add_middleware(
 )
 
 _generation_dispatcher = LocalGenerationDispatcher()
+_video_dispatcher = LocalVideoDispatcher()
 
 SAFE_IDENTIFIER_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
 _SAFE_IDENTIFIER = re.compile(SAFE_IDENTIFIER_PATTERN)
@@ -64,6 +69,7 @@ class CapabilityResponse(BaseModel):
     local_rvt_inspection: bool
     aps_geometry_extraction: bool
     gemini_image_generation: bool
+    veo_video_generation: bool
 
 
 class ActiveModelResponse(BaseModel):
@@ -140,12 +146,46 @@ class ViewSetOutputsResponse(BaseModel):
     outputs: tuple[OutputArtifactResponse, ...]
 
 
+class VideoJobResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    video_job_id: str
+    view_set_id: str
+    state: VideoJobState
+    created: bool
+    estimated_cost_usd: float
+    output_url: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+
+
 def _settings() -> Settings:
     return Settings.from_env()
 
 
 def _repository(settings: Settings) -> LocalJobRepository:
     return LocalJobRepository(settings.artifact_dir / "metadata")
+
+
+def _video_repository(settings: Settings) -> LocalVideoJobRepository:
+    return LocalVideoJobRepository(settings.artifact_dir / "metadata")
+
+
+def _video_job_response(job: VideoJob, *, created: bool) -> VideoJobResponse:
+    return VideoJobResponse(
+        video_job_id=job.video_job_id,
+        view_set_id=job.view_set_id,
+        state=job.state,
+        created=created,
+        estimated_cost_usd=job.estimated_cost_usd,
+        output_url=(
+            f"/v1/video-jobs/{job.video_job_id}/output"
+            if job.state is VideoJobState.COMPLETED and job.output_ref
+            else None
+        ),
+        error_code=job.error_code,
+        error_message=job.error_message,
+    )
 
 
 def _design_directory(artifact_dir: Path, model_revision: str, design_revision: str) -> Path:
@@ -195,6 +235,7 @@ def capabilities() -> CapabilityResponse:
         local_rvt_inspection=True,
         aps_geometry_extraction=settings.aps_configured,
         gemini_image_generation=settings.gemini_configured,
+        veo_video_generation=settings.gemini_configured,
     )
 
 
@@ -409,6 +450,112 @@ def download_view_set_output(view_set_id: str, asset_id: str) -> FileResponse:
         raise HTTPException(status_code=404, detail="output artifact not found")
     path, _, _, _ = artifact
     return FileResponse(path, filename=path.name)
+
+
+@app.post(
+    "/v1/view-sets/{view_set_id}/video-jobs",
+    response_model=VideoJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    tags=["video"],
+)
+def create_video_job(view_set_id: str) -> VideoJobResponse:
+    """Start video generation only after an explicit request for a completed image set."""
+
+    _require_safe_identifier(view_set_id, "view_set_id")
+    settings = _settings()
+    try:
+        image_job = _repository(settings).get_by_view_set(view_set_id)
+    except OSError as exc:
+        raise HTTPException(status_code=404, detail="view set not found") from exc
+    if image_job.state is not WorkflowState.COMPLETED:
+        raise HTTPException(
+            status_code=409,
+            detail="the image view set must complete before video generation",
+        )
+
+    generated_root = (
+        settings.artifact_dir
+        / "generated"
+        / image_job.model_revision
+        / image_job.design_revision
+    )
+    manifest = generated_root / "viewset_generation_manifest.json"
+    board = generated_root / "viewset_board.jpg"
+    view_set_path = (
+        settings.artifact_dir
+        / "scenes"
+        / image_job.model_revision
+        / "designs"
+        / image_job.design_revision
+        / "view_set.json"
+    )
+    try:
+        view_set = ViewSet.model_validate_json(view_set_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="the completed image set has no valid camera set",
+        ) from exc
+    source_images_ready = all(
+        len(tuple((generated_root / camera.view_id).glob("provider_source.*"))) == 1
+        or (generated_root / camera.view_id / "refined.jpg").is_file()
+        for camera in view_set.cameras
+    )
+    if not manifest.is_file() or not board.is_file() or not source_images_ready:
+        raise HTTPException(
+            status_code=409,
+            detail="the completed image set is missing approved generation artifacts",
+        )
+
+    created = CreateVideoJob().execute(
+        _video_repository(settings),
+        image_job,
+        settings,
+        shot_count=len(view_set.cameras),
+    )
+    job = created.job
+    if settings.local_worker_enabled and job.state not in {
+        VideoJobState.COMPLETED,
+        VideoJobState.FAILED,
+    }:
+        _video_dispatcher.submit(job.video_job_id)
+    return _video_job_response(job, created=created.created)
+
+
+@app.get(
+    "/v1/video-jobs/{video_job_id}",
+    response_model=VideoJobResponse,
+    tags=["video"],
+)
+def get_video_job(video_job_id: str) -> VideoJobResponse:
+    _require_safe_identifier(video_job_id, "video_job_id")
+    try:
+        job = _video_repository(_settings()).get(video_job_id)
+    except OSError as exc:
+        raise HTTPException(status_code=404, detail="video job not found") from exc
+    return _video_job_response(job, created=False)
+
+
+@app.get(
+    "/v1/video-jobs/{video_job_id}/output",
+    response_class=FileResponse,
+    tags=["video"],
+)
+def download_video_job_output(video_job_id: str) -> FileResponse:
+    _require_safe_identifier(video_job_id, "video_job_id")
+    try:
+        job = _video_repository(_settings()).get(video_job_id)
+    except OSError as exc:
+        raise HTTPException(status_code=404, detail="video job not found") from exc
+    if job.state is not VideoJobState.COMPLETED or not job.output_ref:
+        raise HTTPException(status_code=409, detail="video is not completed")
+    output = Path(job.output_ref).resolve()
+    videos_root = (_settings().artifact_dir / "videos").resolve()
+    if not output.is_relative_to(videos_root):
+        raise HTTPException(status_code=409, detail="invalid video artifact reference")
+    if not output.is_file():
+        raise HTTPException(status_code=404, detail="video artifact not found")
+    return FileResponse(output, filename=output.name, media_type="video/mp4")
 
 
 def _transition_view_set(view_set_id: str, target: WorkflowState) -> ViewSetJobResponse:

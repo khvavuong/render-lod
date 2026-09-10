@@ -4,6 +4,8 @@ import type {
   OutputArtifact,
   StudioGateway,
   StudioJob,
+  StudioVideoJob,
+  VideoJobState,
   WorkflowState,
 } from '../types/studio';
 
@@ -27,6 +29,15 @@ interface ViewSetResponse {
 
 interface OutputsResponse {
   outputs: OutputArtifact[];
+}
+
+interface VideoJobResponse {
+  video_job_id: string;
+  view_set_id: string;
+  state: VideoJobState;
+  estimated_cost_usd: number;
+  output_url?: string | null;
+  error_message?: string | null;
 }
 
 interface ApiValidationIssue {
@@ -94,6 +105,17 @@ function toJob(job: ViewSetResponse, outputs: OutputArtifact[] = []): StudioJob 
   };
 }
 
+function toVideoJob(job: VideoJobResponse): StudioVideoJob {
+  return {
+    videoJobId: job.video_job_id,
+    viewSetId: job.view_set_id,
+    state: job.state,
+    estimatedCostUsd: job.estimated_cost_usd,
+    outputUrl: job.output_url ?? undefined,
+    errorMessage: job.error_message ?? undefined,
+  };
+}
+
 export class HttpStudioGateway implements StudioGateway {
   async createDesign(values: DesignFormValues): Promise<StudioJob> {
     if (!values.modelFile) {
@@ -153,6 +175,21 @@ export class HttpStudioGateway implements StudioGateway {
         ? await outputRequest
         : await outputRequest.catch(() => ({ outputs: [] }));
     return toJob(job, outputResponse.outputs);
+  }
+
+  async createVideo(viewSetId: string): Promise<StudioVideoJob> {
+    const job = await request<VideoJobResponse>(
+      `/v1/view-sets/${encodeURIComponent(viewSetId)}/video-jobs`,
+      { method: 'POST' },
+    );
+    return toVideoJob(job);
+  }
+
+  async getVideoJob(videoJobId: string): Promise<StudioVideoJob> {
+    const job = await request<VideoJobResponse>(
+      `/v1/video-jobs/${encodeURIComponent(videoJobId)}`,
+    );
+    return toVideoJob(job);
   }
 }
 

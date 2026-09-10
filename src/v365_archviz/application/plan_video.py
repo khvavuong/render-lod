@@ -37,8 +37,9 @@ MOTION_PROMPTS = {
         "One existing vehicle moves slowly through the visible circulation route."
     ),
     "loading_detail": (
-        "A gentle human-eye-level stabilized walk forward inside the authored circulation space. "
-        "Existing adults and vehicles move slowly and naturally without approaching the camera."
+        "A gentle human-eye-level stabilized walk forward through the open-air exterior authored "
+        "circulation space, always outside the building envelope. Existing adults and vehicles "
+        "move slowly and naturally without approaching the camera."
     ),
 }
 

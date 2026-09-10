@@ -7,6 +7,8 @@ import type { StudioGateway } from './types/studio';
 const gateway: StudioGateway = {
   createDesign: async () => { throw new Error('not called'); },
   getJob: async () => { throw new Error('not called'); },
+  createVideo: async () => { throw new Error('not called'); },
+  getVideoJob: async () => { throw new Error('not called'); },
 };
 
 describe('V365 Render Studio', () => {

@@ -225,6 +225,9 @@ Các endpoint control plane hiện có:
 - `GET /v1/view-sets/{view_set_id}`
 - `GET /v1/view-sets/{view_set_id}/outputs`
 - `GET /v1/view-sets/{view_set_id}/outputs/{asset_id}`
+- `POST /v1/view-sets/{view_set_id}/video-jobs` (chỉ chạy khi người dùng yêu cầu)
+- `GET /v1/video-jobs/{video_job_id}`
+- `GET /v1/video-jobs/{video_job_id}/output`
 - `POST /v1/views/{view_id}/approve`
 - `POST /v1/views/{view_id}/repair`
 - OpenAPI UI: `/docs`
@@ -249,9 +252,10 @@ make fe-dev
 Vite chạy tại `http://localhost:5173` và proxy `/v1` sang FastAPI tại cổng 8000. Kiểm tra
 frontend bằng:
 
-Ở chế độ development, FastAPI tự đưa mỗi view set vào local worker đơn luồng. Worker chạy
-conditioning render, Gemini, QA, board/branding và Veo Lite ở nền; frontend theo dõi state qua
-polling. Có thể tắt video bằng `V365_GENERATE_VIDEO=0` hoặc tắt worker bằng
+Ở chế độ development, FastAPI tự đưa mỗi view set vào image worker đơn luồng. Worker chỉ chạy
+conditioning render, Gemini, QA và board/branding; hoàn tất image pipeline không gọi Veo. Sau khi
+bộ ảnh hoàn tất, người dùng có thể chủ động bấm **Tạo video trình diễn**. Video worker riêng vẫn
+tạo đủ sáu shot, ghép thành showreel không audio và chèn logo. Có thể tắt toàn bộ local worker bằng
 `V365_ENABLE_LOCAL_WORKER=0` khi chỉ cần chạy control plane.
 
 ```bash
@@ -265,7 +269,7 @@ make fe-build
 Gemini/Veo và không phát sinh chi phí. Khi dùng giao diện thật, nhập mã dự án, chọn phong cách,
 mức chi tiết, màu sắc và bối cảnh, thêm yêu cầu tự do nếu cần rồi bấm **Tạo phương án diễn họa**.
 Frontend upload và khóa đúng revision của file được chọn, sau đó theo dõi job và cập nhật
-ảnh/video ở panel phải. Nếu revision chưa có Canonical Scene, giao diện dừng an toàn và yêu cầu
+ảnh ở panel phải; video chỉ xuất hiện sau yêu cầu riêng có xác nhận chi phí. Nếu revision chưa có Canonical Scene, giao diện dừng an toàn và yêu cầu
 chạy APS extraction/canonicalization trước khi phát sinh tác vụ sinh ảnh.
 
 ## Quality gates

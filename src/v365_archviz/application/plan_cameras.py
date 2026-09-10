@@ -50,11 +50,11 @@ def _axis_point(
     return center[0] + cross_offset, center[1] + long_offset, z
 
 
-def _corridor_cross_coordinate(design: DesignDNA | None, long_axis: int, fallback: float) -> float:
+def _corridor_cross_coordinate(design: DesignDNA | None, long_axis: int) -> float | None:
     """Find the centre of the clearest gap between parallel roof assemblies."""
 
     if design is None or len(design.roof_assemblies) < 2:
-        return fallback
+        return None
     cross_axis = 1 - long_axis
     ordered = sorted(
         design.roof_assemblies,
@@ -70,7 +70,7 @@ def _corridor_cross_coordinate(design: DesignDNA | None, long_axis: int, fallbac
         gap = upper_edge - lower_edge
         if gap > 0:
             candidates.append((gap, (lower_edge + upper_edge) / 2))
-    return max(candidates, default=(0.0, fallback))[1]
+    return max(candidates)[1] if candidates else None
 
 
 def _preferred_long_axis(design: DesignDNA | None, fallback: int) -> int:
@@ -133,7 +133,18 @@ class PlanStandardCameras:
         height = maximum[2] - minimum[2]
         ground_target_z = minimum[2] + height * 0.42
         aerial_target_z = minimum[2] + height * 0.25
-        corridor_cross = _corridor_cross_coordinate(design, long_axis, center[cross_axis])
+        detected_corridor = _corridor_cross_coordinate(design, long_axis)
+        has_internal_corridor = detected_corridor is not None
+        corridor_cross = (
+            detected_corridor
+            if detected_corridor is not None
+            else minimum[cross_axis] - max(10.0, cross_span * 0.18)
+        )
+        corridor_target_cross = (
+            corridor_cross
+            if has_internal_corridor
+            else minimum[cross_axis] + min(3.0, cross_span * 0.06)
+        )
         site_roles = {
             SemanticRole.SITE_ROAD,
             SemanticRole.SIDEWALK,
@@ -161,10 +172,12 @@ class PlanStandardCameras:
         def point(long_offset: float, cross_offset: float, z: float) -> tuple[float, float, float]:
             return _axis_point(center, long_axis, long_offset, cross_offset, z)
 
-        def corridor_point(long_coordinate: float, z: float) -> tuple[float, float, float]:
+        def corridor_point(
+            long_coordinate: float, z: float, *, target: bool = False
+        ) -> tuple[float, float, float]:
             coordinate = [center[0], center[1], z]
             coordinate[long_axis] = long_coordinate
-            coordinate[cross_axis] = corridor_cross
+            coordinate[cross_axis] = corridor_target_cross if target else corridor_cross
             return tuple(coordinate)  # type: ignore[return-value]
 
         cameras = (
@@ -199,7 +212,9 @@ class PlanStandardCameras:
                     long_min - max(24.0, long_span * 0.10),
                     minimum[2] + max(7.0, height * 0.48),
                 ),
-                target=corridor_point(long_min + long_span * 0.38, height * 0.32),
+                target=corridor_point(
+                    long_min + long_span * 0.38, height * 0.32, target=True
+                ),
                 focal_length_mm=36,
                 sensor_width_mm=36,
                 aspect_ratio="16:9",
@@ -237,6 +252,7 @@ class PlanStandardCameras:
                 target=corridor_point(
                     long_min + long_span * 0.40,
                     minimum[2] + min(3.2, height * 0.3),
+                    target=True,
                 ),
                 focal_length_mm=32,
                 sensor_width_mm=36,
@@ -252,7 +268,7 @@ class PlanStandardCameras:
         if design is not None:
             design_revision = design.design_revision
         view_set = ViewSet(
-            view_set_id=f"{revision_key}-{design_revision}-standard-v6",
+            view_set_id=f"{revision_key}-{design_revision}-standard-v8",
             design_revision=design_revision,
             cameras=cameras,
         )

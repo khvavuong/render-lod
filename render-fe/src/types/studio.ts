@@ -122,6 +122,23 @@ export type WorkflowState =
 
 export type OutputKind = 'image' | 'board' | 'video';
 
+export type VideoJobState =
+  | 'queued'
+  | 'planning'
+  | 'generating'
+  | 'assembling'
+  | 'completed'
+  | 'failed';
+
+export interface StudioVideoJob {
+  videoJobId: string;
+  viewSetId: string;
+  state: VideoJobState;
+  estimatedCostUsd: number;
+  outputUrl?: string;
+  errorMessage?: string;
+}
+
 export interface OutputArtifact {
   id: string;
   kind: OutputKind;
@@ -144,4 +161,6 @@ export interface StudioJob {
 export interface StudioGateway {
   createDesign(values: DesignFormValues): Promise<StudioJob>;
   getJob(viewSetId: string): Promise<StudioJob>;
+  createVideo(viewSetId: string): Promise<StudioVideoJob>;
+  getVideoJob(videoJobId: string): Promise<StudioVideoJob>;
 }

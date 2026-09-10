@@ -25,6 +25,7 @@ import { useMemo, useState } from "react";
 
 import type {
   OutputArtifact,
+  CertificationState,
   StudioJob,
   StudioVideoJob,
   VideoJobState,
@@ -68,6 +69,16 @@ const VIDEO_STATE_LABEL: Record<VideoJobState, string> = {
   assembling: "Đang ghép video và chèn logo",
   completed: "Video đã hoàn tất",
   failed: "Tạo video không thành công",
+};
+
+const CERTIFICATION_META: Record<
+  CertificationState,
+  { label: string; color: string }
+> = {
+  base_pbr: { label: "PBR nền", color: "default" },
+  marketing_generative_review: { label: "Ảnh AI · Chờ kiểm duyệt", color: "warning" },
+  geometry_certified: { label: "Đã chứng nhận hình học", color: "processing" },
+  approved_final: { label: "Đã duyệt bàn giao", color: "success" },
 };
 
 function ArtifactCard({ artifact }: { artifact: OutputArtifact }) {
@@ -174,6 +185,9 @@ export function GenerationWorkspace({
   const videoActive = Boolean(
     videoJob && !["completed", "failed"].includes(videoJob.state),
   );
+  const certification = job
+    ? CERTIFICATION_META[job.certificationState]
+    : null;
 
   return (
     <main className="generation-workspace">
@@ -205,6 +219,9 @@ export function GenerationWorkspace({
             >
               Làm mới
             </Button>
+          )}
+          {certification && (
+            <Tag color={certification.color}>{certification.label}</Tag>
           )}
         </Space>
       </div>

@@ -8,6 +8,18 @@
           "title": "Base Rgb Ref",
           "type": "string"
         },
+        "bounded_mask_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bounded Mask Ref"
+        },
         "camera_ref": {
           "minLength": 1,
           "title": "Camera Ref",
@@ -17,6 +29,18 @@
           "minLength": 1,
           "title": "Clay Ref",
           "type": "string"
+        },
+        "control_pack_manifest_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Control Pack Manifest Ref"
         },
         "depth_ref": {
           "minLength": 1,
@@ -28,10 +52,46 @@
           "title": "Edges Ref",
           "type": "string"
         },
+        "free_mask_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Free Mask Ref"
+        },
         "instance_id_ref": {
           "minLength": 1,
           "title": "Instance Id Ref",
           "type": "string"
+        },
+        "locked_mask_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Locked Mask Ref"
+        },
+        "material_id_manifest_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Material Id Manifest Ref"
         },
         "material_id_ref": {
           "anyOf": [

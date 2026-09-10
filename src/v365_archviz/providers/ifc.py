@@ -67,17 +67,49 @@ def _semantic_role(
     if any(token in normalized_name for token in ("duong", "road", "driveway")):
         return SemanticRole.SITE_ROAD, 0.98
     if any(
-        token in normalized_name for token in ("cong chinh", "cong vao", "main gate", "entry gate")
+        token in normalized_name
+        for token in (
+            "cong chinh",
+            "cong vao",
+            "cong ra vao",
+            "loi ra vao",
+            "main gate",
+            "entry gate",
+            "site entrance",
+        )
     ):
         return SemanticRole.MAIN_ENTRANCE, 0.9
     if any(token in normalized_name for token in ("nha bao ve", "guardhouse", "security house")):
         # LOD100 masterplans commonly encode the controlled entrance as its
         # guardhouse mass instead of a separately modelled gate leaf.
         return SemanticRole.MAIN_ENTRANCE, 0.88
-    if any(token in normalized_name for token in ("hang rao", "fence", "boundary")):
-        return SemanticRole.SITE_BOUNDARY, 0.9
+    if any(
+        token in normalized_name
+        for token in (
+            "hang rao",
+            "ranh gioi",
+            "ranh dat",
+            "fence",
+            "boundary",
+            "property line",
+        )
+    ):
+        return SemanticRole.SITE_BOUNDARY, 0.95
     if any(token in normalized_name for token in ("bai xe", "parking")):
         return SemanticRole.PARKING, 0.9
+    if any(token in normalized_name for token in ("san xe lay hang", "loading yard", "loading")):
+        return SemanticRole.LOADING_ZONE, 0.9
+    if any(
+        token in normalized_name
+        for token in (
+            "phu tro",
+            "tram xu ly",
+            "xu ly nuoc thai",
+            "utility",
+            "service building",
+        )
+    ):
+        return SemanticRole.UTILITY_BLOCK, 0.9
     if height <= 0.5 and footprint_area >= 500:
         return SemanticRole.SERVICE_YARD, 0.75
     if entity_type == "IfcBuildingElementProxy" and footprint_area >= 500 and height >= 5:
@@ -102,7 +134,7 @@ def _box_surfaces(
     height = z1 - z0
     if width <= 0 or depth <= 0 or height <= 0:
         return ()
-    if height < 3.0:
+    if height < 3.0 and element_role is not SemanticRole.UTILITY_BLOCK:
         return ()
     definitions = (
         ("south", (x0, y0, z0), (1.0, 0.0, 0.0), (0.0, -1.0, 0.0), width),
@@ -126,6 +158,26 @@ def _box_surfaces(
         )
         for name, origin, u_axis, normal, surface_width in definitions
     )
+
+
+def _has_overlapping_focus_alternatives(elements: list[SceneElement]) -> bool:
+    """Detect mutually exclusive full-building options exported into one IFC scene."""
+
+    sheds = [item for item in elements if item.semantic_role is SemanticRole.MAIN_SHED]
+    for index, first in enumerate(sheds):
+        first_x0, first_y0, _ = first.bounding_box.minimum
+        first_x1, first_y1, _ = first.bounding_box.maximum
+        first_area = (first_x1 - first_x0) * (first_y1 - first_y0)
+        for second in sheds[index + 1 :]:
+            second_x0, second_y0, _ = second.bounding_box.minimum
+            second_x1, second_y1, _ = second.bounding_box.maximum
+            second_area = (second_x1 - second_x0) * (second_y1 - second_y0)
+            overlap_x = max(0.0, min(first_x1, second_x1) - max(first_x0, second_x0))
+            overlap_y = max(0.0, min(first_y1, second_y1) - max(first_y0, second_y0))
+            overlap = overlap_x * overlap_y
+            if min(first_area, second_area) > 0 and overlap / min(first_area, second_area) >= 0.6:
+                return True
+    return False
 
 
 class IfcGeometryProvider:
@@ -232,6 +284,11 @@ class IfcGeometryProvider:
 
         if not elements:
             raise InvalidModelError("IFC model did not contain tessellatable building elements")
+        if _has_overlapping_focus_alternatives(elements):
+            raise InvalidModelError(
+                "IFC contains overlapping focus-building alternatives; use a view-scoped Revit "
+                "export so one coherent 3D option is selected before canonicalization"
+            )
 
         self.diagnostics = tuple(diagnostics)
         scene = CanonicalScene(

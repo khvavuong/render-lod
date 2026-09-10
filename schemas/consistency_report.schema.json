@@ -182,7 +182,10 @@
       "enum": [
         "geometry",
         "semantic",
+        "material",
         "cross_view_appearance",
+        "camera",
+        "realism",
         "aesthetic",
         "artifact_integrity"
       ],

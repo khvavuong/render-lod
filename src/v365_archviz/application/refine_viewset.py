@@ -67,9 +67,22 @@ def _request_id(
     profile: GenerationProfile,
     prompt: str,
     prompt_version: str,
+    provider_variant: str,
+    selected_view_ids: tuple[str, ...],
+    reference_hashes: tuple[str, ...],
 ) -> str:
     payload = "\n".join(
-        (model_revision, design_revision, view_set_id, profile.value, prompt_version, prompt)
+        (
+            model_revision,
+            design_revision,
+            view_set_id,
+            profile.value,
+            prompt_version,
+            provider_variant,
+            ",".join(selected_view_ids),
+            ",".join(reference_hashes),
+            prompt,
+        )
     ).encode()
     return f"gen-{hashlib.sha256(payload).hexdigest()[:16]}"
 
@@ -87,11 +100,21 @@ class RefineViewSet:
         reference_images: tuple[Path, ...] = (),
         profile: GenerationProfile = GenerationProfile.PREVIEW_FAST,
         watermark: BrandWatermark | None = None,
+        view_ids: tuple[str, ...] = (),
     ) -> RefinedViewSetArtifacts:
         view_set = ViewSet.model_validate_json(view_set_path.read_text(encoding="utf-8"))
         design = DesignDNA.model_validate_json(design_dna_path.read_text(encoding="utf-8"))
         if view_set.design_revision != design.design_revision:
             raise InvalidModelError("view set and Design DNA revisions do not match")
+        known_view_ids = {camera.view_id for camera in view_set.cameras}
+        unknown_view_ids = set(view_ids) - known_view_ids
+        if unknown_view_ids:
+            raise InvalidModelError(f"unknown benchmark view IDs: {sorted(unknown_view_ids)}")
+        selected_cameras = tuple(
+            camera for camera in view_set.cameras if not view_ids or camera.view_id in view_ids
+        )
+        if not selected_cameras:
+            raise InvalidModelError("view-set selection cannot be empty")
         requests = tuple(
             ViewConditioningInput(
                 view_id=camera.view_id,
@@ -101,10 +124,11 @@ class RefineViewSet:
                 semantic=render_root / camera.view_id / "semantic.png",
                 edges=render_root / camera.view_id / "edges.png",
                 prompt=f"{prompt}\n\n{VIEW_DIRECTIVES[camera.role]}",
+                structure_guide=render_root / camera.view_id / "structure_guide.png",
                 reference_images=reference_images,
                 aspect_ratio=camera.aspect_ratio,
             )
-            for camera in view_set.cameras
+            for camera in selected_cameras
         )
         request_id = _request_id(
             model_revision,
@@ -113,6 +137,9 @@ class RefineViewSet:
             profile,
             prompt,
             PROMPT_VERSION,
+            renderer.name,
+            tuple(camera.view_id for camera in selected_cameras),
+            tuple(hashlib.sha256(path.read_bytes()).hexdigest() for path in reference_images),
         )
         generated = renderer.generate_view_set(
             ViewSetGenerationInput(
@@ -159,9 +186,10 @@ class RefineViewSet:
             "provider": renderer.name,
             "prompt_version": PROMPT_VERSION,
             "generation_strategy": (
-                "view-03-style-anchor"
-                if profile in {GenerationProfile.BASE_PRO, GenerationProfile.MARKETING_HERO}
-                and any(camera.view_id == "view-03" for camera in view_set.cameras)
+                "view-01-design-master"
+                if len(requests) >= 2
+                and profile in {GenerationProfile.BASE_PRO, GenerationProfile.MARKETING_HERO}
+                and any(camera.view_id == "view-01" for camera in selected_cameras)
                 else "independent-views"
             ),
             "grammar_version": design.grammar_version,
@@ -172,7 +200,7 @@ class RefineViewSet:
                     "role": camera.role.value,
                     "manifest": str(artifact.manifest_path),
                 }
-                for camera, artifact in zip(view_set.cameras, artifacts, strict=True)
+                for camera, artifact in zip(selected_cameras, artifacts, strict=True)
             ],
         }
         atomic_write(

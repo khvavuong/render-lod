@@ -1,0 +1,119 @@
+{
+  "$defs": {
+    "ControlClass": {
+      "enum": [
+        "locked",
+        "bounded",
+        "free"
+      ],
+      "title": "ControlClass",
+      "type": "string"
+    },
+    "ControlMaskArtifact": {
+      "additionalProperties": false,
+      "properties": {
+        "control_class": {
+          "$ref": "#/$defs/ControlClass"
+        },
+        "coverage": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Coverage",
+          "type": "number"
+        },
+        "path": {
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "control_class",
+        "path",
+        "sha256",
+        "coverage"
+      ],
+      "title": "ControlMaskArtifact",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "critical_edge_ref": {
+      "minLength": 1,
+      "title": "Critical Edge Ref",
+      "type": "string"
+    },
+    "height": {
+      "exclusiveMinimum": 0,
+      "title": "Height",
+      "type": "integer"
+    },
+    "masks": {
+      "items": {
+        "$ref": "#/$defs/ControlMaskArtifact"
+      },
+      "title": "Masks",
+      "type": "array"
+    },
+    "overlap_pixels": {
+      "minimum": 0,
+      "title": "Overlap Pixels",
+      "type": "integer"
+    },
+    "policy_source_ref": {
+      "minLength": 1,
+      "title": "Policy Source Ref",
+      "type": "string"
+    },
+    "schema_version": {
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "structure_guide_ref": {
+      "minLength": 1,
+      "title": "Structure Guide Ref",
+      "type": "string"
+    },
+    "structure_guide_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Structure Guide Sha256",
+      "type": "string"
+    },
+    "uncovered_pixels": {
+      "minimum": 0,
+      "title": "Uncovered Pixels",
+      "type": "integer"
+    },
+    "view_id": {
+      "minLength": 1,
+      "title": "View Id",
+      "type": "string"
+    },
+    "width": {
+      "exclusiveMinimum": 0,
+      "title": "Width",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "view_id",
+    "width",
+    "height",
+    "policy_source_ref",
+    "critical_edge_ref",
+    "structure_guide_ref",
+    "structure_guide_sha256",
+    "masks",
+    "overlap_pixels",
+    "uncovered_pixels"
+  ],
+  "title": "ControlPackManifest",
+  "type": "object"
+}

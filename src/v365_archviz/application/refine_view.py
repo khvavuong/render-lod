@@ -6,7 +6,7 @@ import hashlib
 import io
 import json
 import mimetypes
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from PIL import Image, UnidentifiedImageError
@@ -17,16 +17,19 @@ from v365_archviz.errors import InvalidModelError, ProviderError
 from v365_archviz.providers.contracts import (
     GeneratedImage,
     GenerativeRenderer,
+    ImageProviderCapabilities,
     ViewConditioningInput,
 )
 
-PROMPT_VERSION = "geometry-first-vietnam-industrial-v10-site-access"
+PROMPT_VERSION = "geometry-first-vietnam-industrial-v13-site-access-and-auxiliary"
 DEFAULT_PROMPT = """Create a photorealistic professional architectural visualization of this
 Vietnamese industrial project. Treat the base render and auxiliary passes as immutable spatial
-geometry: preserve the exact camera, site boundary, road and sidewalk centerlines and widths,
-gate/access positions, landscape-zone boundaries, footprint, massing, roof silhouette, building
-count, facade rhythm, glazing and every authored opening. Never remove, reroute, widen, narrow or
-invent roads, gates, yards, parking, buildings, doors, docks or landscape zones.
+geometry: preserve the exact camera, site boundary, authored road and sidewalk centerlines and
+widths, gate/access positions, landscape-zone boundaries, footprint, massing, roof silhouette,
+building count, facade rhythm, glazing and every authored opening. Never remove, reroute, widen or
+narrow authored roads, gates, yards, parking, buildings, doors, docks or landscape zones. New
+low-detail context infrastructure is allowed only in explicitly FREE off-site pixels and must
+never cross or alter the authored project/site geometry.
 
 Make the focus factory refined but buildable and restrained: realistic symmetric low-slope
 profiled-metal industrial roofs fitted inside the approved LOD100 envelope, gutters and downpipes;
@@ -75,12 +78,26 @@ render a plausible controlled gate opening and guardhouse at that exact location
 Keep all authored entrance locations simultaneously visible when the camera framing contains them.
 Never relocate an entrance or block it with planting, vehicles or invented construction. Draw a
 perimeter fence only where boundary geometry is explicitly present in the conditioning passes.
+Keep every visible fence run continuous except at an authored gate opening; retain its plinth,
+posts and rails instead of replacing it with planting. Read the gate as a controlled vehicular
+entrance connected to the authored internal and external roads, with its exact opening preserved.
+UTILITY-BUILDING RULE: every authored utility/auxiliary mass is an opaque, secondary support
+building on the subject site. Preserve its exact footprint, height, service door and ventilation
+details. Give it restrained durable industrial finishes; never turn it into another main shed,
+office pavilion, translucent context block, decorative landmark or landscaping.
 CONTEXT-BUILDING RULE: render a context building only where its geometry exists in the base render
 and its pixels are explicitly marked as context in the semantic-ID pass. Never extrapolate, mirror,
 clone or fill unmarked background with blocks. For approved context geometry, use quiet pale
-translucent massing: preserve exact size and position, add no facade design, and keep attention on
-focus buildings. Context-landscape pixels may become soft distant tree belts, but must remain
-visually secondary and may not spill into the protected project site.
+frosted translucent conceptual massing with credible ground contact, soft shadows, low contrast
+and atmospheric fade: preserve exact size and position, add no facade design, and keep attention
+on focus buildings. It must read as an intentional neutral planning proxy, never glass architecture,
+ghost buildings or floating blocks. CONTEXT SETTING RULE: this is a developed Vietnamese industrial
+park, not a forest or rural wilderness. In explicitly FREE off-site context pixels, create a
+subdued industrial-estate background of broad asphalt collector roads, curbs, drainage edges,
+divided plots, low grass and
+simple secondary warehouses. Trees must be limited to narrow verges, regularly spaced street-tree
+rows, small setbacks and a distant belt; they must not form continuous dense canopy. Context must
+remain visually secondary and may not spill into the protected project site.
 Add sparse entourage only where it cannot hide protected architecture or circulation.
 Use physically plausible daylight and materials, premium bid-presentation quality, no text, no
 logos or aerial labels. Semantic-pass annotation colors must never leak into the final image;
@@ -125,6 +142,9 @@ class RefineView:
             "semantic": view_directory / "semantic.png",
             "edges": view_directory / "edges.png",
         }
+        structure_guide = view_directory / "structure_guide.png"
+        if structure_guide.is_file():
+            inputs["structure_guide"] = structure_guide
         missing = [name for name, path in inputs.items() if not path.is_file()]
         missing.extend(f"reference:{path.name}" for path in reference_images if not path.is_file())
         if missing:
@@ -140,6 +160,7 @@ class RefineView:
                 semantic=inputs["semantic"],
                 edges=inputs["edges"],
                 prompt=prompt,
+                structure_guide=inputs.get("structure_guide"),
                 reference_images=reference_images,
             )
         )
@@ -165,6 +186,10 @@ class RefineView:
             "project_id": project_id,
             "design_revision": design_revision,
             "provider": renderer.name,
+            "provider_capabilities": asdict(
+                getattr(renderer, "capabilities", ImageProviderCapabilities())
+            ),
+            "provider_configuration": getattr(renderer, "provenance", {}),
             "provider_request_id": generated.provider_request_id,
             "prompt_version": PROMPT_VERSION,
             "inputs": {

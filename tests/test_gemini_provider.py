@@ -7,6 +7,7 @@ from PIL import Image
 from v365_archviz.config import Settings
 from v365_archviz.providers.contracts import ViewConditioningInput, ViewSetGenerationInput
 from v365_archviz.providers.gemini import (
+    GeminiConditioningMode,
     GeminiImageRenderer,
     _image_block,
     _neutral_semantic_block,
@@ -37,10 +38,13 @@ def test_generates_with_privacy_safe_request(tmp_path: Path) -> None:
         assert request.headers["x-goog-api-key"] == "test-secret"
         body = __import__("json").loads(request.content)
         assert body["store"] is False
-        assert len(body["input"]) == 6
+        assert len(body["input"]) == 11
         prompt = body["input"][0]["text"]
         assert "non-binding realism samples only" in prompt
         assert "Do not copy their palette" in prompt
+        labels = [block["text"] for block in body["input"] if block["type"] == "text"]
+        assert any("sole camera" in label for label in labels)
+        assert any("STRUCTURAL EDGES" in label for label in labels)
         return httpx.Response(
             200,
             json={
@@ -69,6 +73,8 @@ def test_generates_with_privacy_safe_request(tmp_path: Path) -> None:
     )
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
         renderer = GeminiImageRenderer(_settings(), client=client)
+        assert renderer.capabilities.supports_masked_edit is False
+        assert renderer.capabilities.supports_multi_reference is True
         result = renderer.generate(request)
 
     assert result.content == b"output-image"
@@ -87,6 +93,50 @@ def test_image_block_detects_content_mime_instead_of_misleading_suffix(
     assert block["mime_type"] == "image/jpeg"
 
 
+def test_minimal_conditioning_sends_only_base_edges_and_references(tmp_path: Path) -> None:
+    image = tmp_path / "pass.png"
+    Image.new("RGB", (2, 2), "white").save(image)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = __import__("json").loads(request.content)
+        assert len(body["input"]) == 5
+        labels = [block["text"] for block in body["input"] if block["type"] == "text"]
+        assert any("base RGB, structural edges" in label for label in labels)
+        assert not any("DEPTH" in label for label in labels)
+        assert not any("INSTANCE ID" in label for label in labels)
+        assert not any("SEMANTIC ID" in label for label in labels)
+        return httpx.Response(
+            200,
+            json={
+                "id": "interaction-minimal",
+                "output": {
+                    "mime_type": "image/jpeg",
+                    "data": base64.b64encode(b"output-image").decode(),
+                },
+            },
+        )
+
+    request_input = ViewConditioningInput(
+        view_id="view-01",
+        base_rgb=image,
+        depth=image,
+        instance_id=image,
+        semantic=image,
+        edges=image,
+        prompt="Refine this shared-scene render.",
+    )
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        renderer = GeminiImageRenderer(
+            _settings(),
+            client=client,
+            conditioning_mode=GeminiConditioningMode.MINIMAL,
+        )
+        result = renderer.generate(request_input)
+
+    assert renderer.name == "gemini-minimal"
+    assert result.provider_request_id == "interaction-minimal"
+
+
 def test_semantic_block_is_neutral_grayscale(tmp_path: Path) -> None:
     semantic = tmp_path / "semantic.png"
     Image.new("RGB", (2, 1), "red").save(semantic)
@@ -98,7 +148,7 @@ def test_semantic_block_is_neutral_grayscale(tmp_path: Path) -> None:
     assert red[0] == red[1] == red[2]
 
 
-def test_marketing_viewset_uses_close_hero_as_style_anchor(tmp_path: Path) -> None:
+def test_marketing_viewset_uses_overall_view_as_design_master(tmp_path: Path) -> None:
     image = tmp_path / "pass.png"
     Image.new("RGB", (2, 2), "white").save(image)
     calls: list[dict[str, object]] = []
@@ -136,19 +186,19 @@ def test_marketing_viewset_uses_close_hero_as_style_anchor(tmp_path: Path) -> No
         design_revision="design-1",
         view_set_id="views-1",
         profile="marketing_hero",
-        views=(view("view-01"), view("view-02"), view("view-03")),
+        views=(view("view-03"), view("view-01"), view("view-02")),
     )
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
         renderer = GeminiImageRenderer(_settings(), client=client)
         result = renderer.generate_view_set(generation_request)
 
     assert [generated.view_id for generated in result.views] == [
+        "view-03",
         "view-01",
         "view-02",
-        "view-03",
     ]
     assert len(calls) == 3
     assert "STYLE ANCHOR" not in calls[0]["input"][0]["text"]  # type: ignore[index]
-    assert calls[0]["input"][-1]["data"] != calls[1]["input"][-1]["data"]  # type: ignore[index]
     assert calls[1]["input"][-1]["data"] == base64.b64encode(b"output-1").decode()  # type: ignore[index]
+    assert calls[2]["input"][-1]["data"] == base64.b64encode(b"output-1").decode()  # type: ignore[index]
     assert "STYLE ANCHOR" in calls[1]["input"][0]["text"]  # type: ignore[index]

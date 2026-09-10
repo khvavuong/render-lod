@@ -7,7 +7,7 @@ from datetime import datetime
 from pydantic import Field
 
 from v365_archviz.domain.common import DomainModel, utc_now
-from v365_archviz.domain.workflow import GenerationProfile, WorkflowState
+from v365_archviz.domain.workflow import GenerationProfile, RenderProfile, WorkflowState
 
 _ALLOWED_TRANSITIONS: dict[WorkflowState, frozenset[WorkflowState]] = {
     WorkflowState.RESOLVING_MODEL: frozenset(
@@ -68,6 +68,7 @@ class GenerationJob(DomainModel):
     design_revision: str = Field(min_length=1)
     view_set_id: str = Field(min_length=1)
     profile: GenerationProfile
+    render_profile: RenderProfile = RenderProfile.STANDARD_EEVEE
     state: WorkflowState
     attempt: int = Field(default=0, ge=0)
     created_at: datetime
@@ -87,6 +88,7 @@ class GenerationJob(DomainModel):
         design_revision: str,
         view_set_id: str,
         profile: GenerationProfile,
+        render_profile: RenderProfile = RenderProfile.STANDARD_EEVEE,
         initial_state: WorkflowState = WorkflowState.RESOLVING_MODEL,
     ) -> GenerationJob:
         now = utc_now()
@@ -99,6 +101,7 @@ class GenerationJob(DomainModel):
             design_revision=design_revision,
             view_set_id=view_set_id,
             profile=profile,
+            render_profile=render_profile,
             state=initial_state,
             created_at=now,
             updated_at=now,

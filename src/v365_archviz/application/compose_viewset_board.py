@@ -19,13 +19,13 @@ class ComposedBoard:
 
 
 def _image_for(view_directory: Path) -> Path:
+    candidates = sorted(view_directory.glob("refined.*"))
+    if len(candidates) == 1:
+        return candidates[0]
     provider_sources = sorted(view_directory.glob("provider_source.*"))
     if len(provider_sources) == 1:
         return provider_sources[0]
-    candidates = sorted(view_directory.glob("refined.*"))
-    if len(candidates) != 1:
-        raise InvalidModelError(f"expected one refined image in {view_directory}")
-    return candidates[0]
+    raise InvalidModelError(f"expected one refined image in {view_directory}")
 
 
 class ComposeViewSetBoard:

@@ -122,6 +122,12 @@ export type WorkflowState =
 
 export type OutputKind = 'image' | 'board' | 'video';
 
+export type CertificationState =
+  | 'base_pbr'
+  | 'marketing_generative_review'
+  | 'geometry_certified'
+  | 'approved_final';
+
 export type VideoJobState =
   | 'queued'
   | 'planning'
@@ -154,6 +160,7 @@ export interface StudioJob {
   viewSetId: string;
   designRevision: string;
   state: WorkflowState;
+  certificationState: CertificationState;
   outputs: OutputArtifact[];
   errorMessage?: string;
 }

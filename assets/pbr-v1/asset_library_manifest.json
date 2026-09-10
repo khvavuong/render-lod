@@ -1,0 +1,283 @@
+{
+  "schema_version": "1.0.0",
+  "library_version": "baseline-assets-v2",
+  "assets": [
+    {
+      "asset_id": "mat.roof.profiled-metal.light.v1",
+      "kind": "material",
+      "semantic_roles": ["roof"],
+      "files": [],
+      "license": "V365 proprietary procedural asset",
+      "source": "V365 authored",
+      "renderer_compatibility": ["BLENDER_EEVEE", "BLENDER_EEVEE_NEXT", "CYCLES"],
+      "memory_class": "procedural",
+      "material": {"color_source": "#A8ADB2", "metallic": 0.48, "roughness": 0.32, "micro_surface": {"scale_per_m": 7.0, "roughness_variation": 0.045, "bump_strength": 0.07, "bump_distance_m": 0.035}}
+    },
+    {
+      "asset_id": "mat.facade.profiled-metal.primary.v1",
+      "kind": "material",
+      "semantic_roles": ["main_shed", "primary_facade"],
+      "files": [],
+      "license": "V365 proprietary procedural asset",
+      "source": "V365 authored",
+      "renderer_compatibility": ["BLENDER_EEVEE", "BLENDER_EEVEE_NEXT", "CYCLES"],
+      "memory_class": "procedural",
+      "material": {"color_source": "palette:primary_hex", "metallic": 0.32, "roughness": 0.38, "micro_surface": {"scale_per_m": 5.0, "roughness_variation": 0.055, "bump_strength": 0.08, "bump_distance_m": 0.035}}
+    },
+    {
+      "asset_id": "mat.office.cladding.primary.v1",
+      "kind": "material",
+      "semantic_roles": ["office_block"],
+      "files": [],
+      "license": "V365 proprietary procedural asset",
+      "source": "V365 authored",
+      "renderer_compatibility": ["BLENDER_EEVEE", "BLENDER_EEVEE_NEXT", "CYCLES"],
+      "memory_class": "procedural",
+      "material": {"color_source": "palette:primary_hex", "metallic": 0.18, "roughness": 0.4, "micro_surface": {"scale_per_m": 4.0, "roughness_variation": 0.04, "bump_strength": 0.055, "bump_distance_m": 0.035}}
+    },
+    {
+      "asset_id": "mat.site.concrete.v1",
+      "kind": "material",
+      "semantic_roles": ["service_yard", "loading_zone"],
+      "files": [
+        {"role": "albedo", "path": "textures/hangar_concrete_floor/albedo.jpg", "sha256": "8c365cc65bc3026045c4e3ecba9642cbe0bee1cf705edafe4a8fed5b78c08a4d"},
+        {"role": "roughness", "path": "textures/hangar_concrete_floor/roughness.jpg", "sha256": "84c37e42dd93de6c3743c7bca3558a7264cc6b8be3d0ae74babe0cdf98d5f877"},
+        {"role": "normal", "path": "textures/hangar_concrete_floor/normal.jpg", "sha256": "b1fc3146e62c5d5cd7859eb0d8174480e1ea87c80c92ba4364229547d1f8dda7"}
+      ],
+      "license": "CC0",
+      "source": "Poly Haven: hangar_concrete_floor",
+      "renderer_compatibility": ["BLENDER_EEVEE", "BLENDER_EEVEE_NEXT", "CYCLES"],
+      "memory_class": "1K",
+      "material": {"color_source": "palette:paving_hex", "metallic": 0.0, "roughness": 0.76, "texture_scale_m": 2.0}
+    },
+    {
+      "asset_id": "mat.site.sidewalk.v1",
+      "kind": "material",
+      "semantic_roles": ["sidewalk"],
+      "files": [
+        {"role": "albedo", "path": "textures/concrete_pavement_02/albedo.jpg", "sha256": "e129ee6b59b6ed7f65b4c4c5ba9eb583d13d040ec26bef5d5d4e0080fe342e7a"},
+        {"role": "roughness", "path": "textures/concrete_pavement_02/roughness.jpg", "sha256": "966ee3d1a6d343e5e72d5536fde7c04ecd32e6e95efc879a102effc527f5b679"},
+        {"role": "normal", "path": "textures/concrete_pavement_02/normal.jpg", "sha256": "26c09320b3373da7f55edb8165562f16d36c07161c9c715787a09daf5910450c"}
+      ],
+      "license": "CC0",
+      "source": "Poly Haven: concrete_pavement_02",
+      "renderer_compatibility": ["BLENDER_EEVEE", "BLENDER_EEVEE_NEXT", "CYCLES"],
+      "memory_class": "1K",
+      "material": {"color_source": "palette:paving_hex", "metallic": 0.0, "roughness": 0.78, "texture_scale_m": 1.8}
+    },
+    {
+      "asset_id": "mat.site.asphalt.v1",
+      "kind": "material",
+      "semantic_roles": ["site_road", "parking"],
+      "files": [
+        {"role": "albedo", "path": "textures/asphalt_floor/albedo.jpg", "sha256": "3c4b3ff069a45e3af920f179ab8446a24c9c5cba32c563c235301e638e0ffb55"},
+        {"role": "roughness", "path": "textures/asphalt_floor/roughness.jpg", "sha256": "49c4d388e9c832501581c68d16a37b0742944e4007dfc9e5c3119c6fdd301368"},
+        {"role": "normal", "path": "textures/asphalt_floor/normal.jpg", "sha256": "726c4b2a4777a9f0ed2c7e174da12590dd135f476539dd61b642cb9af923d54f"}
+      ],
+      "license": "CC0",
+      "source": "Poly Haven: asphalt_floor",
+      "renderer_compatibility": ["BLENDER_EEVEE", "BLENDER_EEVEE_NEXT", "CYCLES"],
+      "memory_class": "1K",
+      "material": {"color_source": "#23272A", "metallic": 0.0, "roughness": 0.84, "texture_scale_m": 2.35}
+    },
+    {
+      "asset_id": "mat.landscape.groundcover.v1",
+      "kind": "material",
+      "semantic_roles": ["landscape_zone"],
+      "files": [],
+      "license": "V365 proprietary procedural asset",
+      "source": "V365 authored",
+      "renderer_compatibility": ["BLENDER_EEVEE", "BLENDER_EEVEE_NEXT", "CYCLES"],
+      "memory_class": "procedural",
+      "material": {"color_source": "#35633A", "metallic": 0.0, "roughness": 0.92, "micro_surface": {"scale_per_m": 1.1, "roughness_variation": 0.06, "bump_strength": 0.12, "bump_distance_m": 0.025}}
+    },
+    {
+      "asset_id": "mat.context.ground-muted.v1",
+      "kind": "material",
+      "semantic_roles": ["context_landscape"],
+      "files": [],
+      "license": "V365 proprietary procedural asset",
+      "source": "V365 authored",
+      "renderer_compatibility": ["BLENDER_EEVEE", "BLENDER_EEVEE_NEXT", "CYCLES"],
+      "memory_class": "procedural",
+      "material": {"color_source": "#6B705E", "metallic": 0.0, "roughness": 0.95, "opacity": 1.0, "micro_surface": {"scale_per_m": 0.7, "roughness_variation": 0.04, "bump_strength": 0.06, "bump_distance_m": 0.03}}
+    },
+    {
+      "asset_id": "mat.glass.office-neutral.v1",
+      "kind": "material",
+      "semantic_roles": ["office_glass"],
+      "files": [],
+      "license": "V365 proprietary procedural asset",
+      "source": "V365 authored",
+      "renderer_compatibility": ["BLENDER_EEVEE", "BLENDER_EEVEE_NEXT", "CYCLES"],
+      "memory_class": "procedural",
+      "material": {"color_source": "palette:glass_hex", "metallic": 0.04, "roughness": 0.22, "opacity": 1.0, "transmission_weight": 0.08, "ior": 1.45, "coat_weight": 0.35, "coat_roughness": 0.1}
+    },
+    {
+      "asset_id": "mat.facade.accent-coated-metal.v1",
+      "kind": "material",
+      "semantic_roles": ["facade_accent"],
+      "files": [],
+      "license": "V365 proprietary procedural asset",
+      "source": "V365 authored",
+      "renderer_compatibility": ["BLENDER_EEVEE", "BLENDER_EEVEE_NEXT", "CYCLES"],
+      "memory_class": "procedural",
+      "material": {"color_source": "palette:accent_hex", "metallic": 0.24, "roughness": 0.36, "coat_weight": 0.12, "coat_roughness": 0.16, "micro_surface": {"scale_per_m": 5.0, "roughness_variation": 0.035, "bump_strength": 0.04, "bump_distance_m": 0.02}}
+    },
+    {
+      "asset_id": "mat.facade.secondary-coated-metal.v1",
+      "kind": "material",
+      "semantic_roles": ["facade_secondary"],
+      "files": [],
+      "license": "V365 proprietary procedural asset",
+      "source": "V365 authored",
+      "renderer_compatibility": ["BLENDER_EEVEE", "BLENDER_EEVEE_NEXT", "CYCLES"],
+      "memory_class": "procedural",
+      "material": {"color_source": "palette:secondary_hex", "metallic": 0.28, "roughness": 0.4, "coat_weight": 0.1, "coat_roughness": 0.18, "micro_surface": {"scale_per_m": 4.5, "roughness_variation": 0.035, "bump_strength": 0.035, "bump_distance_m": 0.02}}
+    },
+    {
+      "asset_id": "mat.loading-door.powder-coated.v1",
+      "kind": "material",
+      "semantic_roles": ["loading_dock"],
+      "files": [],
+      "license": "V365 proprietary procedural asset",
+      "source": "V365 authored",
+      "renderer_compatibility": ["BLENDER_EEVEE", "BLENDER_EEVEE_NEXT", "CYCLES"],
+      "memory_class": "procedural",
+      "material": {"color_source": "#242A2E", "metallic": 0.18, "roughness": 0.48, "micro_surface": {"scale_per_m": 6.0, "roughness_variation": 0.025, "bump_strength": 0.025, "bump_distance_m": 0.015}}
+    },
+    {
+      "asset_id": "mat.facade.panel-seam.v1",
+      "kind": "material",
+      "semantic_roles": ["panel_seam"],
+      "files": [],
+      "license": "V365 proprietary procedural asset",
+      "source": "V365 authored",
+      "renderer_compatibility": ["BLENDER_EEVEE", "BLENDER_EEVEE_NEXT", "CYCLES"],
+      "memory_class": "procedural",
+      "material": {"color_source": "palette:secondary_hex", "metallic": 0.3, "roughness": 0.42}
+    },
+    {
+      "asset_id": "mat.vegetation.foliage-tropical.v1",
+      "kind": "material",
+      "semantic_roles": ["tree_foliage"],
+      "files": [],
+      "license": "V365 proprietary procedural asset",
+      "source": "V365 authored",
+      "renderer_compatibility": ["BLENDER_EEVEE", "BLENDER_EEVEE_NEXT", "CYCLES"],
+      "memory_class": "procedural",
+      "material": {"color_source": "#214D27", "metallic": 0.0, "roughness": 0.86, "micro_surface": {"scale_per_m": 2.2, "roughness_variation": 0.08, "bump_strength": 0.1, "bump_distance_m": 0.025}}
+    },
+    {
+      "asset_id": "mat.vegetation.trunk.v1",
+      "kind": "material",
+      "semantic_roles": ["tree_trunk"],
+      "files": [],
+      "license": "V365 proprietary procedural asset",
+      "source": "V365 authored",
+      "renderer_compatibility": ["BLENDER_EEVEE", "BLENDER_EEVEE_NEXT", "CYCLES"],
+      "memory_class": "procedural",
+      "material": {"color_source": "#553B27", "metallic": 0.0, "roughness": 0.88}
+    },
+    {
+      "asset_id": "mat.entourage.vehicle-neutral.v1",
+      "kind": "material",
+      "semantic_roles": ["vehicle_body"],
+      "files": [],
+      "license": "V365 proprietary procedural asset",
+      "source": "V365 authored",
+      "renderer_compatibility": ["BLENDER_EEVEE", "BLENDER_EEVEE_NEXT", "CYCLES"],
+      "memory_class": "procedural",
+      "material": {"color_source": "#8B908F", "metallic": 0.22, "roughness": 0.32, "coat_weight": 0.28, "coat_roughness": 0.12}
+    },
+    {
+      "asset_id": "mat.entourage.vehicle-glass.v1",
+      "kind": "material",
+      "semantic_roles": ["vehicle_glass"],
+      "files": [],
+      "license": "V365 proprietary procedural asset",
+      "source": "V365 authored",
+      "renderer_compatibility": ["BLENDER_EEVEE", "BLENDER_EEVEE_NEXT", "CYCLES"],
+      "memory_class": "procedural",
+      "material": {"color_source": "#152126", "metallic": 0.04, "roughness": 0.18, "coat_weight": 0.32, "coat_roughness": 0.08}
+    },
+    {
+      "asset_id": "mat.entourage.tire.v1",
+      "kind": "material",
+      "semantic_roles": ["vehicle_tire"],
+      "files": [],
+      "license": "V365 proprietary procedural asset",
+      "source": "V365 authored",
+      "renderer_compatibility": ["BLENDER_EEVEE", "BLENDER_EEVEE_NEXT", "CYCLES"],
+      "memory_class": "procedural",
+      "material": {"color_source": "#111314", "metallic": 0.0, "roughness": 0.9}
+    },
+    {
+      "asset_id": "mat.entourage.person-neutral.v1",
+      "kind": "material",
+      "semantic_roles": ["person"],
+      "files": [],
+      "license": "V365 proprietary procedural asset",
+      "source": "V365 authored",
+      "renderer_compatibility": ["BLENDER_EEVEE", "BLENDER_EEVEE_NEXT", "CYCLES"],
+      "memory_class": "procedural",
+      "material": {"color_source": "#414645", "metallic": 0.0, "roughness": 0.72}
+    },
+    {
+      "asset_id": "env.industrial-overcast.day.v1",
+      "kind": "environment",
+      "semantic_roles": ["environment_daylight"],
+      "files": [
+        {"role": "environment", "path": "environment/overcast_industrial_courtyard_1k.hdr", "sha256": "34dafd32b607256c61113c3c757a99a6d3e6b211953da77e4417d749d001def3"}
+      ],
+      "license": "CC0",
+      "source": "Poly Haven: overcast_industrial_courtyard",
+      "renderer_compatibility": ["BLENDER_EEVEE", "BLENDER_EEVEE_NEXT", "CYCLES"],
+      "memory_class": "1K"
+    },
+    {
+      "asset_id": "veg.tree.tropical-lowpoly.v1",
+      "kind": "vegetation",
+      "semantic_roles": ["landscape_zone"],
+      "physical_dimensions_m": [3.2, 3.2, 6.0],
+      "files": [],
+      "license": "V365 proprietary procedural asset",
+      "source": "V365 authored",
+      "renderer_compatibility": ["BLENDER_EEVEE", "BLENDER_EEVEE_NEXT", "CYCLES"],
+      "memory_class": "procedural"
+    },
+    {
+      "asset_id": "vehicle.passenger.neutral-lowpoly.v1",
+      "kind": "vehicle",
+      "semantic_roles": ["parking"],
+      "physical_dimensions_m": [4.6, 1.85, 1.55],
+      "files": [],
+      "license": "V365 proprietary procedural asset",
+      "source": "V365 authored",
+      "renderer_compatibility": ["BLENDER_EEVEE", "BLENDER_EEVEE_NEXT", "CYCLES"],
+      "memory_class": "procedural"
+    },
+    {
+      "asset_id": "vehicle.service.light-truck-lowpoly.v1",
+      "kind": "vehicle",
+      "semantic_roles": ["service_yard"],
+      "physical_dimensions_m": [6.8, 2.35, 2.75],
+      "files": [],
+      "license": "V365 proprietary procedural asset",
+      "source": "V365 authored",
+      "renderer_compatibility": ["BLENDER_EEVEE", "BLENDER_EEVEE_NEXT", "CYCLES"],
+      "memory_class": "procedural"
+    },
+    {
+      "asset_id": "person.scale-cue-neutral-lowpoly.v1",
+      "kind": "person",
+      "semantic_roles": ["office_entrance"],
+      "physical_dimensions_m": [0.45, 0.35, 1.72],
+      "files": [],
+      "license": "V365 proprietary procedural asset",
+      "source": "V365 authored",
+      "renderer_compatibility": ["BLENDER_EEVEE", "BLENDER_EEVEE_NEXT", "CYCLES"],
+      "memory_class": "procedural"
+    }
+  ]
+}

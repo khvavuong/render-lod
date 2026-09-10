@@ -42,10 +42,13 @@ def test_technical_pass_still_requires_visual_review(tmp_path: Path) -> None:
 
     assert result.report.status is QAStatus.REVIEW
     assert {finding.gate for finding in result.report.findings} == {
-        QAGate.GEOMETRY,
-        QAGate.SEMANTIC,
-        QAGate.CROSS_VIEW_APPEARANCE,
-        QAGate.AESTHETIC,
+            QAGate.GEOMETRY,
+            QAGate.SEMANTIC,
+            QAGate.MATERIAL,
+            QAGate.CROSS_VIEW_APPEARANCE,
+            QAGate.CAMERA,
+            QAGate.REALISM,
+            QAGate.AESTHETIC,
     }
 
 
@@ -58,6 +61,39 @@ def test_technical_error_fails_consistency_report(tmp_path: Path) -> None:
 
     assert result.report.status is QAStatus.FAIL
     assert result.report.findings[0].gate is QAGate.ARTIFACT_INTEGRITY
+
+
+def test_measured_camera_evidence_replaces_camera_review(tmp_path: Path) -> None:
+    report_path = tmp_path / "technical.json"
+    report_path.write_text(
+        json.dumps(
+            {
+                "project_id": "project",
+                "design_revision": "design",
+                "views": [
+                    {
+                        "view_id": view_id,
+                        "findings": [],
+                        "gate_evidence": {
+                            "camera": {"status": "pass", "code": "camera_coverage_passed"}
+                        },
+                    }
+                    for view_id in ("view-01", "view-02")
+                ],
+                "global_findings": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = EvaluateConsistency().execute(report_path, "model", "view-set")
+
+    camera_findings = [
+        finding for finding in result.report.findings if finding.gate is QAGate.CAMERA
+    ]
+    assert len(camera_findings) == 1
+    assert camera_findings[0].status is QAStatus.PASS
+    assert camera_findings[0].code == "camera_evidence_passed"
 
 
 def test_repair_plan_is_bounded_and_escalates(tmp_path: Path) -> None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import io
 import mimetypes
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -17,11 +18,19 @@ from v365_archviz.providers.contracts import (
     GeneratedImage,
     GeneratedView,
     GeneratedViewSet,
+    ImageProviderCapabilities,
     ViewConditioningInput,
     ViewSetGenerationInput,
 )
 
 DEFAULT_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/interactions"
+
+
+class GeminiConditioningMode(str, Enum):
+    """Versioned input strategies used by the controlled-realism bake-off."""
+
+    FULL = "full"
+    MINIMAL = "minimal"
 
 
 def _image_block(path: Path) -> dict[str, str]:
@@ -96,7 +105,9 @@ def _find_output_image(value: Any) -> tuple[bytes, str] | None:
 
 
 class GeminiImageRenderer:
-    name = "gemini"
+    capabilities = ImageProviderCapabilities(
+        supports_multi_reference=True,
+    )
 
     def __init__(
         self,
@@ -104,6 +115,7 @@ class GeminiImageRenderer:
         *,
         client: httpx.Client | None = None,
         endpoint: str = DEFAULT_ENDPOINT,
+        conditioning_mode: GeminiConditioningMode = GeminiConditioningMode.FULL,
     ) -> None:
         api_key = settings.gemini_api_key
         if not api_key:
@@ -113,6 +125,13 @@ class GeminiImageRenderer:
         self._client = client or httpx.Client(timeout=httpx.Timeout(180.0, connect=10.0))
         self._owns_client = client is None
         self._endpoint = endpoint
+        self._conditioning_mode = conditioning_mode
+
+    @property
+    def name(self) -> str:
+        if self._conditioning_mode is GeminiConditioningMode.FULL:
+            return "gemini"
+        return f"gemini-{self._conditioning_mode.value}"
 
     def close(self) -> None:
         if self._owns_client:
@@ -138,12 +157,16 @@ class GeminiImageRenderer:
             if style_anchor is not None
             else ""
         )
+        input_order = (
+            "base RGB, structural edges"
+            if self._conditioning_mode is GeminiConditioningMode.MINIMAL
+            else "base RGB, depth, instance ID, semantic ID, structural edges"
+        )
         labeled_prompt = (
             f"{request.prompt}\n\n"
-            "The attached images are ordered as: base RGB, depth, instance ID, semantic ID, "
-            "edges, "
+            f"The attached images are ordered as: {input_order}, "
             "then optional approved references. Preserve the camera and all hard geometry "
-            "from the base RGB; auxiliary passes are constraints. Approved references are "
+            "from the base RGB; any auxiliary passes are constraints. Approved references are "
             "non-binding realism samples only: use their photographic credibility, material "
             "response and construction-detail density. Do not copy their palette, facade motif, "
             "roof form, massing, site or landscape layout, surrounding land use, camera, logos, "
@@ -156,19 +179,62 @@ class GeminiImageRenderer:
             "muted-grey context pixels; grey background is empty space, not permission to invent "
             f"massing.{anchor_instruction}"
         )
-        input_images = [
-            _image_block(request.base_rgb),
-            _image_block(request.depth),
-            _image_block(request.instance_id),
-            _neutral_semantic_block(request.semantic),
-            _image_block(request.edges),
-            *map(_image_block, request.reference_images),
-        ]
         input_blocks: list[dict[str, str]] = [
             {"type": "text", "text": labeled_prompt},
-            *input_images,
+            {
+                "type": "text",
+                "text": "BASE RGB — sole camera, geometry, composition and spatial authority:",
+            },
+            _image_block(request.base_rgb),
         ]
+        if self._conditioning_mode is GeminiConditioningMode.FULL:
+            input_blocks.extend(
+                (
+                    {"type": "text", "text": "DEPTH — preserve this exact depth ordering:"},
+                    _image_block(request.depth),
+                    {
+                        "type": "text",
+                        "text": "INSTANCE ID — preserve every distinct object boundary and count:",
+                    },
+                    _image_block(request.instance_id),
+                    {
+                        "type": "text",
+                        "text": (
+                            "SEMANTIC ID — neutral categorical regions, never a color reference:"
+                        ),
+                    },
+                    _neutral_semantic_block(request.semantic),
+                )
+            )
+        input_blocks.extend(
+            (
+                {
+                    "type": "text",
+                    "text": "STRUCTURAL EDGES — do not move, remove or invent these boundaries:",
+                },
+                _image_block(request.edges),
+            )
+        )
+        for index, reference in enumerate(request.reference_images, start=1):
+            input_blocks.extend(
+                (
+                    {
+                        "type": "text",
+                        "text": (
+                            f"REALISM REFERENCE {index} — finish quality only; no geometry, "
+                            "palette or design authority:"
+                        ),
+                    },
+                    _image_block(reference),
+                )
+            )
         if style_anchor is not None:
+            input_blocks.append(
+                {
+                    "type": "text",
+                    "text": "STYLE ANCHOR — shared appearance only; current-view geometry wins:",
+                }
+            )
             input_blocks.append(_generated_image_block(style_anchor))
         payload = {
             "model": self._settings.gemini_image_model,
@@ -219,8 +285,12 @@ class GeminiImageRenderer:
             )
             return GeneratedViewSet(request_id=request.request_id, views=views)
 
+        # The overall view is the project identity authority: it contains the largest
+        # observable set of roofs, facades, site access, fence and context massing.  A
+        # close facade view is a poor master because the provider must invent the unseen
+        # appearance of the rest of the campus.
         anchor_request = next(
-            (view for view in request.views if view.view_id == "view-03"), request.views[0]
+            (view for view in request.views if view.view_id == "view-01"), request.views[0]
         )
         anchor = self.generate(anchor_request)
         generated_by_id = {anchor_request.view_id: anchor}

@@ -38,7 +38,10 @@
           "type": "array"
         }
       },
-      "required": ["minimum", "maximum"],
+      "required": [
+        "minimum",
+        "maximum"
+      ],
       "title": "BoundingBox",
       "type": "object"
     },
@@ -66,17 +69,29 @@
           "default": "focus"
         }
       },
-      "required": ["building_id", "roof"],
+      "required": [
+        "building_id",
+        "roof"
+      ],
       "title": "BuildingDesign",
       "type": "object"
     },
     "BuildingTreatment": {
-      "enum": ["focus", "context"],
+      "enum": [
+        "focus",
+        "auxiliary",
+        "context"
+      ],
       "title": "BuildingTreatment",
       "type": "string"
     },
     "DecorLevel": {
-      "enum": ["minimal", "subtle", "balanced", "expressive"],
+      "enum": [
+        "minimal",
+        "subtle",
+        "balanced",
+        "expressive"
+      ],
       "title": "DecorLevel",
       "type": "string"
     },
@@ -183,7 +198,10 @@
           "type": "number"
         }
       },
-      "required": ["u", "width_m"],
+      "required": [
+        "u",
+        "width_m"
+      ],
       "title": "Entrance",
       "type": "object"
     },
@@ -324,7 +342,10 @@
           "type": "string"
         }
       },
-      "required": ["surface_id", "panel_module_m"],
+      "required": [
+        "surface_id",
+        "panel_module_m"
+      ],
       "title": "FacadeDesign",
       "type": "object"
     },
@@ -348,7 +369,11 @@
           "type": "number"
         }
       },
-      "required": ["dock_id", "u", "width_m"],
+      "required": [
+        "dock_id",
+        "u",
+        "width_m"
+      ],
       "title": "LoadingDock",
       "type": "object"
     },
@@ -438,7 +463,12 @@
           "$ref": "#/$defs/RoofDesign"
         }
       },
-      "required": ["assembly_id", "building_ids", "bounding_box", "roof"],
+      "required": [
+        "assembly_id",
+        "building_ids",
+        "bounding_box",
+        "roof"
+      ],
       "title": "RoofAssembly",
       "type": "object"
     },
@@ -476,7 +506,9 @@
           "type": "boolean"
         }
       },
-      "required": ["roof_type"],
+      "required": [
+        "roof_type"
+      ],
       "title": "RoofDesign",
       "type": "object"
     },

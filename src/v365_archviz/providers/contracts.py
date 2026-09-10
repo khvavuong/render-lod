@@ -34,6 +34,7 @@ class ViewConditioningInput:
     semantic: Path
     edges: Path
     prompt: str
+    structure_guide: Path | None = None
     reference_images: tuple[Path, ...] = ()
     aspect_ratio: str = "16:9"
     image_size: str = "1K"
@@ -44,6 +45,17 @@ class GeneratedImage:
     content: bytes
     media_type: str
     provider_request_id: str | None
+
+
+@dataclass(frozen=True)
+class ImageProviderCapabilities:
+    supports_masked_edit: bool = False
+    supports_control_image: bool = False
+    supports_control_scale: bool = False
+    supports_edit_strength: bool = False
+    supports_seed: bool = False
+    supports_multi_reference: bool = False
+    supports_multi_turn_state: bool = False
 
 
 @dataclass(frozen=True)
@@ -74,6 +86,9 @@ class GenerativeRenderer(Protocol):
 
     @property
     def name(self) -> str: ...
+
+    @property
+    def capabilities(self) -> ImageProviderCapabilities: ...
 
     def generate(self, request: ViewConditioningInput) -> GeneratedImage: ...
 

@@ -56,6 +56,7 @@ test('configures a design and follows the generation output', async ({ page }) =
         view_set_id: 'viewset-e2e',
         design_revision: 'R01-e2e',
         state: 'completed',
+        certification_state: 'marketing_generative_review',
       },
     }),
   );

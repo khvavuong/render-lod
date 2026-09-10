@@ -7,11 +7,15 @@ from pathlib import Path
 
 from v365_archviz.application.brand_deliverables import BrandDeliverables
 from v365_archviz.application.brand_watermark import BrandWatermark
+from v365_archviz.application.build_control_pack import BuildControlPack
 from v365_archviz.application.build_correspondence import BuildCorrespondenceIndex
 from v365_archviz.application.compose_viewset_board import ComposeViewSetBoard
+from v365_archviz.application.create_certification_report import CreateCertificationReport
 from v365_archviz.application.evaluate_consistency import EvaluateConsistency
+from v365_archviz.application.protect_refinement import ProtectRefinement
 from v365_archviz.application.refine_viewset import RefineViewSet
 from v365_archviz.application.refinement_prompt import build_refinement_prompt
+from v365_archviz.application.validate_conditioning import ValidateConditioningViewSet
 from v365_archviz.application.validate_viewset import ValidateGeneratedViewSet
 from v365_archviz.config import Settings
 from v365_archviz.domain.jobs import GenerationJob
@@ -54,24 +58,16 @@ class RunGenerationJob:
         paths = _JobPaths.from_job(settings.artifact_dir, job)
         view_set = ViewSet.model_validate_json(paths.view_set.read_text(encoding="utf-8"))
 
+        if job.state in {WorkflowState.RENDERING_PASSES, WorkflowState.GENERATING_VIEWSET}:
+            self._ensure_conditioning(paths, view_set, job)
+
         if job.state is WorkflowState.RENDERING_PASSES:
-            if not self._conditioning_complete(paths.render_root, view_set):
-                DockerConditioningRenderer().execute(
-                    paths.scene,
-                    paths.design_dna,
-                    paths.view_set,
-                    paths.render_root,
-                )
-            correspondence = BuildCorrespondenceIndex().execute(
-                paths.scene,
-                paths.view_set,
-                paths.render_root,
-            )
             job = self._advance(
                 repository,
                 job,
                 WorkflowState.GENERATING_VIEWSET,
-                correspondence.manifest_path,
+                paths.render_root / "correspondence_index.json",
+                paths.render_root / "conditioning_qa.json",
             )
 
         if job.state is WorkflowState.GENERATING_VIEWSET:
@@ -87,11 +83,13 @@ class RunGenerationJob:
                     prompt,
                     profile=job.profile,
                 )
+            protected = ProtectRefinement().execute(paths.render_root, paths.generated_root)
             job = self._advance(
                 repository,
                 job,
                 WorkflowState.VALIDATING,
                 generated.manifest_path,
+                protected.manifest_path,
             )
 
         if job.state is WorkflowState.VALIDATING:
@@ -110,12 +108,20 @@ class RunGenerationJob:
                 job.model_revision,
                 job.view_set_id,
             )
+            certification_path = paths.generated_root / "certification_report.json"
+            CreateCertificationReport().execute(
+                consistency.report_path,
+                validation.report_path,
+                paths.generated_root / "protected_composite_manifest.json",
+                certification_path,
+            )
             job = self._advance(
                 repository,
                 job,
                 WorkflowState.COMPOSING_BOARD,
                 validation.report_path,
                 consistency.report_path,
+                certification_path,
             )
 
         if job.state is WorkflowState.COMPOSING_BOARD:
@@ -142,6 +148,36 @@ class RunGenerationJob:
             job = self._advance(repository, job, WorkflowState.COMPLETED)
         return job
 
+    def _ensure_conditioning(
+        self,
+        paths: _JobPaths,
+        view_set: ViewSet,
+        job: GenerationJob,
+    ) -> None:
+        if not self._conditioning_complete(paths.render_root, view_set):
+            DockerConditioningRenderer().execute(
+                paths.scene,
+                paths.design_dna,
+                paths.view_set,
+                paths.render_root,
+                job.render_profile,
+            )
+            for camera in view_set.cameras:
+                BuildControlPack().execute(paths.render_root / camera.view_id)
+        BuildCorrespondenceIndex().execute(
+            paths.scene,
+            paths.view_set,
+            paths.render_root,
+        )
+        conditioning_qa = ValidateConditioningViewSet().execute(
+            paths.scene,
+            paths.view_set,
+            paths.render_root,
+        )
+        if not conditioning_qa.passed:
+            failed = ", ".join(conditioning_qa.failed_view_ids)
+            raise V365Error(f"camera preflight rejected views before paid generation: {failed}")
+
     @staticmethod
     def _advance(
         repository: LocalJobRepository,
@@ -156,7 +192,24 @@ class RunGenerationJob:
 
     @staticmethod
     def _conditioning_complete(render_root: Path, view_set: ViewSet) -> bool:
-        names = ("base_rgb.png", "depth.png", "instance_id.png", "semantic.png", "edges.png")
+        if not (render_root / "render_manifest.json").is_file():
+            return False
+        names = (
+            "base_rgb.png",
+            "depth.png",
+            "instance_id.png",
+            "semantic.png",
+            "semantic_id_manifest.json",
+            "material_id.png",
+            "material_id_manifest.json",
+            "edges.png",
+            "control_policy.png",
+            "structure_guide.png",
+            "locked_mask.png",
+            "bounded_mask.png",
+            "free_mask.png",
+            "control_pack_manifest.json",
+        )
         passes_exist = all(
             (render_root / camera.view_id / name).is_file()
             for camera in view_set.cameras

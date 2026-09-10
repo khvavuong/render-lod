@@ -17,13 +17,13 @@ def _image_for(view_directory: Path, image_name: str | None = None) -> Path:
         if not image.is_file():
             raise ValueError(f"expected {image_name} in {view_directory}")
         return image
+    candidates = sorted(view_directory.glob("refined.*"))
+    if len(candidates) == 1:
+        return candidates[0]
     provider_sources = sorted(view_directory.glob("provider_source.*"))
     if len(provider_sources) == 1:
         return provider_sources[0]
-    candidates = sorted(view_directory.glob("refined.*"))
-    if len(candidates) != 1:
-        raise ValueError(f"expected one refined image in {view_directory}")
-    return candidates[0]
+    raise ValueError(f"expected one refined image in {view_directory}")
 
 
 def main() -> None:

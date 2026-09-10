@@ -1,0 +1,289 @@
+{
+  "$defs": {
+    "AssetFile": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "role": {
+          "minLength": 1,
+          "title": "Role",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "role",
+        "path",
+        "sha256"
+      ],
+      "title": "AssetFile",
+      "type": "object"
+    },
+    "AssetKind": {
+      "enum": [
+        "material",
+        "environment",
+        "vegetation",
+        "vehicle",
+        "person",
+        "site_furniture"
+      ],
+      "title": "AssetKind",
+      "type": "string"
+    },
+    "AssetManifestEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "asset_id": {
+          "minLength": 1,
+          "title": "Asset Id",
+          "type": "string"
+        },
+        "files": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/AssetFile"
+          },
+          "title": "Files",
+          "type": "array"
+        },
+        "kind": {
+          "$ref": "#/$defs/AssetKind"
+        },
+        "license": {
+          "minLength": 1,
+          "title": "License",
+          "type": "string"
+        },
+        "material": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MaterialDefinition"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "memory_class": {
+          "pattern": "^(procedural|1K|2K|4K)$",
+          "title": "Memory Class",
+          "type": "string"
+        },
+        "physical_dimensions_m": {
+          "anyOf": [
+            {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Physical Dimensions M"
+        },
+        "renderer_compatibility": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Renderer Compatibility",
+          "type": "array"
+        },
+        "semantic_roles": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Semantic Roles",
+          "type": "array"
+        },
+        "source": {
+          "minLength": 1,
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "asset_id",
+        "kind",
+        "semantic_roles",
+        "license",
+        "source",
+        "renderer_compatibility",
+        "memory_class"
+      ],
+      "title": "AssetManifestEntry",
+      "type": "object"
+    },
+    "MaterialDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "coat_roughness": {
+          "default": 0.03,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Coat Roughness",
+          "type": "number"
+        },
+        "coat_weight": {
+          "default": 0.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Coat Weight",
+          "type": "number"
+        },
+        "color_source": {
+          "minLength": 1,
+          "title": "Color Source",
+          "type": "string"
+        },
+        "ior": {
+          "default": 1.5,
+          "maximum": 3.0,
+          "minimum": 1.0,
+          "title": "Ior",
+          "type": "number"
+        },
+        "metallic": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Metallic",
+          "type": "number"
+        },
+        "micro_surface": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MicroSurfaceDefinition"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "opacity": {
+          "default": 1.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Opacity",
+          "type": "number"
+        },
+        "roughness": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Roughness",
+          "type": "number"
+        },
+        "texture_scale_m": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Texture Scale M"
+        },
+        "transmission_weight": {
+          "default": 0.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Transmission Weight",
+          "type": "number"
+        }
+      },
+      "required": [
+        "color_source",
+        "metallic",
+        "roughness"
+      ],
+      "title": "MaterialDefinition",
+      "type": "object"
+    },
+    "MicroSurfaceDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "bump_distance_m": {
+          "exclusiveMinimum": 0.0,
+          "title": "Bump Distance M",
+          "type": "number"
+        },
+        "bump_strength": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Bump Strength",
+          "type": "number"
+        },
+        "roughness_variation": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Roughness Variation",
+          "type": "number"
+        },
+        "scale_per_m": {
+          "exclusiveMinimum": 0.0,
+          "title": "Scale Per M",
+          "type": "number"
+        }
+      },
+      "required": [
+        "scale_per_m",
+        "roughness_variation",
+        "bump_strength",
+        "bump_distance_m"
+      ],
+      "title": "MicroSurfaceDefinition",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "assets": {
+      "items": {
+        "$ref": "#/$defs/AssetManifestEntry"
+      },
+      "title": "Assets",
+      "type": "array"
+    },
+    "library_version": {
+      "minLength": 1,
+      "title": "Library Version",
+      "type": "string"
+    },
+    "schema_version": {
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "library_version",
+    "assets"
+  ],
+  "title": "AssetLibraryManifest",
+  "type": "object"
+}

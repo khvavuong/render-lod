@@ -1,8 +1,8 @@
 # V365 Controlled Realism — Kế hoạch cải thiện chất lượng diễn họa
 
-**Phiên bản:** 1.0  
+**Phiên bản:** 1.1
 **Ngày:** 2026-09-10  
-**Trạng thái:** Approved direction / implementation baseline  
+**Trạng thái:** Revised direction — geometry-control-first / cloud beauty pilot
 **Phạm vi:** Revit LOD100 → 6 ảnh diễn họa nhà xưởng công nghiệp đồng nhất, chân thực và có kiểm soát
 
 ## 1. Mục tiêu và quyết định kiến trúc
@@ -11,33 +11,79 @@ Mục tiêu của giai đoạn tiếp theo là làm cho bộ ảnh giống ảnh
 không đánh đổi độ đúng của model, giao thông nội bộ, mái, cổng, hàng rào, cảnh quan hoặc sự đồng
 nhất giữa sáu góc nhìn.
 
-Kiến trúc mục tiêu được chốt theo nguyên tắc:
+Sau spike PBR ngày 2026-09-10, kiến trúc mục tiêu được sửa theo nguyên tắc:
 
-> **PBR-first, shared-scene, mask-bounded generation, evidence-based QA.**
+> **Geometry-control-first, cloud beauty generation, protected compositing, evidence-based QA.**
 
-Ảnh PBR từ scene 3D dùng chung phải đạt khoảng 70–85% chất lượng cuối. AI chỉ đảm nhiệm phần hoàn
-thiện hình ảnh còn lại trong phạm vi được phép; AI không được là nguồn quyết định hình học hoặc tự
-thiết kế lại công trình.
+Blender không còn phải dựng đủ asset để đạt 70–85% chất lượng ảnh cuối. Scene 3D dùng chung chịu
+trách nhiệm cho camera, silhouette, mái, footprint, đường, cổng, hàng rào, landscape region và các
+control pass. Cloud image model chịu trách nhiệm cho material appearance, vegetation/entourage
+beauty, ánh sáng, atmosphere và photographic finish. AI vẫn không được là nguồn quyết định hình học
+hoặc tự thiết kế lại công trình.
 
 ```text
 RVT / IFC / Canonical Scene
         ↓
 Semantic Scene + Design DNA
         ↓
-Procedural Detail + Versioned Asset Library
+Lightweight Control Scene + semantic placement
         ↓
-Shared PBR Scene
+Cheap Eevee guide render
         ↓
 6 cameras + RGB/depth/normal/ID/semantic/control masks
         ↓
-Bounded AI refinement: global low-strength → local masked repair
+Cloud beauty: structure-controlled generation → local masked repair
         ↓
 Geometry + semantic + cross-view + realism QA
         ↓
 Human approval
         ↓
-Certified View Set + Board + Video inputs
+Certified Beauty View Set + Board + optional Video input
 ```
+
+### 1.1. Vì sao thay đổi
+
+Spike trên sample 4 chứng minh scene-linear, HDRI và PBR ground maps chỉ cải thiện cục bộ; phần lớn
+pixel vẫn là roof/facade procedural, low-poly entourage và context massing nên ảnh vẫn có cảm giác
+CGI. Tăng Cycles/sample không giải quyết chất lượng asset và có chi phí phần cứng lớn. Hướng mới giữ
+phần 3D mà dự án đã làm tốt — đúng tỷ lệ, hình khối, camera và semantic — rồi thuê cloud model làm
+phần beauty vốn đắt nhất nếu tự dựng.
+
+### 1.2. Provider shortlist và chi phí tham chiếu
+
+Giá tại thời điểm 2026-09-10, chưa gồm retry và input token rất nhỏ:
+
+| Provider/path | Control phù hợp | Giá 1 ảnh | 6 ảnh | Vai trò đề xuất |
+|---|---|---:|---:|---|
+| Gemini 3.1 Flash Lite Image | edit/multi-reference, không có hard mask/control strength | $0.0336 | $0.2016 | preview/candidate giá thấp |
+| Gemini 3.1 Flash Image | edit/multi-reference, không có hard structure control | $0.067 | $0.402 | hero/candidate với credential hiện có |
+| Stability Control Structure | structure image + `control_strength` + seed | $0.05 | $0.30 | ứng viên mặc định cho six-view pilot |
+| FLUX.2 Pro edit | multi-reference, photoreal edit | từ $0.045 | từ $0.27 | ứng viên style/realism challenger |
+| Imagen 3 controlled customization | Canny/scribble control | $0.04 | $0.24 | benchmark khi có Vertex access |
+
+Nguồn: [Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing),
+[Stability API/pricing](https://platform.stability.ai/pricing),
+[FLUX pricing](https://docs.bfl.ai/quick_start/pricing),
+[Vertex AI pricing](https://cloud.google.com/vertex-ai/generative-ai/pricing).
+
+Imagen không được chọn mặc định chỉ vì rẻ: tài liệu của Google liệt kê việc kết hợp style reference
+với composition control là use case không được tối ưu. FLUX hỗ trợ multi-reference tốt nhưng không
+công bố structure-strength contract. Mọi provider vẫn phải qua protected compositor và QA; tên
+`control` không đồng nghĩa geometry guarantee.
+
+### 1.3. Routing tối ưu chi phí
+
+1. Render control pack cho cả sáu view trên CPU/Eevee, chưa gọi AI.
+2. Sinh một hero preview; chỉ sinh candidate thứ hai nếu người dùng từ chối candidate đầu.
+3. Sau khi duyệt hero, khóa palette/material/lighting description vào Design DNA.
+4. Sinh năm view còn lại bằng structure-controlled provider; không tạo ba candidate cho mỗi view.
+5. Chỉ repair vùng fail, tối đa hai lần; không regenerate toàn bộ six-view set.
+6. Upscale chỉ ảnh đã pass; video vẫn là thao tác riêng sau approval.
+
+Ngân sách pilot điển hình: một hero Gemini Flash ($0.067) + năm view Structure ($0.25) + dự phòng
+hai cloud repair ($0.10) = khoảng **$0.42/view-set**. Hai hero candidate đưa mức dự kiến lên khoảng
+$0.49. Mask/composite local không phát sinh phí API; các con số chưa gồm upscale và retry ngoài
+ngân sách dự phòng.
 
 ## 2. Kết quả đầu ra cần đạt
 
@@ -50,7 +96,8 @@ Mỗi design revision phải tạo được:
 4. Báo cáo QA có bằng chứng đo được, không chỉ kiểm tra file tồn tại.
 5. Manifest ghi lại model hash, design revision, asset-library version, material IDs, camera specs,
    provider/model, prompt version, seed và lịch sử repair.
-6. Ảnh PBR fallback an toàn khi AI refinement không đạt gate.
+6. Control render fallback để review kỹ thuật khi AI không đạt gate; fallback này không được gọi là
+   ảnh bàn giao.
 
 Video tiếp tục sử dụng các ảnh đã được chứng nhận; giai đoạn này không thay đổi nguyên tắc tạo
 video, nhưng không được đưa view lỗi hình học vào video pipeline.
@@ -77,6 +124,12 @@ Thứ tự ưu tiên bắt buộc:
 Ảnh tham khảo chỉ truyền đạt mức độ chân thực, image science và chất lượng hoàn thiện. Nó không phải
 nguồn đúng cho footprint, camera, facade motif, bố cục hay một phong cách cố định áp dụng cho mọi dự
 án.
+
+`resource/sample_image_2.png` được đăng ký là **quality reference**, không phải
+geometry/style reference. Các đặc tính được chuyển giao sang rubric gồm: phản ứng vật liệu không
+phẳng, bóng tiếp xúc, chiều sâu khí quyển, dấu hiệu tỷ lệ thuyết phục và thứ bậc rõ giữa
+công trình chính với context. Hồ nước, công viên, mật độ cây, hình khối xung quanh và
+palette trong ảnh không được chuyển thành prompt/rule cứng cho nhà xưởng.
 
 ## 4. Creative Budget — sáng tạo có giới hạn
 
@@ -108,6 +161,12 @@ Tên preset không được làm thay đổi các nguyên tắc bắt buộc v�
 
 ### 5.1. Semantic enrichment
 
+Extraction phải chọn đúng một 3D view/site option trước khi canonicalize. Nếu IFC toàn model chứa
+các `main_shed` chồng lấn trên 60% footprint, pipeline phải fail closed với trạng thái
+`ambiguous_view_scope`; không được tự chọn khối lớn nhất hoặc dựa vào tên/tọa độ của project mẫu.
+APS Model Derivative IFC chỉ là fallback cho model không có option chồng lấn. Luồng production cần
+Revit Automation với `VisibleElementsOfCurrentView`/`ActiveViewId`, sau đó mới chạy semantic rules.
+
 Canonical scene cần chuẩn hóa tối thiểu các semantic role:
 
 - `primary_building`, `secondary_building`, `office`, `utility`;
@@ -136,16 +195,31 @@ Mọi asset có real-world dimensions, material-space scale, LOD, license/proven
 compatibility. Scatter sử dụng seed theo `model_hash + design_revision`, nhờ đó cùng một cây hoặc xe
 cố định xuất hiện tại cùng tọa độ trong mọi view.
 
-### 5.3. PBR renderer
+Asset phải tách rõ hai mục đích:
 
-- Preview dùng engine nhanh; final dùng Cycles hoặc path tracer tương đương.
+- `conditioning_proxy`: geometry nhẹ để sinh depth/normal/semantic/ID và kiểm tra vị trí; không được
+  xuất hiện nguyên trạng trong ảnh bàn giao;
+- `delivery_beauty`: mesh/material đã qua visual QA, có texture/normal/roughness, LOD và provenance;
+  chỉ lớp này được render vào beauty RGB final.
+
+Không được gọi một asset low-poly/procedural là “PBR production” chỉ vì nó sử dụng Principled BSDF.
+PBR shader đúng không bù được silhouette đơn giản, texture phẳng hoặc thiếu biến thiên tự nhiên.
+
+### 5.3. Control renderer
+
+- `preview_fast` dùng Eevee ở độ phân giải thấp để duyệt camera/layout.
+- `standard_eevee` là đường control mặc định: guide RGB và các control pass. Nó không phải ảnh bàn
+  giao và không yêu cầu GPU mạnh trên máy chủ điều phối.
+- `premium_cycles` chỉ còn là công cụ chẩn đoán/benchmark tùy chọn, không nằm trong luồng mặc định.
 - Scene-linear workflow và AgX/filmic color management.
-- Một sun/sky rig, exposure family và white balance cho cả view-set.
-- Vật liệu dùng albedo, roughness, normal/displacement đúng dải vật lý; tránh trắng cháy và màu phát
-  sáng giả.
-- Bắt buộc có contact shadow, atmospheric perspective và surface variation đúng tỷ lệ.
+- Một sun/sky rig, exposure family và white balance cho cả view-set để guide dễ hiểu.
+- Material palette phải phân biệt rõ roof/facade/road/landscape và không tạo màu giả; không cần author
+  toàn bộ photoreal texture library trước cloud pilot.
 - Context xác thực phải lấy từ model hoặc `ContextPack` có provenance. Nếu không có dữ liệu địa điểm,
-  chỉ dùng translucent massing/tree belt trung tính.
+  dùng lớp procedural industrial-park theo tỷ lệ của site: mạng đường trục–nhánh nằm ngoài authored
+  envelope, lô công nghiệp/low grass và các khối xưởng frosted-translucent trung tính. Cây chỉ nằm
+  theo verge/hàng cây/setback; không tạo rừng. Toàn bộ lớp này là `FREE/non-authoritative`, trong khi
+  vị trí/silhouette proxy xưởng là `BOUNDED`; không được gọi là context địa điểm thật.
 
 ### 5.4. Control pack
 
@@ -158,17 +232,18 @@ Ngoài conditioning pack hiện có, mỗi view cần thêm:
 - projected material/asset IDs;
 - visible surface ID và correspondence map giữa các camera;
 - base silhouette và protected edge map.
+- `structure_guide` trung tính, bỏ màu xanh/CAD giả nhưng giữ shading và critical edges.
 
 Ba control mask phải không chồng lấn ngoài policy cho phép và phủ toàn ảnh. Contract này độc lập với
 Gemini, Imagen hay ControlNet để có thể benchmark/thay provider.
 
 ### 5.5. Hai lượt generative refinement
 
-**Lượt 1 — global photographic finish**
+**Lượt 1 — structure-controlled photographic generation**
 
-- Input là PBR RGB cùng control pack.
-- Edit strength thấp.
-- Chỉ điều chỉnh image science, vật liệu vi mô, bóng/khí quyển và độ tự nhiên.
+- Input là RGB guide hoặc edge control đã được chọn theo capability của provider.
+- Control strength được version hóa và hiệu chỉnh theo camera role.
+- Model tạo material response, vegetation/entourage beauty, bóng/khí quyển và độ tự nhiên.
 - Không được thay đổi vùng `LOCKED`.
 
 **Lượt 2 — local semantic repair**
@@ -177,22 +252,25 @@ Gemini, Imagen hay ControlNet để có thể benchmark/thay provider.
 - Inpaint theo mask nhỏ nhất có thể.
 - Mỗi lỗi tối đa hai lần repair.
 - Sau mỗi lần phải chạy lại gate liên quan và cross-view gate.
-- Không đạt sau giới hạn thì reject refinement và trả PBR fallback/human review.
+- Không đạt sau giới hạn thì reject candidate và trả control render để review kỹ thuật; không giả
+  vờ đó là ảnh bàn giao.
 
 Không regenerate toàn frame chỉ vì một chi tiết cục bộ lỗi.
 
 ### 5.6. Multi-view appearance
 
-Giải pháp chuyển tiếp vẫn có thể dùng một hero view đã duyệt làm style reference, nhưng không coi
-đó là consistency guarantee.
+Hero view được dùng để duyệt quyết định, không dùng như nguồn hình học. Sau khi duyệt, hệ thống ghi
+palette, material family, lighting và decor thành dữ liệu Design DNA có version; không chỉ truyền
+một ảnh style anchor mơ hồ.
 
 Giải pháp production:
 
-1. Duyệt một hero design/material state.
-2. Bake hoặc ánh xạ appearance về UV/triplanar/world-space của shared scene.
-3. Render lại sáu camera từ material state chung.
-4. Dùng AI theo view chỉ cho vùng occluded/unseen và photographic finish.
-5. So sánh các surface ID cùng nhìn thấy bằng reprojection.
+1. Sinh và duyệt một hero candidate.
+2. Khóa material/lighting/decor description vào Design DNA.
+3. Sinh năm view còn lại bằng cùng provider version, prompt template, control strength và seed
+   family; từng view vẫn dùng structure guide riêng từ shared scene.
+4. Chỉ sửa vùng occluded/unseen bằng local masked repair.
+5. So sánh các surface ID cùng nhìn thấy bằng reprojection và human review.
 
 ## 6. QA và trạng thái chứng nhận
 
@@ -201,7 +279,7 @@ Giải pháp production:
 | Gate | Kiểm tra | Hành động khi lỗi |
 |---|---|---|
 | Artifact | File, kích thước, checksum, provenance | Fail job |
-| Geometry | Silhouette, protected edge, roof/ridge, footprint | Local repair hoặc PBR fallback |
+| Geometry | Silhouette, protected edge, roof/ridge, footprint | Local repair hoặc technical fallback |
 | Semantic | Building/road/landscape/context IoU, gate/fence recall | Reject/local repair |
 | Material | Palette, material ID, color drift, semantic-color leakage | Local repair |
 | Cross-view | Reprojection cùng surface, facade/material identity | Reject candidate/view-set |
@@ -239,11 +317,11 @@ VLM hoặc aesthetic model chỉ hỗ trợ xếp hạng candidate; không có q
 
 | Mã | Pipeline | Mục đích |
 |---|---|---|
-| A | Base hiện tại + AI full-frame | Baseline |
-| B | PBR cải thiện, không AI | Đo đóng góp của renderer/asset |
-| C | PBR + AI full-frame strength thấp | Đo rủi ro drift toàn ảnh |
-| D | PBR + global low-strength + local masked repair | Phương án khuyến nghị |
-| E | PBR + controlled provider/ControlNet/Imagen | So sánh mức spatial control |
+| A | Control render + Gemini với toàn bộ pass như hiện tại | Baseline |
+| B | Control render + Gemini minimal-input | Đo ảnh hưởng của việc bỏ reference gây nhiễu |
+| C | Control render + Stability Structure | Ứng viên structure-control mặc định |
+| D | Control render + FLUX.2 Pro + hero reference | Ứng viên realism/style consistency |
+| E | Canny control + Imagen 3 | Benchmark khi có Vertex access |
 
 Không chỉ thử trên một sample. Dataset pilot cần 10–20 RVT đại diện cho:
 
@@ -265,8 +343,24 @@ Không chỉ thử trên một sample. Dataset pilot cần 10–20 RVT đại di
 - thời gian và chi phí/view-set;
 - tỷ lệ cần human correction.
 
-Chỉ chọn phương án production sau blind review. Dự kiến D cho cân bằng tốt nhất; E là ứng viên thay
-thế nếu controlled API đạt chất lượng và độ ổn định cao hơn.
+### 7.3. Protocol dùng ảnh tham chiếu chất lượng
+
+- Khóa file tham chiếu bằng path, checksum và vai trò `quality_only`; file
+  `sample_image_2.png` hiện có SHA-256
+  `43797e5fd2d452faf93e542d311d1557d34c8e9b8d6b1250236ea64ec1f30d0f`.
+- Không đưa ảnh này vào conditioning như geometry/composition reference. Nếu provider nhận ảnh,
+  block phải được gắn nhãn rõ `photographic finish only` và output vẫn qua protected
+  compositor.
+- Blind review hiển thị ảnh tham chiếu như mốc finish, nhưng chấm đúng model và khả năng
+  thi công tách biệt với chân thực.
+- Không chấm bằng pixel/CLIP similarity với ảnh tham khảo; các project khác nhau không được
+  bị kéo về cùng bố cục hay palette.
+- Control guide được review trước AI về camera, silhouette, mái, đường, cổng, hàng rào và semantic
+  coverage. Guide không cần photorealistic, nhưng thiếu geometry/context có thẩm quyền thì không
+  được dùng prompt để bịa phần còn thiếu.
+
+Chỉ chọn provider production sau blind review cùng input/camera. Stability Structure là ứng viên
+đầu tiên cần spike; Gemini minimal-input và FLUX.2 Pro là hai challenger.
 
 ## 8. Lộ trình triển khai theo cổng
 
@@ -288,34 +382,40 @@ Exit criteria:
 - trạng thái thiếu evidence không được coi là pass;
 - baseline A có số liệu thời gian, chi phí và lỗi.
 
-### Phase 1 — PBR foundation (ưu tiên cao nhất)
+### Phase 1 — Control-render foundation
 
-**Mục tiêu:** base render tự nó đã rõ thiết kế và gần ảnh cuối.
+**Mục tiêu:** guide render tự nó khóa đúng thiết kế, semantic và camera; không cần giả làm ảnh final.
 
 Deliverables:
 
-- material/asset library v1;
+- material-ID/control palette library nhẹ;
+- tách `conditioning_proxy` khỏi `delivery_beauty`; proxy không được lọt vào final RGB;
+- HDRI/image-based lighting chỉ dùng cho ánh sáng và phản xạ khi không có ContextPack địa điểm;
 - procedural detail cho mái, facade, road/site và landscape;
 - deterministic scattering;
-- final render profile với scene-linear/AgX;
-- render B trên dataset pilot.
+- standard Eevee control render; premium Cycles không nằm trên critical path;
+- projected-bounds camera fitting và preflight trước mọi API call;
+- render guide baseline trên dataset pilot.
 
 Exit criteria:
 
 - sáu view dùng đúng cùng asset/material IDs;
 - road, gate, fence và landscape không phụ thuộc AI;
-- blind review xác nhận PBR tốt hơn baseline clay;
+- control render đạt geometry/semantic/camera gate; không chấm nó như ảnh bàn giao;
+- không còn low-poly tree/vehicle/person trong candidate được phép bàn giao;
 - không có logic theo tên hoặc tọa độ model mẫu.
 
-### Phase 2 — Bounded generative refinement
+### Phase 2 — Cloud beauty pilot và bounded repair
 
 **Mục tiêu:** AI tăng độ chân thực mà không được redesign.
 
 Deliverables:
 
 - control-mask contract;
-- provider capability interface cho mask, edit strength và reference role;
-- hai lượt refinement;
+- provider interface cho structure strength, mask, seed và reference role;
+- benchmark Gemini minimal-input, Stability Structure và FLUX.2 Pro trên ba view đại diện;
+- hero approval rồi mới tạo năm view còn lại;
+- structure-controlled full-frame beauty pass và local masked repair;
 - local repair và fail-closed fallback;
 - benchmark C, D và E.
 
@@ -323,7 +423,8 @@ Exit criteria:
 
 - vùng `LOCKED` vượt toàn bộ geometry gate;
 - lỗi cục bộ không kích hoạt regenerate toàn frame;
-- D hoặc E thắng B về realism/bid appeal mà không tăng critical geometry failure.
+- provider thắng phải đạt realism/bid appeal và không tăng critical geometry failure;
+- chi phí median không vượt $0.70/view-set trước upscale.
 
 ### Phase 3 — Shared appearance và dense multi-view QA
 
@@ -368,13 +469,14 @@ Exit criteria:
 - Định nghĩa `ControlPolicy` và schema ba mask.
 - Biến QA thiếu evidence thành fail/review rõ ràng.
 - Xây baseline benchmark runner.
-- Chuẩn hóa final PBR color/lighting profile.
+- Chuẩn hóa control-render color/edge/depth profile.
 - Version hóa material và asset manifest.
+- Thêm provider adapter có structure strength và benchmark ba view trước khi chạy đủ sáu.
 
 ### P1
 
-- Bổ sung roof/facade/site procedural detail.
-- Xây deterministic vegetation/vehicle/people scattering.
+- Giữ roof/facade/site geometry đủ tạo control pass; không author beauty asset tràn lan.
+- Dùng deterministic proxy cho control pass và cấm proxy lọt vào final beauty RGB.
 - Thêm geometry, semantic, palette và camera metrics.
 - Mở rộng provider interface cho mask/edit strength.
 - Thực hiện pipeline D trên ít nhất ba model khác hình dạng trước khi chạy toàn dataset.
@@ -399,7 +501,7 @@ Exit criteria:
 | Rủi ro | Biện pháp |
 |---|---|
 | LOD100 thiếu semantic | Confidence + `needs_review`, không đoán im lặng |
-| AI thay mái/đường/cổng | Locked mask, geometry gate, PBR fallback |
+| AI thay mái/đường/cổng | Locked mask, geometry gate, technical fallback |
 | Sáu view khác vật liệu | Shared material state + reprojection QA |
 | Ảnh quá sạch kiểu CGI | PBR micro-detail, physical lighting, variation đúng tỷ lệ |
 | Context đẹp nhưng sai địa điểm | ContextPack có provenance hoặc neutral context |
@@ -416,7 +518,7 @@ Chương trình chỉ được coi là hoàn thành khi:
 3. Material/facade identity của cùng một surface nhất quán giữa các camera.
 4. Phương án mới thắng baseline có ý nghĩa trong blind review về realism và bid appeal.
 5. Mọi hard gate có evidence; thiếu evidence không được pass.
-6. Có PBR fallback và provenance đầy đủ cho mọi output.
+6. Có technical fallback và provenance đầy đủ cho mọi output; fallback không được gắn nhãn final.
 7. UI/API thể hiện đúng trạng thái chứng nhận.
 8. Human reviewer có thể duyệt hoặc từ chối toàn view-set với lý do truy vết được.
 

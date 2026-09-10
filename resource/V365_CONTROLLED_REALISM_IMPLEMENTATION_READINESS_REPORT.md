@@ -1,13 +1,15 @@
 # V365 Controlled Realism — Implementation Readiness Report
 
 **Ngày đánh giá:** 2026-09-10  
-**Kế hoạch nguồn:** `V365_CONTROLLED_REALISM_IMPLEMENTATION_PLAN.md` v1.0  
+**Kế hoạch nguồn:** `V365_CONTROLLED_REALISM_IMPLEMENTATION_PLAN.md` v1.1
 **Mục đích:** xác nhận mức sẵn sàng, chốt quyết định kỹ thuật và định nghĩa gói công việc đầu tiên
 
 ## 1. Kết luận
 
-Hướng `PBR-first + shared-scene + mask-bounded generation + evidence-based QA` là đúng và nên tiếp
-tục. Tuy nhiên hệ thống hiện tại **chưa đủ điều kiện chứng nhận output để bàn giao tự động**.
+Hướng `shared-scene + mask-bounded generation + evidence-based QA` vẫn đúng, nhưng spike đã bác bỏ
+giả định rằng team nên tự nâng Blender/PBR thành nguồn beauty chính. Hướng mới là
+`geometry-control-first + cloud beauty`; hệ thống hiện tại **chưa đủ điều kiện chứng nhận output để
+bàn giao tự động**.
 
 Điểm mạnh hiện có:
 
@@ -17,19 +19,22 @@ tục. Tuy nhiên hệ thống hiện tại **chưa đủ điều kiện chứng
 - Gemini style-anchor cải thiện độ đồng nhất hơn generation độc lập;
 - bốn model khác nhau đã được canonicalize và dùng làm dữ liệu phát triển ban đầu.
 
-Các blocker trước khi gọi output là `GEOMETRY_CERTIFIED`:
+Các blocker hiện tại trước khi gọi output là `APPROVED_FINAL`:
 
-1. PBR hiện tại vẫn là vật liệu màu phẳng, chưa có texture/normal/roughness asset library.
-2. Renderer production vẫn dùng Eevee ở 768×432; container chưa dùng GPU Cycles.
-3. Chưa có control-mask contract và provider hiện tại không thực thi mask/control strength cứng.
-4. Correspondence mới là object-level visibility, chưa có dense pixel reprojection.
-5. QA chỉ kiểm tra artifact; mọi visual gate hiện trả `evidence_not_available`.
-6. Workflow vẫn có thể hoàn thành và làm board khi consistency report là `review`.
-7. UI/API chưa thể hiện certification state độc lập với job-completed state.
+1. PBR hiện tại mới có foundation cho HDRI và một số surface map; phần lớn mái/facade, vegetation,
+   vehicle/person và context vẫn là procedural proxy, chưa phải delivery asset library.
+2. Control-mask contract đã có nhưng Gemini adapter hiện tại không thực thi mask/control strength
+   cứng; chưa tích hợp structure-controlled provider.
+3. Correspondence mới là object-level visibility, chưa có dense pixel reprojection.
+4. Geometry/material/camera đã có evidence từng phần; realism và aesthetic vẫn cần calibrated blind
+   review thay vì tự động pass.
+5. Chưa có A/B/C bake-off trên cùng ba view để chứng minh provider nào đạt cân bằng
+   realism–accuracy–cost tốt nhất.
 
-Quyết định triển khai: **bắt đầu Phase 0 và Phase 1; chưa xây custom diffusion hoặc texture-space
-model.** Mốc đầu tiên là tạo một base PBR đủ tốt và một cơ chế chứng minh phần hình học nào đã được
-bảo vệ.
+Quyết định triển khai sửa đổi: **dừng mở rộng production asset library đại trà, giữ Blender làm
+control renderer, chạy provider bake-off trên ba view trước.** Không xây custom diffusion hoặc
+texture-space model. Mốc tiếp theo là chứng minh một cloud provider có thể nâng photographic realism
+nhưng vẫn vượt geometry/semantic gates.
 
 ## 2. Bằng chứng từ repository
 
@@ -37,13 +42,14 @@ bảo vệ.
 
 `scripts/blender/render_conditioning.py` hiện:
 
-- tạo Principled BSDF chỉ từ base color, metallic và roughness;
-- chưa có image texture, normal, displacement, decal, instanced vegetation hoặc HDRI library;
+- đã đọc asset manifest, kiểm tra checksum và hỗ trợ albedo/roughness/normal map cho các bề mặt site;
+- đã có HDRI CC0 1K và material-scale metadata; mái/facade chủ yếu vẫn là procedural material;
+- chưa có delivery-grade decal, instanced vegetation, vehicle/person hoặc facade asset library;
 - luôn chọn `BLENDER_EEVEE_NEXT`/`BLENDER_EEVEE`;
 - render mặc định 768×432;
-- đã dùng Nishita sky và AgX, đây là nền tảng tốt để giữ;
+- đã dùng HDRI/Nishita fallback và AgX, đủ làm control renderer;
 - tự dựng mái/facade detail bằng procedural boxes, phù hợp prototype nhưng chưa đạt construction
-  detail và phản ứng vật liệu cần cho final.
+  detail và phản ứng vật liệu cần cho final beauty.
 
 Docker image đang chạy Blender 4.0.2 từ Ubuntu package, không pin version/digest. Máy phát triển có
 RTX 4050 Laptop 6 GB VRAM và driver đủ mới cho OptiX, nhưng Docker command chưa truyền GPU và scene
@@ -102,8 +108,9 @@ Chọn Blender **4.5 LTS**, pin exact version và image digest. Blender 4.5 LTS 
 7/2027 và phù hợp hơn image Ubuntu hiện tại dùng Blender 4.0.2 không pin:
 [Blender 4.5 LTS](https://www.blender.org/releases/4-5/).
 
-Final profile dùng Cycles + OptiX. Blender xác nhận OptiX hỗ trợ RTX trên Linux và GPU rendering có
-thể nhanh hơn, nhưng bị giới hạn bởi VRAM:
+Cycles + OptiX là profile `premium_cycles` tùy chọn, không phải điều kiện bắt buộc của máy chủ chính.
+Blender xác nhận OptiX hỗ trợ RTX trên Linux và GPU rendering có thể nhanh hơn, nhưng bị giới hạn
+bởi VRAM:
 [Cycles GPU rendering](https://docs.blender.org/manual/en/4.5/render/cycles/gpu_rendering.html).
 
 Khởi điểm benchmark, chưa phải ngưỡng cố định:
@@ -111,8 +118,8 @@ Khởi điểm benchmark, chưa phải ngưỡng cố định:
 | Profile | Engine | Resolution | Sampling | Denoising | Mục đích |
 |---|---|---:|---|---|---|
 | `preview_fast` | Eevee | 768×432 | N/A | N/A | camera/layout preview |
-| `qa_pbr` | Cycles GPU | 1024×576 | adaptive, max 64 | OIDN, albedo+normal | QA và tuning |
-| `final_pbr` | Cycles GPU | 2048×1152 | adaptive, max 128 | OIDN, albedo+normal | base bàn giao/AI |
+| `standard_eevee` | Eevee | 1024×576 | calibrated TAA | N/A | mặc định: control render + cloud beauty |
+| `premium_cycles` | Cycles GPU | 2048×1152 | adaptive, max 128 | OIDN, albedo+normal | hero view/QA fallback theo yêu cầu |
 
 Adaptive sampling và denoising bằng albedo+normal phù hợp cho việc giảm thời gian nhưng giữ chi
 tiết; thông số cuối phải lấy từ benchmark scene thật:
@@ -330,7 +337,7 @@ lighting hoặc so material features thay vì pixel RGB thô.
 
 - `technical_qa=pass` nhưng `consistency=review` → `MARKETING_GENERATIVE_REVIEW`, không phải final.
 - thiếu evidence ở hard gate → không được `GEOMETRY_CERTIFIED`.
-- AI candidate fail → local repair tối đa hai lần; sau đó PBR fallback hoặc human review.
+- AI candidate fail → local repair tối đa hai lần; sau đó technical fallback hoặc human review.
 - chỉ `GEOMETRY_CERTIFIED` mới được đưa sang bước approval.
 - chỉ `APPROVED_FINAL` mới được mặc định chọn làm video input hoặc deliverable package.
 
@@ -356,15 +363,14 @@ Chạy cùng camera, Design DNA và seed policy:
 
 | Variant | Nội dung |
 |---|---|
-| A | Eevee hiện tại + Gemini full-frame |
-| B | Cycles PBR v1, không AI |
-| C | Cycles PBR + Gemini global candidate + protected composite |
-| D | C + local masked repair |
-| E | Cycles PBR + controlled provider |
+| A | Control render + Gemini với RGB/depth/instance/semantic/edge như hiện tại |
+| B | Control render + Gemini minimal-input: RGB guide + edge + prompt |
+| C | Control render + Stability Structure với `control_strength` đã định |
+| D | Control render + FLUX.2 Pro với hero/material reference |
+| E | Canny control + Imagen 3 khi có Vertex access |
 
-Không sinh ba candidate cho cả sáu view. Chỉ sinh tối đa ba candidate cho hero/material decision,
-chọn một design state rồi truyền về shared scene. View còn lại mỗi view một candidate và chỉ repair
-vùng fail.
+Không sinh ba candidate cho cả sáu view. Chỉ sinh candidate thứ hai cho hero khi candidate đầu bị
+từ chối; sau khi khóa Design DNA, năm view còn lại mỗi view một candidate và chỉ repair vùng fail.
 
 ### 6.3. Success criteria cho pilot
 
@@ -396,30 +402,34 @@ Chấp nhận production chỉ dựa trên validation set, không dựa trên c�
 **Exit:** output hiện tại được gắn đúng `MARKETING_GENERATIVE_REVIEW`; không còn false-positive
 “đã hoàn tất để bàn giao”.
 
-### Milestone 1 — PBR v1
+### Milestone 1 — Control renderer v1
 
-**Ước lượng lập kế hoạch:** 10–15 engineering/technical-art days.
+**Ước lượng lập kế hoạch:** 3–5 engineering days.
 
 - pin Blender 4.5 LTS image;
-- thêm renderer profiles và GPU/CPU fallback;
-- xây material resolver và asset manifest;
-- tạo bộ material v1: roof/facade/glass/concrete/asphalt/curb/landscape;
-- deterministic instancing cho vegetation, vehicle và people;
-- benchmark VRAM/time/quality ở 1K và 2K.
+- dùng `standard_eevee` để sinh RGB guide, depth, normal, edge, semantic và ID; Cycles không nằm
+  trên critical path;
+- fit camera theo projected bounds thay cho hệ số khoảng cách cố định;
+- deterministic proxy cho semantic/control pass nhưng không cho phép proxy vào final beauty;
+- benchmark CPU time, camera coverage và control fidelity ở 1K.
 
-**Exit:** B thắng base Eevee hiện tại trong blind review và mọi view dùng cùng material/asset IDs.
+**Exit:** 6/6 view không crop critical site/building, control pack tái lập được và không phụ thuộc
+model mẫu.
 
-### Milestone 2 — Protected generative refinement
+### Milestone 2 — Cloud beauty bake-off và protected refinement
 
-**Ước lượng lập kế hoạch:** 7–12 engineering days, chưa gồm thời gian xin Vertex access nếu cần.
+**Ước lượng lập kế hoạch:** 5–8 engineering days, chưa gồm thời gian cấp credential provider.
 
 - capability-aware provider interface;
-- global candidate + protected compositor;
+- benchmark cùng ba view đại diện: Gemini minimal-input, Stability Structure và FLUX.2 Pro;
+- một hoặc hai hero candidate trước, chỉ gọi năm view còn lại khi hero được duyệt;
+- structure-controlled candidate + protected compositor;
 - masked local repair adapter;
 - repair budget, caching và provenance;
-- benchmark C/D/E.
+- ghi chi phí ở cấp request và view-set.
 
-**Exit:** D hoặc E tăng realism/bid appeal mà không gây critical topology change.
+**Exit:** provider thắng tăng realism/bid appeal, không gây critical topology change và typical
+cost không vượt 0,60 USD/view-set trước upscale.
 
 ### Milestone 3 — Dense multi-view QA
 
@@ -455,7 +465,7 @@ annotation phụ thuộc chất lượng nguồn dữ liệu.
 **CONDITIONAL GO** cho Milestone 2 sau khi:
 
 - control masks có coverage đúng;
-- PBR v1 đủ tốt để làm fallback;
+- control renderer đủ rõ để làm technical fallback và sinh control pass ổn định;
 - có provider access phù hợp hoặc protected compositor đã pass.
 
 **HOLD** Milestone 3 custom/texture-space R&D và fine-tuning cho đến khi benchmark D/E chứng minh
@@ -465,10 +475,165 @@ shared deterministic PBR vẫn chưa đạt yêu cầu.
 
 Sprint có thể bắt đầu khi:
 
-- chấp nhận Blender 4.5 LTS + Cycles là renderer final v1;
+- chấp nhận Blender 4.5 LTS + Eevee bounded pipeline là standard v1; Cycles là premium tùy chọn;
 - chỉ định người duyệt kiến trúc/thẩm mỹ cho blind review;
 - xác nhận chính sách license của asset/material;
 - chọn bốn model hiện có làm dev set và không dùng chúng làm validation set;
 - chấp nhận nguyên tắc: thiếu hard evidence thì output chỉ là review, không phải certified;
 - thống nhất rằng Gemini full-frame không được là nguồn geometry-authoritative.
 
+## 11. Trạng thái triển khai hiện tại
+
+Các hạng mục foundation đã được triển khai sau lần đánh giá readiness:
+
+- có domain contract và JSON Schema cho `ControlPolicy`, `ControlPackManifest`,
+  `AssetLibraryManifest` và `CertificationReport`;
+- Blender sinh `control_policy.png`; application layer tạo ba mask `locked/bounded/free` thành một
+  partition phủ kín, không overlap;
+- structural-edge band được đưa vào `locked_mask`; ngưỡng Sobel đã được spike bằng render thật để
+  tránh khóa cả bề mặt cần nâng vật liệu. Trên sáu view dev đã kiểm tra, locked coverage nằm trong
+  khoảng 0,9–9,5% tùy góc nhìn sau hiệu chỉnh; đây vẫn là hypothesis cần validation thêm;
+- mọi ảnh AI trong API worker đi qua protected compositor trước QA; manifest lưu hash của base RGB,
+  mask, provider source và protected output;
+- provider capability contract được ghi vào generation manifest; Gemini hiện khai báo rõ chỉ hỗ
+  trợ multi-reference trong integration này, không khai báo masked edit/control scale/edit strength
+  hay seed nên không thể tự cấp hard-geometry evidence;
+- API/UI trả certification state độc lập với workflow state;
+- có `preview_fast`, `standard_eevee` mặc định và `premium_cycles` tùy chọn; premium yêu cầu GPU
+  worker riêng, máy chủ điều phối không phải có RTX;
+- có asset-library manifest/resolver cho 18 nhóm vật liệu procedural nền (roof, facade,
+  office, glass, coated metal, loading door, panel seam, concrete, asphalt, authored landscape và
+  muted context ground, vegetation và entourage) cùng material-ID pass; cùng asset ID được
+  dùng qua mọi camera, không phát sinh texture-memory;
+- pass instance/semantic/material/control đã được tách khỏi look tương phản và dùng
+  `Standard/None`, tránh làm biến đổi byte ID trước khi QA giải mã; mỗi semantic pass có manifest
+  màu đi kèm;
+- có camera preflight trước bước gọi provider trả phí: đo focus/circulation/context coverage theo
+  từng camera role từ semantic-ID pass và fail sớm nếu chủ thể bị quá nhỏ, crop nặng hoặc mất phần
+  giao thông đã authored. Spike thật trên sáu view của sample 4 đạt focus coverage 9,8–58,4% và
+  circulation coverage 2,9–23,2%; các threshold hiện vẫn là benchmark hypothesis;
+- `standard_eevee` 1024×576 đã render headless thành công trên một dev view không truyền GPU. Lần
+  đo này chỉ xác nhận khả năng chạy, chưa phải benchmark chất lượng toàn dataset.
+
+Cập nhật theo spike vật liệu và `sample_image_2.png`:
+
+- manifest hiện có 24 asset: 19 material, một HDRI environment và bốn geometry proxy cho cây,
+  xe con, xe dịch vụ và người; asphalt/concrete/sidewalk đã có map 1K, các material còn lại vẫn
+  procedural; schema hỗ trợ real-world dimensions, transmission, IOR và clear coat;
+- renderer đã có deterministic entourage: cây chỉ sample bên trong triangle của
+  `landscape_zone`, xe con bám `parking`, xe dịch vụ chỉ bám loading dock đã authored, người
+  chỉ bám office entrance. Manifest lưu vị trí/kích thước/asset ID và seed theo design revision,
+  nên sáu camera không sinh entourage khác nhau;
+- Blender 4.0.2 headless đã render thành công view có office entrance, xác nhận material resolver
+  tương thích socket shader hiện tại. Artifact:
+  `.artifacts/spikes/pbr-materials-480-v2/view-03/base_rgb.png`;
+- kết quả spike cũng cho thấy **chưa đạt mức bàn giao**: facade còn quá trắng/phẳng,
+  cụm kính/nhấn màu còn mang cảm giác CGI, thiếu phản xạ context, tiếp xúc với nền và
+  scale cue. Đây là bằng chứng để ưu tiên asset/lighting/entourage, không phải lý do
+  nới AI;
+- `sample_image_2.png` được phân loại `quality_only`: dùng để calibrate surface response,
+  contact shadow, atmospheric depth, scale cue và project/context hierarchy. Không sao chép hồ,
+  công viên, hình khối, palette hoặc bố cục sang project khác.
+
+Các blocker còn lại trước `GEOMETRY_CERTIFIED`:
+
+1. camera coverage và protected geometry/palette đã có evidence ban đầu; semantic fidelity của ảnh
+   refined, dense silhouette reprojection và cross-view material identity vẫn chưa đủ evidence để
+   chuyển toàn bộ visual gate từ `review` sang `pass`;
+2. material library và entourage geometry đã có foundation nhưng chưa đạt photographic
+   calibration; HDRI reflection và ba ground material chỉ mới là spike, còn thiếu roof/facade map,
+   vegetation/vehicle/person variant chất lượng final, site furniture, asset LOD và provenance
+   production cho toàn bộ beauty layer;
+3. Gemini vẫn là full-frame candidate provider; Stability Control Structure adapter đã có nhưng
+   chưa thể chạy thật khi chưa cấu hình `STABILITY_API_KEY`;
+4. chưa có dense surface reprojection và benchmark/blind review trên validation set độc lập;
+5. Blender container production vẫn cần pin 4.5 LTS exact digest thay cho package 4.0.2 hiện tại.
+
+## 12. Kết quả spike photographic baseline — 2026-09-10
+
+Đã chạy ba bước tách biệt trên cùng model/camera để tránh đánh giá cảm tính:
+
+1. sửa HEX sRGB sang scene-linear;
+2. thêm HDRI sân công nghiệp làm image-based lighting nhưng không dùng ảnh nền của HDRI làm context;
+3. thêm CC0 1K albedo/roughness/OpenGL-normal cho asphalt, concrete yard và sidewalk, sau đó
+   điều chỉnh camera overall theo site envelope.
+
+Artifact so sánh:
+
+- baseline sau sửa màu: `.artifacts/spikes/linear-color-c4ce-v1/view-01/base_rgb.png`;
+- PBR map/HDRI với overall framing mới:
+  `.artifacts/spikes/pbr-texture-hdri-c4ce-v3/view-01/base_rgb.png`.
+
+Kết luận: framing mới giúp đọc khối chính và site tốt hơn, ground map/HDRI tăng phản ứng bề mặt ở
+cự ly gần, nhưng **visual exit của Milestone 1 vẫn fail**. Khoảng cách lớn nhất còn nằm ở bốn lớp:
+
+- mái/facade procedural chiếm phần lớn pixel nên vẫn phẳng và quá sạch;
+- cây, xe và người là low-poly conditioning proxy nhưng đang xuất hiện trong beauty RGB;
+- context chỉ có ground plane và translucent massing, thiếu road network, tree belt và atmospheric
+  depth có provenance;
+- camera được tạo bằng hệ số envelope, chưa có projected-bounds fitting và composition score.
+
+Quyết định sau spike:
+
+- không tăng render samples/Cycles để che các blocker asset;
+- giữ Eevee làm standard profile nhẹ phần cứng;
+- giữ asset ingestion ở mức đủ tạo control render rõ semantic, không mở rộng thành full beauty farm;
+- chỉ chạy AI sau camera/conditioning preflight; cloud beauty không được dùng để thay đổi geometry;
+- thêm gate `realism`; `APPROVED_FINAL` bắt buộc cả realism và aesthetic có evidence pass cùng reviewer.
+
+Nguồn asset spike: Poly Haven CC0 — `overcast_industrial_courtyard`, `asphalt_floor`,
+`hangar_concrete_floor`, `concrete_pavement_02`. Manifest lưu source, license, file path và SHA-256;
+tổng dung lượng 1K foundation khoảng 10 MB, phù hợp server không có GPU mạnh.
+
+## 13. Kết quả bake-off Gemini trên sample 4 — 2026-09-10
+
+Đã chạy cùng camera v12, Design DNA và reference policy trên `view-01`, `view-03`, `view-06`:
+
+| Variant | Thời gian | Edge gate | Nhận xét visual |
+|---|---:|---:|---|
+| Gemini full pass | ~42 giây/3 ảnh | 0/3 pass | decor/entourage tốt hơn nhưng lệch structural edges |
+| Gemini minimal RGB + edge | ~58 giây/3 ảnh | 2/3 pass | bám hình tốt hơn, vẫn mang cảm giác CGI; hero fail |
+| Gemini full + industrial reference | ~20 giây/1 hero | 0/1 pass | đổi facade/decor nhưng không nâng photographic realism đủ mức |
+
+Artifact đánh giá:
+
+- `.artifacts/experiments/controlled-realism-c4ce-v1/gemini-full-board.jpg`;
+- `.artifacts/experiments/controlled-realism-c4ce-v1/gemini-minimal-board.jpg`;
+- `.artifacts/experiments/controlled-realism-c4ce-v1/gemini-industrial-reference/view-03/provider_source.jpg`.
+
+Kết luận tạm thời: reference selection không phải nút thắt chính. Gemini hiện phù hợp candidate/hero
+exploration nhưng chưa đủ để vừa đạt photo realism vừa vượt geometry gate. Dừng retry Gemini trên
+sample này; bước kế tiếp là chạy đúng ba view qua Stability Control Structure tại các mức control
+strength được version hóa, rồi blind review cùng output trên.
+
+## 14. Spike industrial-park context và view-scope — 2026-09-10
+
+Đối chiếu ảnh khu công nghiệp mới cho thấy context đúng phải được đọc bằng mạng đường trục–nhánh,
+lô công nghiệp, hạ tầng tuyến và mật độ xưởng có tổ chức; cây xanh là lớp phụ, không phải continuous
+canopy. Đã thay ground xanh phẳng bằng ground trung tính, thêm mạng đường context sinh theo site
+envelope và giữ các xưởng lân cận là frosted-translucent proxy có ground contact. Đây là thuật toán
+theo tỷ lệ scene, không chứa tọa độ hoặc tên project mẫu.
+
+Semantic extraction trên sample 4 phát hiện hai lỗi cụ thể đã được sửa bằng rule dùng metadata:
+
+- `SITEOPT - Cổng ra vào` trước đây là `unknown`, nay là `main_entrance`;
+- `Sân xe lấy hàng` trước đây là `unknown`, nay là `loading_zone`.
+
+Control renderer tạo cột/header cổng ngay trong bounding box của entrance authored và khóa semantic
+cổng. Bộ six-view mới pass conditioning QA. Artifact:
+
+- `.artifacts/experiments/controlled-realism-c4ce-v2/control-board-industrial-context.jpg`;
+- `.artifacts/experiments/controlled-realism-c4ce-v2/structure-guide-industrial-context.jpg`.
+
+Hai prototype cloud-beauty chứng minh context industrial park và photographic material có thể tăng
+rõ rệt. Prototype mới nhất:
+`.artifacts/experiments/controlled-realism-c4ce-v2/view-01-industrial-context-v2.png`.
+Tuy vậy edge-alignment recall chỉ đạt `0.4784`, thấp hơn gate `0.75`, nên **không được chứng nhận
+bàn giao**. AI vẫn tự mở rộng một số đường/context; prompt-only không đủ để bảo toàn hình học.
+
+Một blocker extraction cũng được xác nhận: APS Model Derivative xuất IFC toàn model, không xuất theo
+specific Revit view. Sample 4 vì vậy chứa 228 phần tử, 5 main shed và 8 entrance thuộc các option
+chồng lấn. Provider nay fail closed khi main-shed footprint overlap từ 60%; production cần
+view-scoped IFC qua Revit Automation. Bản scene 42 phần tử dùng trong spike được phục hồi từ six-view
+visibility evidence đã duyệt và có provenance riêng; đây là cầu nối thử nghiệm, không phải chiến
+lược chọn option production.

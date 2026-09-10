@@ -1,0 +1,93 @@
+{
+  "$defs": {
+    "AppearancePolicy": {
+      "enum": [
+        "preserve",
+        "approved_assets_only",
+        "free"
+      ],
+      "title": "AppearancePolicy",
+      "type": "string"
+    },
+    "ControlPreset": {
+      "enum": [
+        "conservative",
+        "balanced",
+        "expressive"
+      ],
+      "title": "ControlPreset",
+      "type": "string"
+    },
+    "ControlRule": {
+      "additionalProperties": false,
+      "properties": {
+        "appearance_policy": {
+          "$ref": "#/$defs/AppearancePolicy"
+        },
+        "max_variation": {
+          "default": 0.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Max Variation",
+          "type": "number"
+        },
+        "permitted_asset_collections": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Permitted Asset Collections",
+          "type": "array"
+        },
+        "semantic_role": {
+          "minLength": 1,
+          "title": "Semantic Role",
+          "type": "string"
+        },
+        "topology_policy": {
+          "$ref": "#/$defs/TopologyPolicy"
+        }
+      },
+      "required": [
+        "semantic_role",
+        "topology_policy",
+        "appearance_policy"
+      ],
+      "title": "ControlRule",
+      "type": "object"
+    },
+    "TopologyPolicy": {
+      "enum": [
+        "locked",
+        "preserve_boundary",
+        "free"
+      ],
+      "title": "TopologyPolicy",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "preset": {
+      "$ref": "#/$defs/ControlPreset",
+      "default": "balanced"
+    },
+    "rules": {
+      "items": {
+        "$ref": "#/$defs/ControlRule"
+      },
+      "title": "Rules",
+      "type": "array"
+    },
+    "schema_version": {
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "rules"
+  ],
+  "title": "ControlPolicy",
+  "type": "object"
+}

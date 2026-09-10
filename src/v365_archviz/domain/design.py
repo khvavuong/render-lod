@@ -74,6 +74,7 @@ class RoofDesign(DomainModel):
 
 class BuildingTreatment(str, Enum):
     FOCUS = "focus"
+    AUXILIARY = "auxiliary"
     CONTEXT = "context"
 
 

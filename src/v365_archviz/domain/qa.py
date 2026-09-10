@@ -12,7 +12,10 @@ from v365_archviz.domain.common import DomainModel, UnitInterval
 class QAGate(str, Enum):
     GEOMETRY = "geometry"
     SEMANTIC = "semantic"
+    MATERIAL = "material"
     CROSS_VIEW_APPEARANCE = "cross_view_appearance"
+    CAMERA = "camera"
+    REALISM = "realism"
     AESTHETIC = "aesthetic"
     ARTIFACT_INTEGRITY = "artifact_integrity"
 

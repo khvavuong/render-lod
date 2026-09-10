@@ -7,6 +7,12 @@ import sys
 from pathlib import Path
 
 from v365_archviz.artifacts import atomic_write
+from v365_archviz.domain.controlled_realism import (
+    AssetLibraryManifest,
+    CertificationReport,
+    ControlPackManifest,
+    ControlPolicy,
+)
 from v365_archviz.domain.design import DesignBrief, DesignDNA
 from v365_archviz.domain.qa import ConsistencyReport, RepairRequest
 from v365_archviz.domain.scene import CanonicalScene
@@ -31,6 +37,10 @@ def main() -> None:
         "consistency_report.schema.json": ConsistencyReport,
         "repair_request.schema.json": RepairRequest,
         "video_plan.schema.json": VideoPlan,
+        "asset_library_manifest.schema.json": AssetLibraryManifest,
+        "control_policy.schema.json": ControlPolicy,
+        "control_pack_manifest.schema.json": ControlPackManifest,
+        "certification_report.schema.json": CertificationReport,
     }
     drifted: list[str] = []
     for file_name, model in models.items():

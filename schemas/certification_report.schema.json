@@ -1,0 +1,146 @@
+{
+  "$defs": {
+    "CertificationEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "evidence_refs": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "gate": {
+          "$ref": "#/$defs/QAGate"
+        },
+        "message": {
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/QAStatus"
+        }
+      },
+      "required": [
+        "gate",
+        "status",
+        "message"
+      ],
+      "title": "CertificationEvidence",
+      "type": "object"
+    },
+    "CertificationState": {
+      "enum": [
+        "base_pbr",
+        "marketing_generative_review",
+        "geometry_certified",
+        "approved_final"
+      ],
+      "title": "CertificationState",
+      "type": "string"
+    },
+    "QAGate": {
+      "enum": [
+        "geometry",
+        "semantic",
+        "material",
+        "cross_view_appearance",
+        "camera",
+        "realism",
+        "aesthetic",
+        "artifact_integrity"
+      ],
+      "title": "QAGate",
+      "type": "string"
+    },
+    "QAStatus": {
+      "enum": [
+        "pass",
+        "fail",
+        "review"
+      ],
+      "title": "QAStatus",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "decision_reason": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Decision Reason"
+    },
+    "design_revision": {
+      "minLength": 1,
+      "title": "Design Revision",
+      "type": "string"
+    },
+    "evidence": {
+      "items": {
+        "$ref": "#/$defs/CertificationEvidence"
+      },
+      "title": "Evidence",
+      "type": "array"
+    },
+    "model_revision": {
+      "minLength": 1,
+      "title": "Model Revision",
+      "type": "string"
+    },
+    "project_id": {
+      "minLength": 1,
+      "title": "Project Id",
+      "type": "string"
+    },
+    "report_id": {
+      "minLength": 1,
+      "title": "Report Id",
+      "type": "string"
+    },
+    "reviewer": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reviewer"
+    },
+    "schema_version": {
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "state": {
+      "$ref": "#/$defs/CertificationState"
+    },
+    "view_set_id": {
+      "minLength": 1,
+      "title": "View Set Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "report_id",
+    "project_id",
+    "model_revision",
+    "design_revision",
+    "view_set_id",
+    "state",
+    "evidence"
+  ],
+  "title": "CertificationReport",
+  "type": "object"
+}

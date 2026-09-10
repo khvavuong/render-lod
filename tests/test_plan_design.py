@@ -3,7 +3,7 @@ from pathlib import Path
 
 from v365_archviz.application.plan_design import PlanDesign, _roof_groups
 from v365_archviz.domain.design import BuildingTreatment, DesignDNA
-from v365_archviz.domain.scene import BoundingBox, CanonicalScene
+from v365_archviz.domain.scene import BoundingBox, CanonicalScene, SemanticRole
 from v365_archviz.providers.ifc import _box_surfaces
 
 
@@ -198,3 +198,45 @@ def test_places_operational_openings_on_one_courtyard_facade(
 
     assert sum(bool(facade.loading_docks) for facade in shed.facades) == 1
     assert sum(facade.office_entrance is not None for facade in office.facades) == 1
+
+
+def test_default_scope_keeps_utility_blocks_opaque_and_undecorated(
+    tmp_path: Path, valid_scene: CanonicalScene
+) -> None:
+    utility = valid_scene.elements[0].model_copy(
+        update={
+            "scene_element_id": "utility-1",
+            "mesh_ref": "meshes/utility.npz",
+            "bounding_box": BoundingBox(minimum=(65, 0, 0), maximum=(77, 6, 4)),
+            "semantic_role": SemanticRole.UTILITY_BLOCK,
+        }
+    )
+    scene = valid_scene.model_copy(update={"elements": (*valid_scene.elements, utility)})
+    surfaces = tuple(
+        surface
+        for element in scene.elements
+        for surface in _box_surfaces(
+            element.scene_element_id, element.bounding_box, element.semantic_role
+        )
+    )
+    scene_path = tmp_path / "canonical_scene.json"
+    scene_path.write_text(scene.model_copy(update={"surfaces": surfaces}).model_dump_json())
+    brief_path = tmp_path / "brief.json"
+    brief_path.write_text(
+        """{
+          "project_id":"project",
+          "design_language":{"style":"industrial","primary_material":"metal",
+            "secondary_material":"metal","office_material":"glass"},
+          "environment":{"time":"09:30","weather":"clear","sun_azimuth_deg":135,
+            "sun_elevation_deg":45,"white_balance_k":5600},
+          "panel_module_m":1.2,
+          "roof_type":"low-slope gable roof","grammar_version":"v1",
+          "asset_library_version":"v1"
+        }"""
+    )
+
+    design = PlanDesign().execute(scene_path, brief_path)
+    auxiliary = next(item for item in design.buildings if item.building_id == "utility-1")
+
+    assert auxiliary.treatment is BuildingTreatment.AUXILIARY
+    assert auxiliary.facades == ()

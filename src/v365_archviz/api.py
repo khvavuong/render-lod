@@ -22,10 +22,12 @@ from v365_archviz.application.plan_cameras import PlanStandardCameras
 from v365_archviz.application.plan_design import PlanDesign
 from v365_archviz.artifacts import atomic_write
 from v365_archviz.config import Settings
+from v365_archviz.domain.controlled_realism import CertificationReport, CertificationState
 from v365_archviz.domain.design import DesignBrief, DesignDNA
+from v365_archviz.domain.jobs import GenerationJob
 from v365_archviz.domain.scene import CanonicalScene
 from v365_archviz.domain.video_jobs import VideoJob, VideoJobState
-from v365_archviz.domain.workflow import GenerationProfile, ViewSet, WorkflowState
+from v365_archviz.domain.workflow import GenerationProfile, RenderProfile, ViewSet, WorkflowState
 from v365_archviz.errors import InvalidModelError
 from v365_archviz.providers.local_dispatcher import LocalGenerationDispatcher
 from v365_archviz.providers.local_jobs import LocalJobRepository
@@ -109,6 +111,7 @@ class CreateViewSetRequest(BaseModel):
 
     model_revision: str = Field(pattern=SAFE_IDENTIFIER_PATTERN)
     profile: GenerationProfile = GenerationProfile.PREVIEW_FAST
+    render_profile: RenderProfile = RenderProfile.STANDARD_EEVEE
 
 
 class ViewSetJobResponse(BaseModel):
@@ -119,6 +122,7 @@ class ViewSetJobResponse(BaseModel):
     view_set_id: str
     design_revision: str
     state: WorkflowState
+    certification_state: CertificationState = CertificationState.BASE_PBR
     created: bool
     error_code: str | None = None
     error_message: str | None = None
@@ -190,6 +194,24 @@ def _video_job_response(job: VideoJob, *, created: bool) -> VideoJobResponse:
 
 def _design_directory(artifact_dir: Path, model_revision: str, design_revision: str) -> Path:
     return artifact_dir / "scenes" / model_revision / "designs" / design_revision
+
+
+def _certification_state(job: GenerationJob, settings: Settings) -> CertificationState:
+    model_revision = job.model_revision
+    design_revision = job.design_revision
+    path = (
+        settings.artifact_dir
+        / "generated"
+        / model_revision
+        / design_revision
+        / "certification_report.json"
+    )
+    if not path.is_file():
+        return CertificationState.BASE_PBR
+    try:
+        return CertificationReport.model_validate_json(path.read_text(encoding="utf-8")).state
+    except (OSError, ValueError):
+        return CertificationState.BASE_PBR
 
 
 def _require_safe_identifier(value: str, label: str) -> None:
@@ -369,6 +391,7 @@ def create_view_set(design_revision: str, request: CreateViewSetRequest) -> View
         design_revision=design_revision,
         view_set=view_set,
         profile=request.profile,
+        render_profile=request.render_profile,
     )
     job = created.job
     if created.created:
@@ -388,6 +411,7 @@ def create_view_set(design_revision: str, request: CreateViewSetRequest) -> View
         view_set_id=job.view_set_id,
         design_revision=job.design_revision,
         state=job.state,
+        certification_state=_certification_state(job, settings),
         created=created.created,
         error_code=job.error_code,
         error_message=job.error_message,
@@ -401,8 +425,9 @@ def create_view_set(design_revision: str, request: CreateViewSetRequest) -> View
 )
 def get_view_set(view_set_id: str) -> ViewSetJobResponse:
     _require_safe_identifier(view_set_id, "view_set_id")
+    settings = _settings()
     try:
-        job = _repository(_settings()).get_by_view_set(view_set_id)
+        job = _repository(settings).get_by_view_set(view_set_id)
     except OSError as exc:
         raise HTTPException(status_code=404, detail="view set not found") from exc
     return ViewSetJobResponse(
@@ -411,6 +436,7 @@ def get_view_set(view_set_id: str) -> ViewSetJobResponse:
         view_set_id=job.view_set_id,
         design_revision=job.design_revision,
         state=job.state,
+        certification_state=_certification_state(job, settings),
         created=False,
         error_code=job.error_code,
         error_message=job.error_message,
@@ -559,7 +585,8 @@ def download_video_job_output(video_job_id: str) -> FileResponse:
 
 
 def _transition_view_set(view_set_id: str, target: WorkflowState) -> ViewSetJobResponse:
-    repository = _repository(_settings())
+    settings = _settings()
+    repository = _repository(settings)
     try:
         job = repository.get_by_view_set(view_set_id)
         updated = job.transition(target)
@@ -574,6 +601,7 @@ def _transition_view_set(view_set_id: str, target: WorkflowState) -> ViewSetJobR
         view_set_id=updated.view_set_id,
         design_revision=updated.design_revision,
         state=updated.state,
+        certification_state=_certification_state(updated, settings),
         created=False,
         error_code=updated.error_code,
         error_message=updated.error_message,

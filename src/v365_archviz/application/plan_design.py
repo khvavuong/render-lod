@@ -162,6 +162,7 @@ class PlanDesign:
             element.scene_element_id
             for element in scene.elements
             if _element_surfaces(scene, element)
+            or element.semantic_role is SemanticRole.UTILITY_BLOCK
         }
         requested_ids = set(brief.focus_building_ids) | set(brief.context_building_ids)
         if missing := requested_ids - buildable_ids:
@@ -174,19 +175,23 @@ class PlanDesign:
         ]
         for element in scene.elements:
             surfaces = _element_surfaces(scene, element)
-            if not surfaces:
+            if not surfaces and element.semantic_role is not SemanticRole.UTILITY_BLOCK:
                 continue
-            treatment = (
-                BuildingTreatment.FOCUS
-                if (
-                    element.scene_element_id in brief.focus_building_ids
-                    or (
-                        not brief.focus_building_ids
-                        and element.scene_element_id not in brief.context_building_ids
-                    )
-                )
-                else BuildingTreatment.CONTEXT
-            )
+            if element.scene_element_id in brief.context_building_ids:
+                treatment = BuildingTreatment.CONTEXT
+            elif element.scene_element_id in brief.focus_building_ids or (
+                not brief.focus_building_ids
+                and element.semantic_role in {SemanticRole.MAIN_SHED, SemanticRole.OFFICE_BLOCK}
+            ):
+                treatment = BuildingTreatment.FOCUS
+            elif element.semantic_role is SemanticRole.UTILITY_BLOCK:
+                treatment = BuildingTreatment.AUXILIARY
+            elif brief.focus_building_ids:
+                treatment = BuildingTreatment.CONTEXT
+            else:
+                # Authored utility/support masses are part of the subject site, but they must
+                # neither receive the shed facade grammar nor become translucent context.
+                treatment = BuildingTreatment.AUXILIARY
             peers = offices if element.semantic_role is SemanticRole.MAIN_SHED else sheds
             nearest_peer = (
                 min(
@@ -212,9 +217,15 @@ class PlanDesign:
                     surface_id=surface.surface_id,
                     panel_module_m=brief.panel_module_m,
                     office_entrance=(
-                        Entrance(u=0.5, width_m=min(2.4, surface.width_m * 0.25))
+                        Entrance(
+                            u=(0.1 if element.semantic_role is SemanticRole.MAIN_SHED else 0.5),
+                            width_m=min(2.4, surface.width_m * 0.25),
+                        )
                         if brief.add_office_entrances
-                        and element.semantic_role is SemanticRole.OFFICE_BLOCK
+                        and (
+                            element.semantic_role is SemanticRole.OFFICE_BLOCK
+                            or (element.semantic_role is SemanticRole.MAIN_SHED and not offices)
+                        )
                         and front_surface is not None
                         and surface.surface_id == front_surface.surface_id
                         else None

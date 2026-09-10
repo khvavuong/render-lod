@@ -12,6 +12,7 @@ from v365_archviz.application.assemble_video import AssembleVideo
 from v365_archviz.application.brand_deliverables import BrandDeliverables
 from v365_archviz.application.brand_watermark import BrandWatermark
 from v365_archviz.application.build_canonical_scene import BuildCanonicalScene
+from v365_archviz.application.build_control_pack import BuildControlPack
 from v365_archviz.application.build_correspondence import BuildCorrespondenceIndex
 from v365_archviz.application.evaluate_consistency import EvaluateConsistency
 from v365_archviz.application.extract_ifc import ExtractIfc
@@ -21,16 +22,19 @@ from v365_archviz.application.plan_cameras import PlanStandardCameras
 from v365_archviz.application.plan_design import PlanDesign
 from v365_archviz.application.plan_repairs import PlanRepairs
 from v365_archviz.application.plan_video import PlanVideo
+from v365_archviz.application.protect_refinement import ProtectRefinement
 from v365_archviz.application.refine_view import DEFAULT_PROMPT, RefineView
 from v365_archviz.application.refine_viewset import RefineViewSet
+from v365_archviz.application.validate_conditioning import ValidateConditioningViewSet
 from v365_archviz.application.validate_viewset import ValidateGeneratedViewSet
 from v365_archviz.config import Settings
 from v365_archviz.domain.design import DesignDNA
 from v365_archviz.domain.workflow import GenerationProfile, ViewSet
 from v365_archviz.errors import V365Error
 from v365_archviz.providers.aps import ApsModelDerivativeClient
-from v365_archviz.providers.gemini import GeminiImageRenderer
+from v365_archviz.providers.gemini import GeminiConditioningMode, GeminiImageRenderer
 from v365_archviz.providers.local_rvt import LocalRvtInspector
+from v365_archviz.providers.stability import StabilityStructureRenderer
 from v365_archviz.providers.veo import VeoVideoRenderer
 
 
@@ -75,6 +79,11 @@ def _parser() -> argparse.ArgumentParser:
         "revision-key", help="print the content revision key for an RVT"
     )
     revision.add_argument("source", type=Path)
+    controls = subcommands.add_parser(
+        "build-control-packs", help="build LOCKED/BOUNDED/FREE masks for rendered views"
+    )
+    controls.add_argument("render_root", type=Path)
+    controls.add_argument("--view-set", type=Path, required=True)
     refine = subcommands.add_parser(
         "refine-view", help="refine one complete conditioning pack with Gemini"
     )
@@ -84,6 +93,16 @@ def _parser() -> argparse.ArgumentParser:
     refine.add_argument("--prompt-file", type=Path)
     refine.add_argument("--reference-image", type=Path, action="append", default=[])
     refine.add_argument("--design-dna", type=Path)
+    refine.add_argument(
+        "--provider",
+        choices=("gemini", "stability-structure"),
+        default="gemini",
+    )
+    refine.add_argument(
+        "--conditioning-mode",
+        choices=[mode.value for mode in GeminiConditioningMode],
+        default=GeminiConditioningMode.FULL.value,
+    )
     refine_set = subcommands.add_parser(
         "refine-viewset", help="generate one ordered immutable view-set unit"
     )
@@ -91,9 +110,25 @@ def _parser() -> argparse.ArgumentParser:
     refine_set.add_argument("--view-set", type=Path, required=True)
     refine_set.add_argument("--design-dna", type=Path, required=True)
     refine_set.add_argument("--model-revision", required=True)
+    refine_set.add_argument(
+        "--provider",
+        choices=("gemini", "stability-structure"),
+        default="gemini",
+    )
     refine_set.add_argument("--output", type=Path, required=True)
     refine_set.add_argument("--prompt-file", type=Path)
     refine_set.add_argument("--reference-image", type=Path, action="append", default=[])
+    refine_set.add_argument(
+        "--conditioning-mode",
+        choices=[mode.value for mode in GeminiConditioningMode],
+        default=GeminiConditioningMode.FULL.value,
+    )
+    refine_set.add_argument(
+        "--view",
+        action="append",
+        default=[],
+        help="generate only this benchmark view; repeat as needed",
+    )
     refine_set.add_argument(
         "--profile",
         choices=[profile.value for profile in GenerationProfile],
@@ -118,6 +153,14 @@ def _parser() -> argparse.ArgumentParser:
     correspondence.add_argument("scene", type=Path)
     correspondence.add_argument("render_root", type=Path)
     correspondence.add_argument("--view-set", type=Path, required=True)
+    conditioning_qa = subcommands.add_parser(
+        "validate-conditioning",
+        help="reject unusable camera coverage before paid image generation",
+    )
+    conditioning_qa.add_argument("scene", type=Path)
+    conditioning_qa.add_argument("render_root", type=Path)
+    conditioning_qa.add_argument("--view-set", type=Path, required=True)
+    conditioning_qa.add_argument("--output", type=Path)
     consistency = subcommands.add_parser(
         "evaluate-consistency", help="create a fail-closed cross-view QA report"
     )
@@ -225,8 +268,9 @@ def _refinement_prompt(
         f"- approved context building count: {context_count}; generate exactly this count, "
         "plus only the deterministic perimeter massings explicitly present in semantic pixels; "
         "never infer additional context\n"
-        f"- context buildings: {site_design.context_render_mode}, opacity reference "
-        f"{site_design.context_opacity:.2f}, no facade design\n"
+        f"- context buildings: {site_design.context_render_mode}, visual-prominence reference "
+        f"{site_design.context_opacity:.2f}; pale frosted translucent planning massing with "
+        "ground contact, no facade design and no glass-building appearance\n"
         f"- surrounding context mode: {site_design.surrounding_context_mode}; "
         f"perimeter massing count: {site_design.surrounding_context_count}\n"
         f"- surrounding landscape buffer: {site_design.surrounding_landscape_buffer}"
@@ -239,6 +283,19 @@ def _refinement_prompt(
         "soft visual preference that cannot override geometry, access, roof or palette constraints"
     )
     return design, prompt
+
+
+def _image_renderer(
+    settings: Settings,
+    provider: str,
+    conditioning_mode: str,
+) -> GeminiImageRenderer | StabilityStructureRenderer:
+    if provider == "stability-structure":
+        return StabilityStructureRenderer(settings)
+    return GeminiImageRenderer(
+        settings,
+        conditioning_mode=GeminiConditioningMode(conditioning_mode),
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -299,10 +356,30 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "revision-key":
             print(LocalRvtInspector().inspect(args.source).sha256[:16])
             return 0
+        if args.command == "build-control-packs":
+            view_set = ViewSet.model_validate_json(args.view_set.read_text(encoding="utf-8"))
+            manifests = tuple(
+                BuildControlPack().execute(args.render_root / camera.view_id)
+                for camera in view_set.cameras
+            )
+            print(
+                json.dumps(
+                    {
+                        "view_count": len(manifests),
+                        "manifests": [
+                            str(args.render_root / item.view_id / "control_pack_manifest.json")
+                            for item in manifests
+                        ],
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return 0
         if args.command == "refine-view":
             settings = Settings.from_env()
             loaded_design, prompt = _refinement_prompt(args.design_dna, args.prompt_file)
-            with GeminiImageRenderer(settings) as renderer:
+            with _image_renderer(settings, args.provider, args.conditioning_mode) as renderer:
                 output_directory = args.output
                 if output_directory is None:
                     model_revision = (
@@ -347,7 +424,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "refine-viewset":
             settings = Settings.from_env()
             _, prompt = _refinement_prompt(args.design_dna, args.prompt_file)
-            with GeminiImageRenderer(settings) as renderer:
+            with _image_renderer(settings, args.provider, args.conditioning_mode) as renderer:
                 viewset_artifacts = RefineViewSet().execute(
                     renderer,
                     args.render_root,
@@ -358,14 +435,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                     prompt,
                     tuple(args.reference_image),
                     GenerationProfile(args.profile),
-                    watermark=BrandWatermark(),
+                    view_ids=tuple(args.view),
                 )
+            protected = ProtectRefinement().execute(args.render_root, args.output)
+            BrandDeliverables().execute(BrandWatermark(), args.output)
             print(
                 json.dumps(
                     {
                         "request_id": viewset_artifacts.request_id,
                         "view_count": viewset_artifacts.view_count,
                         "manifest": str(viewset_artifacts.manifest_path),
+                        "protected_composite_manifest": str(protected.manifest_path),
                     },
                     ensure_ascii=False,
                     indent=2,
@@ -408,6 +488,25 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
             )
             return 0
+        if args.command == "validate-conditioning":
+            result = ValidateConditioningViewSet().execute(
+                args.scene,
+                args.view_set,
+                args.render_root,
+                args.output,
+            )
+            print(
+                json.dumps(
+                    {
+                        "passed": result.passed,
+                        "failed_view_ids": result.failed_view_ids,
+                        "report": str(result.report_path),
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return 0 if result.passed else 3
         if args.command == "evaluate-consistency":
             view_set = ViewSet.model_validate_json(args.view_set.read_text(encoding="utf-8"))
             consistency_result = EvaluateConsistency().execute(

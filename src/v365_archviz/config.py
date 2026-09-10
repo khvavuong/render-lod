@@ -31,6 +31,9 @@ class Settings:
     aps_base_url: str
     aps_region: str
     aps_bucket_key: str | None
+    stability_api_key: str | None = None
+    stability_control_strength: float = 0.85
+    stability_seed: int = 365100
     local_worker_enabled: bool = True
     veo_model: str = "veo-3.1-lite-generate-preview"
     veo_resolution: str = "720p"
@@ -66,6 +69,11 @@ class Settings:
             ),
             aps_region=os.getenv("APS_REGION", "US"),
             aps_bucket_key=os.getenv("APS_BUCKET_KEY"),
+            stability_api_key=os.getenv("STABILITY_API_KEY"),
+            stability_control_strength=float(
+                os.getenv("STABILITY_CONTROL_STRENGTH", "0.85")
+            ),
+            stability_seed=int(os.getenv("STABILITY_SEED", "365100")),
             local_worker_enabled=_as_bool(
                 os.getenv("V365_ENABLE_LOCAL_WORKER"), default=True
             ),
@@ -78,3 +86,7 @@ class Settings:
     @property
     def gemini_configured(self) -> bool:
         return bool(self.gemini_api_key)
+
+    @property
+    def stability_configured(self) -> bool:
+        return bool(self.stability_api_key)

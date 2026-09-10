@@ -85,6 +85,20 @@ make plan-design MODEL=/path/to/project.rvt BRIEF=/path/to/project-brief.json
 make render MODEL=/path/to/project.rvt BRIEF=/path/to/project-brief.json
 ```
 
+`make render` mặc định dùng `RENDER_PROFILE=standard_eevee` (1024×576). Máy cấu hình thấp có thể
+dùng `RENDER_PROFILE=preview_fast` để duyệt camera; `premium_cycles` chỉ dành cho GPU worker.
+Renderer đặt cây và scale-cue entourage một lần trong shared scene theo semantic geometry,
+`design_revision` và `presentation.entourage_density`; không random lại theo view. Vị trí, kích thước
+và asset ID được ghi tại `entourage_manifest.json`. Mật độ `low` không tự đặt xe tải
+trong service yard; xe tải chỉ xuất hiện với mật độ cao hơn và phải gắn với loading dock
+đã authored.
+Sau khi render, pipeline chạy camera preflight từ semantic-ID pass và dừng trước Gemini nếu chủ
+thể quá nhỏ/crop nặng hoặc không nhìn thấy phần giao thông đã có trong model. Có thể chạy lại riêng:
+
+```bash
+make validate-conditioning MODEL=/path/to/project.rvt BRIEF=/path/to/project-brief.json
+```
+
 Ảnh tham khảo là input tùy chọn và **không phải design brief**. Pipeline chỉ dùng chúng để
 tham khảo độ chân thật ảnh chụp, phản ứng vật liệu và mật độ chi tiết thi công; không sao chép
 palette, hình mái, facade, massing, camera, bố cục giao thông/cảnh quan hay vật thể riêng của
@@ -107,10 +121,30 @@ make evaluate-consistency MODEL=/path/to/project.rvt BRIEF=/path/to/project-brie
 make compose-board MODEL=/path/to/project.rvt BRIEF=/path/to/project-brief.json
 ```
 
-`PROFILE=marketing_hero` sinh `view-03` trước làm style anchor cho năm camera còn lại. Conditioning
+`PROFILE=marketing_hero` sinh `view-01` tổng thể trước làm Design Master cho năm camera còn lại. Conditioning
 semantic được chuyển sang grayscale trung tính trước khi gửi provider để màu annotation không rò
 thành màu facade. `preview_fast` vẫn giữ chế độ từng view độc lập để thử nhanh, không dùng làm bộ
 ảnh duyệt cuối.
+
+Controlled-realism bake-off có thể chạy trên ba góc đại diện mà không sinh video hoặc ghi đè bộ
+deliverable. Gemini hỗ trợ hai chiến lược input: `full` gửi toàn bộ pass, `minimal` chỉ gửi RGB và
+structural edges. Stability Control Structure dùng `STABILITY_API_KEY`, mặc định
+`control_strength=0.85` và seed có thể tái lập:
+
+```bash
+# Gemini baseline
+make refine-viewset MODEL=/path/to/project.rvt BRIEF=/path/to/project-brief.json \
+  GENERATED_DIR=.artifacts/experiments/project/gemini-full \
+  PROFILE=marketing_hero CONDITIONING_MODE=full
+
+# Structure-controlled challenger
+make refine-viewset MODEL=/path/to/project.rvt BRIEF=/path/to/project-brief.json \
+  GENERATED_DIR=.artifacts/experiments/project/stability-structure \
+  PROFILE=marketing_hero IMAGE_PROVIDER=stability-structure
+```
+
+CLI `refine-viewset` còn nhận lặp `--view view-01 --view view-03 --view view-06` để giới hạn pilot
+ở ba góc tổng thể/hero/tầm mắt người trước khi trả phí cho đủ sáu ảnh.
 
 ## Video showreel bằng Veo 3.1 Lite
 

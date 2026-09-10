@@ -19,6 +19,9 @@ RENDER_DIR ?= $(ARTIFACT_DIR)/renders/$(REVISION)/$(DESIGN_REVISION)
 GENERATED_DIR ?= $(ARTIFACT_DIR)/generated/$(REVISION)/$(DESIGN_REVISION)
 VIEWS ?= view-01 view-02 view-03 view-04 view-05 view-06
 PROFILE ?= preview_fast
+CONDITIONING_MODE ?= full
+IMAGE_PROVIDER ?= gemini
+RENDER_PROFILE ?= standard_eevee
 VIDEO_PLAN ?= $(shell find "$(ARTIFACT_DIR)/videos/$(REVISION)/$(DESIGN_REVISION)" \
 	-mindepth 2 -maxdepth 2 -name video_plan.json -print 2>/dev/null | sort | tail -1)
 VIDEO_ROOT ?= $(dir $(VIDEO_PLAN))
@@ -28,7 +31,7 @@ REFERENCE_ARGS = $(foreach reference,$(REFERENCES),--reference-image "$(referenc
 
 .PHONY: install test lint typecheck fe-install fe-dev fe-test fe-e2e-install fe-e2e fe-build require-model require-brief require-design inspect extract-ifc \
 	canonicalize plan-design plan-cameras renderer-image render refine-view refine-viewset \
-	build-correspondence validate-viewset evaluate-consistency plan-repairs compose-board api \
+	build-correspondence validate-conditioning validate-viewset evaluate-consistency plan-repairs compose-board api \
 	plan-video generate-video-shots assemble-video brand-deliverables
 
 install:
@@ -100,14 +103,22 @@ render: require-model require-brief renderer-image
 		-v "$(CURDIR):/workspace" v365-archviz-renderer:foundation \
 		--scene "/workspace/$(SCENE)" \
 		--design-dna "/workspace/$(DESIGN_DNA)" \
+		--asset-library "/workspace/assets/pbr-v1/asset_library_manifest.json" \
 		--view-set "/workspace/$(VIEW_SET)" \
-		--output "/workspace/$(RENDER_DIR)"
+		--output "/workspace/$(RENDER_DIR)" \
+		--profile "$(RENDER_PROFILE)"
+	$(PYTHON) -m v365_archviz build-control-packs "$(RENDER_DIR)" \
+		--view-set "$(VIEW_SET)"
 	$(PYTHON) -m v365_archviz build-correspondence "$(SCENE)" "$(RENDER_DIR)" \
+		--view-set "$(VIEW_SET)"
+	$(PYTHON) -m v365_archviz validate-conditioning "$(SCENE)" "$(RENDER_DIR)" \
 		--view-set "$(VIEW_SET)"
 
 refine-view: require-model require-design
 	$(PYTHON) -m v365_archviz refine-view "$(RENDER_DIR)" "$(VIEW)" \
 		--design-dna "$(DESIGN_DNA)" \
+		--provider "$(IMAGE_PROVIDER)" \
+		--conditioning-mode "$(CONDITIONING_MODE)" \
 		$(REFERENCE_ARGS)
 
 refine-viewset: require-model require-design
@@ -117,10 +128,16 @@ refine-viewset: require-model require-design
 		--model-revision "$(REVISION)" \
 		--output "$(GENERATED_DIR)" \
 		--profile "$(PROFILE)" \
+		--provider "$(IMAGE_PROVIDER)" \
+		--conditioning-mode "$(CONDITIONING_MODE)" \
 		$(REFERENCE_ARGS)
 
 build-correspondence: require-model require-design
 	$(PYTHON) -m v365_archviz build-correspondence "$(SCENE)" "$(RENDER_DIR)" \
+		--view-set "$(VIEW_SET)"
+
+validate-conditioning: require-model require-design
+	$(PYTHON) -m v365_archviz validate-conditioning "$(SCENE)" "$(RENDER_DIR)" \
 		--view-set "$(VIEW_SET)"
 
 validate-viewset: require-model require-design

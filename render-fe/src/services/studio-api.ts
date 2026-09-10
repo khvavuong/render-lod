@@ -1,6 +1,7 @@
 import { buildDesignBrief } from '../domain/design-brief';
 import type {
   DesignFormValues,
+  CertificationState,
   OutputArtifact,
   StudioGateway,
   StudioJob,
@@ -24,6 +25,7 @@ interface ViewSetResponse {
   view_set_id: string;
   design_revision: string;
   state: WorkflowState;
+  certification_state?: CertificationState;
   error_message?: string | null;
 }
 
@@ -100,6 +102,7 @@ function toJob(job: ViewSetResponse, outputs: OutputArtifact[] = []): StudioJob 
     viewSetId: job.view_set_id,
     designRevision: job.design_revision,
     state: job.state,
+    certificationState: job.certification_state ?? 'base_pbr',
     outputs,
     errorMessage: job.error_message ?? undefined,
   };
@@ -151,6 +154,7 @@ export class HttpStudioGateway implements StudioGateway {
         body: JSON.stringify({
           model_revision: model.model_revision,
           profile: 'marketing_hero',
+          render_profile: 'standard_eevee',
         }),
       },
     );

@@ -6,6 +6,8 @@ Executed by Blender, not the control-plane Python environment.
 from __future__ import annotations
 
 import argparse
+import colorsys
+import hashlib
 import json
 import math
 import os
@@ -23,9 +25,15 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--scene", type=Path, required=True)
     parser.add_argument("--view-set", type=Path, required=True)
     parser.add_argument("--design-dna", type=Path)
+    parser.add_argument("--asset-library", type=Path)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--width", type=int, default=768)
-    parser.add_argument("--height", type=int, default=432)
+    parser.add_argument("--width", type=int)
+    parser.add_argument("--height", type=int)
+    parser.add_argument(
+        "--profile",
+        choices=("preview_fast", "standard_eevee", "premium_cycles"),
+        default="standard_eevee",
+    )
     parser.add_argument("--view-id", action="append", dest="view_ids")
     parser.add_argument("--pbr-only", action="store_true")
     return parser.parse_args(argv)
@@ -36,6 +44,10 @@ def material(
     color: tuple[float, float, float, float],
     metallic: float,
     roughness: float,
+    micro_surface: dict | None = None,
+    optical: dict | None = None,
+    texture_files: dict[str, Path] | None = None,
+    texture_scale_m: float | None = None,
 ):
     value = bpy.data.materials.new(name)
     value.diffuse_color = color
@@ -44,6 +56,10 @@ def material(
     principled.inputs["Base Color"].default_value = color
     principled.inputs["Metallic"].default_value = metallic
     principled.inputs["Roughness"].default_value = roughness
+    _apply_optical_properties(principled, optical or {})
+    _add_micro_surface(value, principled, name, roughness, micro_surface)
+    if texture_files:
+        _add_image_textures(value, principled, texture_files, texture_scale_m or 1.0)
     if "Alpha" in principled.inputs:
         principled.inputs["Alpha"].default_value = color[3]
     if color[3] < 1.0:
@@ -54,6 +70,134 @@ def material(
         if hasattr(value, "use_transparency_overlap"):
             value.use_transparency_overlap = False
     return value
+
+
+def _add_image_textures(
+    value,
+    principled,
+    texture_files: dict[str, Path],
+    texture_scale_m: float,
+) -> None:
+    """Apply real-world-scale PBR maps using stable world-space projection."""
+
+    nodes = value.node_tree.nodes
+    links = value.node_tree.links
+    geometry = nodes.new("ShaderNodeNewGeometry")
+    mapping = nodes.new("ShaderNodeVectorMath")
+    mapping.operation = "SCALE"
+    mapping.inputs["Scale"].default_value = 1.0 / texture_scale_m
+    links.new(geometry.outputs["Position"], mapping.inputs[0])
+
+    def image_node(role: str, *, non_color: bool = False):
+        path = texture_files.get(role)
+        if path is None:
+            return None
+        node = nodes.new("ShaderNodeTexImage")
+        node.image = bpy.data.images.load(str(path), check_existing=True)
+        node.extension = "REPEAT"
+        node.projection = "FLAT"
+        if non_color:
+            node.image.colorspace_settings.name = "Non-Color"
+        links.new(mapping.outputs["Vector"], node.inputs["Vector"])
+        return node
+
+    albedo = image_node("albedo")
+    if albedo is not None:
+        links.new(albedo.outputs["Color"], principled.inputs["Base Color"])
+    roughness = image_node("roughness", non_color=True)
+    if roughness is not None:
+        links.new(roughness.outputs["Color"], principled.inputs["Roughness"])
+    normal = image_node("normal", non_color=True)
+    if normal is not None:
+        normal_map = nodes.new("ShaderNodeNormalMap")
+        normal_map.inputs["Strength"].default_value = 0.55
+        links.new(normal.outputs["Color"], normal_map.inputs["Color"])
+        links.new(normal_map.outputs["Normal"], principled.inputs["Normal"])
+
+
+def _apply_optical_properties(principled, properties: dict) -> None:
+    """Set Principled inputs across Blender 4.x naming changes."""
+
+    aliases = {
+        "transmission_weight": ("Transmission Weight", "Transmission"),
+        "ior": ("IOR",),
+        "coat_weight": ("Coat Weight", "Clearcoat"),
+        "coat_roughness": ("Coat Roughness", "Clearcoat Roughness"),
+    }
+    defaults = {
+        "transmission_weight": 0.0,
+        "ior": 1.5,
+        "coat_weight": 0.0,
+        "coat_roughness": 0.03,
+    }
+    for key, names in aliases.items():
+        value = float(properties.get(key, defaults[key]))
+        socket = next(
+            (principled.inputs.get(name) for name in names if principled.inputs.get(name)),
+            None,
+        )
+        if socket is not None:
+            socket.default_value = value
+
+
+def _add_micro_surface(
+    value,
+    principled,
+    name: str,
+    roughness: float,
+    definition: dict | None = None,
+) -> None:
+    """Add lightweight world-scale roughness/normal variation without texture memory."""
+
+    profiles = {
+        "main_shed": (5.0, 0.055, 0.08),
+        "office_block": (4.0, 0.04, 0.055),
+        "primary_facade": (5.0, 0.055, 0.08),
+        "roof": (7.0, 0.045, 0.07),
+        "service_yard": (2.4, 0.10, 0.16),
+        "loading_zone": (2.4, 0.10, 0.16),
+        "sidewalk": (3.2, 0.085, 0.13),
+        "parking": (2.0, 0.105, 0.18),
+        "site_road": (1.8, 0.11, 0.20),
+    }
+    profile = (
+        (
+            definition["scale_per_m"],
+            definition["roughness_variation"],
+            definition["bump_strength"],
+            definition["bump_distance_m"],
+        )
+        if definition
+        else (*profiles[name], 0.035)
+        if name in profiles
+        else None
+    )
+    if profile is None:
+        return
+    scale, roughness_variation, bump_strength, bump_distance = profile
+    nodes = value.node_tree.nodes
+    links = value.node_tree.links
+    geometry = nodes.new("ShaderNodeNewGeometry")
+    vector_scale = nodes.new("ShaderNodeVectorMath")
+    vector_scale.operation = "SCALE"
+    vector_scale.inputs["Scale"].default_value = scale
+    noise = nodes.new("ShaderNodeTexNoise")
+    noise.noise_dimensions = "3D"
+    noise.inputs["Scale"].default_value = 1.0
+    noise.inputs["Detail"].default_value = 3.0
+    noise.inputs["Roughness"].default_value = 0.58
+    ramp = nodes.new("ShaderNodeValToRGB")
+    ramp.color_ramp.elements[0].color = (max(0.0, roughness - roughness_variation),) * 3 + (1.0,)
+    ramp.color_ramp.elements[1].color = (min(1.0, roughness + roughness_variation),) * 3 + (1.0,)
+    bump = nodes.new("ShaderNodeBump")
+    bump.inputs["Strength"].default_value = bump_strength
+    bump.inputs["Distance"].default_value = bump_distance
+    links.new(geometry.outputs["Position"], vector_scale.inputs[0])
+    links.new(vector_scale.outputs["Vector"], noise.inputs["Vector"])
+    links.new(noise.outputs["Fac"], ramp.inputs["Fac"])
+    links.new(ramp.outputs["Color"], principled.inputs["Roughness"])
+    links.new(noise.outputs["Fac"], bump.inputs["Height"])
+    links.new(bump.outputs["Normal"], principled.inputs["Normal"])
 
 
 def emission_material(name: str, color: tuple[float, float, float, float]):
@@ -72,8 +216,17 @@ def emission_material(name: str, color: tuple[float, float, float, float]):
 
 def _hex_color(value: str) -> tuple[float, float, float, float]:
     normalized = value.lstrip("#")
-    rgb = tuple(int(normalized[index : index + 2], 16) / 255 for index in (0, 2, 4))
-    return (*rgb, 1.0)
+    encoded = tuple(int(normalized[index : index + 2], 16) / 255 for index in (0, 2, 4))
+
+    def to_linear(channel: float) -> float:
+        return channel / 12.92 if channel <= 0.04045 else ((channel + 0.055) / 1.055) ** 2.4
+
+    return (*(to_linear(channel) for channel in encoded), 1.0)
+
+
+def _linear_channel_to_srgb8(value: float) -> int:
+    encoded = 12.92 * value if value <= 0.0031308 else 1.055 * value ** (1 / 2.4) - 0.055
+    return round(max(0.0, min(1.0, encoded)) * 255)
 
 
 def _palette(design_data: dict | None) -> dict[str, str]:
@@ -89,19 +242,75 @@ def _palette(design_data: dict | None) -> dict[str, str]:
     return defaults
 
 
-def build_materials(design_data: dict | None):
+def _material_specs(asset_data: dict | None) -> dict[str, dict]:
+    specs = {}
+    for asset in (asset_data or {}).get("assets", []):
+        if asset.get("kind") != "material" or not asset.get("material"):
+            continue
+        for role in asset.get("semantic_roles", []):
+            if role in specs:
+                raise ValueError(f"duplicate material asset assignment for semantic role {role}")
+            specs[role] = asset
+    return specs
+
+
+def build_materials(
+    design_data: dict | None,
+    asset_data: dict | None = None,
+    asset_root: Path | None = None,
+):
+    if asset_root is None and asset_data and asset_data.get("_asset_root"):
+        asset_root = Path(asset_data["_asset_root"])
     palette = _palette(design_data)
-    context_opacity = (
-        design_data.get("site_design", {}).get("context_opacity", 0.28) if design_data else 0.28
+    specs = _material_specs(asset_data)
+    requested_context_opacity = (
+        design_data.get("site_design", {}).get("context_opacity", 0.46) if design_data else 0.46
     )
+    context_opacity = max(0.42, min(0.58, requested_context_opacity))
+
+    def resolved(
+        role: str,
+        fallback_color: tuple[float, float, float, float],
+        fallback_metallic: float,
+        fallback_roughness: float,
+    ):
+        asset = specs.get(role, {})
+        asset_id = asset.get("asset_id", f"fallback.{role}")
+        spec = asset.get("material", {})
+        color_source = spec.get("color_source")
+        color = fallback_color
+        if isinstance(color_source, str):
+            if color_source.startswith("palette:"):
+                color = _hex_color(palette[color_source.removeprefix("palette:")])
+            elif color_source.startswith("#"):
+                color = _hex_color(color_source)
+        opacity = float(spec.get("opacity", color[3]))
+        texture_files = {
+            item["role"]: (asset_root / item["path"]).resolve()
+            for item in asset.get("files", [])
+            if asset_root is not None
+        }
+        result = material(
+            role,
+            (*color[:3], opacity),
+            float(spec.get("metallic", fallback_metallic)),
+            float(spec.get("roughness", fallback_roughness)),
+            spec.get("micro_surface"),
+            spec,
+            texture_files,
+            spec.get("texture_scale_m"),
+        )
+        result["asset_id"] = asset_id
+        return result
+
     return {
-        "main_shed": material("main_shed", _hex_color(palette["primary_hex"]), 0.35, 0.3),
-        "office_block": material("office_block", _hex_color(palette["primary_hex"]), 0.18, 0.38),
-        "service_yard": material("service_yard", _hex_color(palette["paving_hex"]), 0.0, 0.72),
-        "site_road": material("site_road", (0.12, 0.135, 0.14, 1), 0.0, 0.82),
-        "sidewalk": material("sidewalk", (0.48, 0.49, 0.48, 1), 0.0, 0.76),
-        "parking": material("parking", (0.28, 0.30, 0.31, 1), 0.0, 0.8),
-        "landscape_zone": material("landscape_zone", (0.10, 0.28, 0.105, 1), 0.0, 0.92),
+        "main_shed": resolved("main_shed", _hex_color(palette["primary_hex"]), 0.35, 0.3),
+        "office_block": resolved("office_block", _hex_color(palette["primary_hex"]), 0.18, 0.38),
+        "service_yard": resolved("service_yard", _hex_color(palette["paving_hex"]), 0.0, 0.72),
+        "site_road": resolved("site_road", (0.12, 0.135, 0.14, 1), 0.0, 0.82),
+        "sidewalk": resolved("sidewalk", (0.48, 0.49, 0.48, 1), 0.0, 0.76),
+        "parking": resolved("parking", (0.28, 0.30, 0.31, 1), 0.0, 0.8),
+        "landscape_zone": resolved("landscape_zone", (0.10, 0.28, 0.105, 1), 0.0, 0.92),
         "main_entrance": material(
             "main_entrance", _hex_color(palette["secondary_hex"]), 0.25, 0.42
         ),
@@ -109,12 +318,28 @@ def build_materials(design_data: dict | None):
             "secondary_entrance", _hex_color(palette["secondary_hex"]), 0.25, 0.42
         ),
         "site_boundary": material("site_boundary", (0.22, 0.24, 0.24, 1), 0.15, 0.55),
-        "loading_zone": material("loading_zone", _hex_color(palette["paving_hex"]), 0.0, 0.75),
-        "roof": material("roof", (0.62, 0.66, 0.68, 1), 0.48, 0.28),
-        "primary_facade": material("primary_facade", _hex_color(palette["primary_hex"]), 0.35, 0.3),
-        "context": material("context", (0.66, 0.70, 0.73, context_opacity), 0.05, 0.65),
-        "context_landscape": material("context_landscape", (0.12, 0.22, 0.12, 0.72), 0.0, 0.95),
-        "utility_block": material("utility_block", _hex_color(palette["secondary_hex"]), 0.2, 0.45),
+        "loading_zone": resolved("loading_zone", _hex_color(palette["paving_hex"]), 0.0, 0.75),
+        "roof": resolved("roof", (0.62, 0.66, 0.68, 1), 0.48, 0.28),
+        "primary_facade": resolved("primary_facade", _hex_color(palette["primary_hex"]), 0.35, 0.3),
+        # A restrained frosted proxy keeps neighbouring factories legible but secondary. The
+        # minimum opacity retains contact shadows and avoids floating/ghost geometry.
+        "context": material("context", (0.76, 0.78, 0.78, context_opacity), 0.0, 0.92),
+        "context_landscape": resolved("context_landscape", (0.12, 0.22, 0.12, 0.72), 0.0, 0.95),
+        "office_glass": resolved("office_glass", _hex_color(palette["glass_hex"]), 0.08, 0.16),
+        "facade_accent": resolved("facade_accent", _hex_color(palette["accent_hex"]), 0.22, 0.34),
+        "facade_secondary": resolved(
+            "facade_secondary", _hex_color(palette["secondary_hex"]), 0.32, 0.36
+        ),
+        "loading_dock": resolved("loading_dock", (0.035, 0.045, 0.05, 1), 0.18, 0.48),
+        "door_shutter": resolved("door_shutter", (0.50, 0.53, 0.54, 1), 0.34, 0.42),
+        "panel_seam": resolved("panel_seam", _hex_color(palette["secondary_hex"]), 0.35, 0.38),
+        "tree_foliage": resolved("tree_foliage", (0.075, 0.24, 0.08, 1), 0.0, 0.86),
+        "tree_trunk": resolved("tree_trunk", (0.16, 0.085, 0.035, 1), 0.0, 0.82),
+        "vehicle_body": resolved("vehicle_body", (0.58, 0.60, 0.59, 1), 0.22, 0.32),
+        "vehicle_glass": resolved("vehicle_glass", (0.035, 0.055, 0.065, 1), 0.04, 0.18),
+        "vehicle_tire": resolved("vehicle_tire", (0.018, 0.02, 0.022, 1), 0.0, 0.9),
+        "person": resolved("person", (0.22, 0.24, 0.23, 1), 0.0, 0.72),
+        "utility_block": material("utility_block", (0.32, 0.34, 0.35, 1), 0.12, 0.52),
         "unknown": material("unknown", (0.45, 0.47, 0.48, 1), 0.0, 0.55),
     }
 
@@ -131,8 +356,13 @@ def _roof_rise(bounding_box: dict, roof: dict) -> float:
     return min(4.5, max(0.35, cross_span * 0.5 * np.tan(np.radians(roof["slope_deg"]))))
 
 
-def create_objects(scene_data: dict, scene_root: Path, design_data: dict | None) -> int:
-    materials = build_materials(design_data)
+def create_objects(
+    scene_data: dict,
+    scene_root: Path,
+    design_data: dict | None,
+    asset_data: dict | None = None,
+) -> int:
+    materials = build_materials(design_data, asset_data)
     treatments = {
         building["building_id"]: building.get("treatment", "focus")
         for building in (design_data or {}).get("buildings", [])
@@ -226,7 +456,7 @@ def _oriented_box(
     detail_material,
     pass_index: int,
     semantic_role: str = "design_detail",
-) -> None:
+):
     first_axis, first_size = axes_and_sizes[0]
     second_axis, second_size = axes_and_sizes[1]
     third_axis, third_size = axes_and_sizes[2]
@@ -264,6 +494,50 @@ def _oriented_box(
     obj["semantic_role"] = semantic_role
     obj.data.materials.append(detail_material)
     bpy.context.collection.objects.link(obj)
+    return obj
+
+
+def _tapered_prism(
+    name: str,
+    base_center: Vector,
+    forward: Vector,
+    lateral: Vector,
+    length: float,
+    width: float,
+    height: float,
+    top_scale: float,
+    detail_material,
+    pass_index: int,
+    semantic_role: str,
+):
+    up = Vector((0, 0, 1))
+    vertices = []
+    for z_offset, scale in ((0.0, 1.0), (height, top_scale)):
+        for longitudinal, transverse in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
+            point = (
+                base_center
+                + forward * (longitudinal * length * scale / 2)
+                + lateral * (transverse * width * scale / 2)
+                + up * z_offset
+            )
+            vertices.append(tuple(point))
+    faces = (
+        (0, 1, 2, 3),
+        (4, 7, 6, 5),
+        (0, 4, 5, 1),
+        (1, 5, 6, 2),
+        (2, 6, 7, 3),
+        (3, 7, 4, 0),
+    )
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata(vertices, [], faces)
+    mesh.update()
+    obj = bpy.data.objects.new(name, mesh)
+    obj.pass_index = pass_index
+    obj["semantic_role"] = semantic_role
+    obj.data.materials.append(detail_material)
+    bpy.context.collection.objects.link(obj)
+    return obj
 
 
 def _gable_roof(
@@ -334,7 +608,12 @@ def _gable_roof(
     bpy.context.collection.objects.link(obj)
 
 
-def create_context_environment(scene_data: dict, design_data: dict, start_index: int) -> int:
+def create_context_environment(
+    scene_data: dict,
+    design_data: dict,
+    start_index: int,
+    asset_data: dict | None = None,
+) -> int:
     site = design_data.get("site_design", {})
     if site.get("surrounding_context_mode") != "procedural_perimeter":
         return start_index
@@ -346,8 +625,74 @@ def create_context_environment(scene_data: dict, design_data: dict, start_index:
     center_x = (minimum[0] + maximum[0]) / 2
     center_y = (minimum[1] + maximum[1]) / 2
     buffer = max(24.0, max(span_x, span_y) * 0.11)
-    materials = build_materials(design_data)
+    materials = build_materials(design_data, asset_data)
     index = start_index
+
+    # Aerial cameras otherwise see the physically empty lower hemisphere of the sky as a black
+    # void outside the authored site.  This low-detail receiver gives AI a stable, explicitly
+    # non-authoritative context surface while all authored roads and landscape remain above it.
+    context_extent = max(max(span_x, span_y) * 6.0, max(span_x, span_y) + buffer * 9.0)
+    index += 1
+    _oriented_box(
+        "procedural-context-ground",
+        Vector((center_x, center_y, minimum[2] - 0.32)),
+        (
+            (Vector((1, 0, 0)), context_extent),
+            (Vector((0, 1, 0)), context_extent),
+            (Vector((0, 0, 1)), 0.2),
+        ),
+        materials["context_landscape"],
+        index,
+        semantic_role="context_landscape",
+    )
+
+    # Establish an industrial-estate reading instead of leaving isolated warehouses in an
+    # undifferentiated green field. These roads stay outside the authored scene envelope and are
+    # non-authoritative context, so they can never replace model-derived circulation.
+    road_width = max(9.0, min(16.0, min(span_x, span_y) * 0.035))
+    road_offset = buffer * 1.55
+    road_length_x = span_x + buffer * 7.2
+    road_length_y = span_y + buffer * 7.2
+    context_roads = (
+        (
+            "north",
+            Vector((center_x, maximum[1] + road_offset, minimum[2] - 0.04)),
+            road_length_x,
+            road_width,
+        ),
+        (
+            "south",
+            Vector((center_x, minimum[1] - road_offset, minimum[2] - 0.04)),
+            road_length_x,
+            road_width,
+        ),
+        (
+            "east",
+            Vector((maximum[0] + road_offset, center_y, minimum[2] - 0.04)),
+            road_width,
+            road_length_y,
+        ),
+        (
+            "west",
+            Vector((minimum[0] - road_offset, center_y, minimum[2] - 0.04)),
+            road_width,
+            road_length_y,
+        ),
+    )
+    for road_name, center, width, depth in context_roads:
+        index += 1
+        _oriented_box(
+            f"procedural-context-road-{road_name}",
+            center,
+            (
+                (Vector((1, 0, 0)), width),
+                (Vector((0, 1, 0)), depth),
+                (Vector((0, 0, 1)), 0.12),
+            ),
+            materials["site_road"],
+            index,
+            semantic_role="context_landscape",
+        )
 
     if site.get("surrounding_landscape_buffer", False):
         strips = (
@@ -400,10 +745,372 @@ def create_context_environment(scene_data: dict, design_data: dict, start_index:
     return index
 
 
+def _stable_rng(*parts: str):
+    digest = hashlib.sha256("\x1f".join(parts).encode("utf-8")).digest()
+    return np.random.default_rng(int.from_bytes(digest[:8], "big"))
+
+
+def _triangle_samples(
+    element: dict,
+    scene_root: Path,
+    count: int,
+    seed_parts: tuple[str, ...],
+) -> list[tuple[float, float, float]]:
+    """Sample an authored horizontal mesh, never its rectangular bounding box."""
+
+    if count <= 0:
+        return []
+    arrays = np.load(scene_root / element["mesh_ref"])
+    vertices = np.asarray(arrays["vertices"], dtype=float)
+    triangles = []
+    weights = []
+    for face in arrays["faces"].tolist():
+        if len(face) < 3:
+            continue
+        for offset in range(1, len(face) - 1):
+            triangle = vertices[[face[0], face[offset], face[offset + 1]]]
+            first = triangle[1, :2] - triangle[0, :2]
+            second = triangle[2, :2] - triangle[0, :2]
+            area = abs(first[0] * second[1] - first[1] * second[0]) / 2
+            if area > 1e-4:
+                triangles.append(triangle)
+                weights.append(area)
+    if not triangles:
+        return []
+    rng = _stable_rng(*seed_parts)
+    probabilities = np.asarray(weights) / sum(weights)
+    results = []
+    attempts = max(count * 8, 16)
+    while len(results) < count and attempts:
+        attempts -= 1
+        triangle = triangles[int(rng.choice(len(triangles), p=probabilities))]
+        first, second = rng.random(2)
+        if first + second > 1:
+            first, second = 1 - first, 1 - second
+        # Pull the point slightly towards the triangle centroid so trunks do not straddle curbs.
+        point = (
+            triangle[0] + first * (triangle[1] - triangle[0]) + second * (triangle[2] - triangle[0])
+        )
+        point = point * 0.86 + triangle.mean(axis=0) * 0.14
+        candidate = tuple(float(value) for value in point)
+        if all(math.dist(candidate[:2], existing[:2]) >= 3.2 for existing in results):
+            results.append(candidate)
+    return results
+
+
+def _tag_asset(obj, instance_id: str, asset_id: str, semantic_role: str, pass_index: int) -> None:
+    obj.pass_index = pass_index
+    obj["asset_instance_id"] = instance_id
+    obj["asset_id"] = asset_id
+    obj["semantic_role"] = semantic_role
+
+
+def _create_tree(
+    instance_id: str,
+    asset_id: str,
+    location: tuple[float, float, float],
+    height: float,
+    materials: dict,
+    pass_index: int,
+) -> None:
+    x, y, z = location
+    trunk_height = height * 0.43
+    bpy.ops.mesh.primitive_cylinder_add(
+        vertices=8,
+        radius=max(0.12, height * 0.028),
+        depth=trunk_height,
+        location=(x, y, z + trunk_height / 2),
+    )
+    trunk = bpy.context.object
+    trunk.name = f"{instance_id}:trunk"
+    trunk.data.materials.append(materials["tree_trunk"])
+    _tag_asset(trunk, instance_id, asset_id, "tree", pass_index)
+    crown_radius = height * 0.22
+    for layer, (radius_factor, z_factor) in enumerate(((1.0, 0.52), (0.82, 0.70)), start=1):
+        bpy.ops.mesh.primitive_ico_sphere_add(
+            subdivisions=1,
+            radius=crown_radius * radius_factor,
+            location=(x, y, z + height * z_factor),
+        )
+        crown = bpy.context.object
+        crown.name = f"{instance_id}:crown-{layer}"
+        crown.scale.z = 1.18
+        crown.data.materials.append(materials["tree_foliage"])
+        _tag_asset(crown, instance_id, asset_id, "tree", pass_index)
+
+
+def _create_vehicle(
+    instance_id: str,
+    asset_id: str,
+    location: tuple[float, float, float],
+    dimensions: tuple[float, float, float],
+    long_axis: str,
+    materials: dict,
+    pass_index: int,
+) -> None:
+    x, y, z = location
+    length, width, height = dimensions
+    forward = Vector((1, 0, 0)) if long_axis == "x" else Vector((0, 1, 0))
+    lateral = Vector((0, 1, 0)) if long_axis == "x" else Vector((1, 0, 0))
+    up = Vector((0, 0, 1))
+    body = _oriented_box(
+        f"{instance_id}:body",
+        Vector((x, y, z + height * 0.28)),
+        ((forward, length), (lateral, width), (up, height * 0.50)),
+        materials["vehicle_body"],
+        pass_index,
+        semantic_role="vehicle",
+    )
+    _tag_asset(body, instance_id, asset_id, "vehicle", pass_index)
+    cabin = _tapered_prism(
+        f"{instance_id}:cabin",
+        Vector((x, y, z + height * 0.52)) + forward * (length * 0.06),
+        forward,
+        lateral,
+        length * 0.5,
+        width * 0.9,
+        height * 0.4,
+        0.7,
+        materials["vehicle_glass"],
+        pass_index,
+        "vehicle",
+    )
+    _tag_asset(cabin, instance_id, asset_id, "vehicle", pass_index)
+    for side in (-1, 1):
+        for along in (-0.31, 0.31):
+            center = Vector((x, y, z + height * 0.18))
+            center += forward * (length * along) + lateral * (width * 0.49 * side)
+            bpy.ops.mesh.primitive_cylinder_add(
+                vertices=10,
+                radius=height * 0.18,
+                depth=width * 0.10,
+                location=center,
+                rotation=(math.pi / 2, 0, 0) if long_axis == "x" else (0, math.pi / 2, 0),
+            )
+            wheel = bpy.context.object
+            wheel.name = f"{instance_id}:wheel-{side}-{along}"
+            wheel.data.materials.append(materials["vehicle_tire"])
+            _tag_asset(wheel, instance_id, asset_id, "vehicle", pass_index)
+
+
+def _create_person(
+    instance_id: str,
+    asset_id: str,
+    location: Vector,
+    materials: dict,
+    pass_index: int,
+) -> None:
+    height = 1.72
+    bpy.ops.mesh.primitive_cylinder_add(
+        vertices=8,
+        radius=0.20,
+        depth=height * 0.68,
+        location=location + Vector((0, 0, height * 0.34)),
+    )
+    body = bpy.context.object
+    body.name = f"{instance_id}:body"
+    body.data.materials.append(materials["person"])
+    _tag_asset(body, instance_id, asset_id, "person", pass_index)
+    bpy.ops.mesh.primitive_ico_sphere_add(
+        subdivisions=1,
+        radius=0.16,
+        location=location + Vector((0, 0, height * 0.82)),
+    )
+    head = bpy.context.object
+    head.name = f"{instance_id}:head"
+    head.data.materials.append(materials["person"])
+    _tag_asset(head, instance_id, asset_id, "person", pass_index)
+
+
+def _geometry_asset(asset_data: dict | None, kind: str, role: str) -> dict | None:
+    candidates = [
+        asset
+        for asset in (asset_data or {}).get("assets", [])
+        if asset.get("kind") == kind and role in asset.get("semantic_roles", [])
+    ]
+    if len(candidates) > 1:
+        raise ValueError(f"multiple {kind} assets resolve semantic role {role}")
+    return candidates[0] if candidates else None
+
+
+def create_deterministic_entourage(
+    scene_data: dict,
+    scene_root: Path,
+    design_data: dict,
+    start_index: int,
+    asset_data: dict | None = None,
+) -> tuple[int, list[dict]]:
+    """Place lightweight scale cues once in the shared scene, based only on authored semantics."""
+
+    density = design_data.get("presentation", {}).get("entourage_density", "low")
+    if density == "none":
+        return start_index, []
+    density_factor = {"low": 0.65, "medium": 1.0, "high": 1.35}[density]
+    revision = str(design_data.get("design_revision", "unversioned"))
+    materials = build_materials(design_data, asset_data)
+    tree_asset = _geometry_asset(asset_data, "vegetation", "landscape_zone")
+    car_asset = _geometry_asset(asset_data, "vehicle", "parking")
+    truck_asset = _geometry_asset(asset_data, "vehicle", "service_yard")
+    person_asset = _geometry_asset(asset_data, "person", "office_entrance")
+    index = start_index
+    records = []
+
+    if tree_asset:
+        for element in scene_data["elements"]:
+            if element["semantic_role"] != "landscape_zone":
+                continue
+            bounds = element["bounding_box"]
+            area = max(0.0, bounds["maximum"][0] - bounds["minimum"][0]) * max(
+                0.0, bounds["maximum"][1] - bounds["minimum"][1]
+            )
+            count = min(10, max(1, round(area / 240 * density_factor)))
+            points = _triangle_samples(
+                element,
+                scene_root,
+                count,
+                (revision, element["scene_element_id"], tree_asset["asset_id"]),
+            )
+            rng = _stable_rng(revision, element["scene_element_id"], "tree-scale")
+            for ordinal, point in enumerate(points, start=1):
+                index += 1
+                instance_id = f"tree:{element['scene_element_id']}:{ordinal:02d}"
+                height = float(rng.uniform(4.5, 7.2))
+                _create_tree(instance_id, tree_asset["asset_id"], point, height, materials, index)
+                records.append(
+                    {
+                        "instance_id": instance_id,
+                        "asset_id": tree_asset["asset_id"],
+                        "position": point,
+                        "height_m": height,
+                    }
+                )
+
+    if car_asset:
+        candidates = [
+            element for element in scene_data["elements"] if element["semantic_role"] == "parking"
+        ]
+        cap = max(1, round(4 * density_factor))
+        for element in candidates[:cap]:
+            bounds = element["bounding_box"]
+            span_x = bounds["maximum"][0] - bounds["minimum"][0]
+            span_y = bounds["maximum"][1] - bounds["minimum"][1]
+            location = (
+                (bounds["minimum"][0] + bounds["maximum"][0]) / 2,
+                (bounds["minimum"][1] + bounds["maximum"][1]) / 2,
+                bounds["maximum"][2] + 0.03,
+            )
+            dimensions = tuple(car_asset.get("physical_dimensions_m") or (4.6, 1.85, 1.55))
+            index += 1
+            instance_id = f"vehicle:{element['scene_element_id']}"
+            _create_vehicle(
+                instance_id,
+                car_asset["asset_id"],
+                location,
+                dimensions,
+                "x" if span_x >= span_y else "y",
+                materials,
+                index,
+            )
+            records.append(
+                {
+                    "instance_id": instance_id,
+                    "asset_id": car_asset["asset_id"],
+                    "position": location,
+                    "dimensions_m": dimensions,
+                }
+            )
+
+    # Service vehicles are only valid when tied to an authored loading dock. A truck at the
+    # centre of a generic yard can obstruct the human camera and invent an operational layout.
+    if truck_asset and density != "low":
+        surfaces = {surface["surface_id"]: surface for surface in scene_data["surfaces"]}
+        docks = [
+            (dock, surfaces.get(facade["surface_id"]))
+            for building in design_data.get("buildings", [])
+            if building.get("treatment", "focus") == "focus"
+            for facade in building.get("facades", [])
+            for dock in facade.get("loading_docks", [])
+        ]
+        cap = max(1, round(2 * density_factor))
+        dimensions = tuple(truck_asset.get("physical_dimensions_m") or (6.8, 2.35, 2.75))
+        # Keep the nearest approach zone legible: the camera planner enters each row from its
+        # minimum longitudinal end, so prefer the far authored docks for sparse entourage.
+        for dock, surface in docks[-cap:]:
+            if not surface:
+                continue
+            frame = surface["frame"]
+            normal = Vector(frame["normal"])
+            location_vector = (
+                Vector(frame["origin"])
+                + Vector(frame["u_axis"]) * (dock["u"] * surface["width_m"])
+                + normal * (dimensions[0] / 2 + 0.8)
+                + Vector((0, 0, 0.03))
+            )
+            location = tuple(location_vector)
+            index += 1
+            instance_id = f"vehicle:{dock['dock_id']}"
+            _create_vehicle(
+                instance_id,
+                truck_asset["asset_id"],
+                location,
+                dimensions,
+                "x" if abs(normal.x) >= abs(normal.y) else "y",
+                materials,
+                index,
+            )
+            records.append(
+                {
+                    "instance_id": instance_id,
+                    "asset_id": truck_asset["asset_id"],
+                    "position": location,
+                    "dimensions_m": dimensions,
+                    "source_dock_id": dock["dock_id"],
+                }
+            )
+
+    if person_asset:
+        surfaces = {surface["surface_id"]: surface for surface in scene_data["surfaces"]}
+        entrances = [
+            (facade, surfaces.get(facade["surface_id"]))
+            for building in design_data.get("buildings", [])
+            if building.get("treatment", "focus") == "focus"
+            for facade in building.get("facades", [])
+            if facade.get("office_entrance")
+        ]
+        cap = max(1, round(4 * density_factor))
+        for facade, surface in entrances[:cap]:
+            if not surface:
+                continue
+            frame = surface["frame"]
+            entrance = facade["office_entrance"]
+            location = (
+                Vector(frame["origin"])
+                + Vector(frame["u_axis"]) * (entrance["u"] * surface["width_m"])
+                + Vector(frame["normal"]) * 1.35
+            )
+            index += 1
+            instance_id = f"person:{facade['surface_id']}"
+            _create_person(instance_id, person_asset["asset_id"], location, materials, index)
+            records.append(
+                {
+                    "instance_id": instance_id,
+                    "asset_id": person_asset["asset_id"],
+                    "position": tuple(location),
+                }
+            )
+    return index, records
+
+
 def batch_noncanonical_details(base_object_count: int) -> None:
     """Join generated details by semantic role; their per-object identity is not canonical."""
 
-    for role in ("design_detail", "roof", "context_building", "context_landscape"):
+    for role in (
+        "design_detail",
+        "roof",
+        "site_boundary",
+        "context_building",
+        "context_landscape",
+    ):
         candidates = [
             obj
             for obj in bpy.context.scene.objects
@@ -424,7 +1131,198 @@ def batch_noncanonical_details(base_object_count: int) -> None:
         merged["semantic_role"] = role
 
 
-def create_design_details(scene_data: dict, design_data: dict, start_index: int) -> None:
+def _subtract_intervals(
+    whole: tuple[float, float], gaps: list[tuple[float, float]]
+) -> list[tuple[float, float]]:
+    """Return fence runs after clipping and removing authored entrance openings."""
+
+    start, end = whole
+    clipped = sorted(
+        (max(start, left), min(end, right))
+        for left, right in gaps
+        if right > start and left < end
+    )
+    runs: list[tuple[float, float]] = []
+    cursor = start
+    for left, right in clipped:
+        if left > cursor:
+            runs.append((cursor, left))
+        cursor = max(cursor, right)
+    if cursor < end:
+        runs.append((cursor, end))
+    return [run for run in runs if run[1] - run[0] >= 0.6]
+
+
+def _create_site_fence(
+    scene_data: dict,
+    material,
+    start_index: int,
+) -> int:
+    """Build a model-derived perimeter fence, preserving openings at authored gates."""
+
+    boundaries = [
+        item for item in scene_data["elements"] if item["semantic_role"] == "site_boundary"
+    ]
+    entrances = [
+        item
+        for item in scene_data["elements"]
+        if item["semantic_role"] in {"main_entrance", "secondary_entrance"}
+    ]
+    index = start_index
+    up = Vector((0, 0, 1))
+    for boundary in boundaries:
+        bounds = boundary["bounding_box"]
+        x0, y0, _ = bounds["minimum"]
+        x1, y1, z1 = bounds["maximum"]
+        ground_z = max(0.0, z1)
+        sides = (
+            ("south", "x", y0, x0, x1),
+            ("north", "x", y1, x0, x1),
+            ("west", "y", x0, y0, y1),
+            ("east", "y", x1, y0, y1),
+        )
+        for side_name, run_axis, fixed, run_start, run_end in sides:
+            gaps: list[tuple[float, float]] = []
+            for entrance in entrances:
+                gate = entrance["bounding_box"]
+                gx0, gy0, _ = gate["minimum"]
+                gx1, gy1, _ = gate["maximum"]
+                touches = (
+                    gy0 - 0.75 <= fixed <= gy1 + 0.75
+                    if run_axis == "x"
+                    else gx0 - 0.75 <= fixed <= gx1 + 0.75
+                )
+                if touches:
+                    interval = (gx0, gx1) if run_axis == "x" else (gy0, gy1)
+                    gaps.append((interval[0] - 0.35, interval[1] + 0.35))
+            axis = Vector((1, 0, 0)) if run_axis == "x" else Vector((0, 1, 0))
+            cross = Vector((0, 1, 0)) if run_axis == "x" else Vector((1, 0, 0))
+            for run_number, (left, right) in enumerate(
+                _subtract_intervals((run_start, run_end), gaps), start=1
+            ):
+                length = right - left
+                run_center = (left + right) / 2
+                center = (
+                    Vector((run_center, fixed, ground_z))
+                    if run_axis == "x"
+                    else Vector((fixed, run_center, ground_z))
+                )
+                index += 1
+                _oriented_box(
+                    f"{boundary['scene_element_id']}:{side_name}-{run_number}:plinth",
+                    center + up * 0.20,
+                    ((axis, length), (cross, 0.22), (up, 0.40)),
+                    material,
+                    index,
+                    semantic_role="site_boundary",
+                )
+                for rail_height in (1.05, 1.85):
+                    index += 1
+                    _oriented_box(
+                        f"{boundary['scene_element_id']}:{side_name}-{run_number}:rail-{rail_height}",
+                        center + up * rail_height,
+                        ((axis, length), (cross, 0.10), (up, 0.10)),
+                        material,
+                        index,
+                        semantic_role="site_boundary",
+                    )
+                post_count = max(1, int(np.ceil(length / 4.0)))
+                for post_number in range(post_count + 1):
+                    position = left + length * post_number / post_count
+                    post_center = (
+                        Vector((position, fixed, ground_z + 1.05))
+                        if run_axis == "x"
+                        else Vector((fixed, position, ground_z + 1.05))
+                    )
+                    index += 1
+                    _oriented_box(
+                        f"{boundary['scene_element_id']}:{side_name}-{run_number}:post-{post_number}",
+                        post_center,
+                        ((axis, 0.12), (cross, 0.16), (up, 2.10)),
+                        material,
+                        index,
+                        semantic_role="site_boundary",
+                    )
+    return index
+
+
+def _create_auxiliary_details(
+    scene_data: dict,
+    materials: dict,
+    start_index: int,
+) -> int:
+    """Give authored support blocks restrained service doors on their road-facing side."""
+
+    roads = [
+        item for item in scene_data["elements"] if item["semantic_role"] == "site_road"
+    ]
+    if not roads:
+        return start_index
+    road_centers = [
+        Vector(
+            (
+                (road["bounding_box"]["minimum"][0] + road["bounding_box"]["maximum"][0]) / 2,
+                (road["bounding_box"]["minimum"][1] + road["bounding_box"]["maximum"][1]) / 2,
+                0,
+            )
+        )
+        for road in roads
+    ]
+    index = start_index
+    up = Vector((0, 0, 1))
+    for element in scene_data["elements"]:
+        if element["semantic_role"] != "utility_block":
+            continue
+        bounds = element["bounding_box"]
+        x0, y0, z0 = bounds["minimum"]
+        x1, y1, z1 = bounds["maximum"]
+        height = z1 - z0
+        if height < 1.6:
+            continue
+        candidates = (
+            (Vector(((x0 + x1) / 2, y0, 0)), Vector((1, 0, 0)), Vector((0, -1, 0)), x1 - x0),
+            (Vector(((x0 + x1) / 2, y1, 0)), Vector((1, 0, 0)), Vector((0, 1, 0)), x1 - x0),
+            (Vector((x0, (y0 + y1) / 2, 0)), Vector((0, 1, 0)), Vector((-1, 0, 0)), y1 - y0),
+            (Vector((x1, (y0 + y1) / 2, 0)), Vector((0, 1, 0)), Vector((1, 0, 0)), y1 - y0),
+        )
+        face_center, lateral, normal, face_width = min(
+            candidates,
+            key=lambda candidate: min(
+                (candidate[0] - road_center).length for road_center in road_centers
+            ),
+        )
+        door_height = min(2.4, height * 0.82)
+        door_width = min(1.4, max(0.9, face_width * 0.16))
+        door_center = face_center - lateral * min(face_width * 0.22, 2.0)
+        index += 1
+        _oriented_box(
+            f"{element['scene_element_id']}:service-door",
+            door_center + up * (z0 + door_height / 2) + normal * 0.08,
+            ((lateral, door_width), (up, door_height), (normal, 0.12)),
+            materials["loading_dock"],
+            index,
+        )
+        louver_width = min(2.4, max(1.0, face_width * 0.22))
+        index += 1
+        _oriented_box(
+            f"{element['scene_element_id']}:service-louver",
+            face_center
+            + lateral * min(face_width * 0.22, 2.0)
+            + up * (z0 + height * 0.58)
+            + normal * 0.07,
+            ((lateral, louver_width), (up, min(1.0, height * 0.28)), (normal, 0.10)),
+            materials["door_shutter"],
+            index,
+        )
+    return index
+
+
+def create_design_details(
+    scene_data: dict,
+    design_data: dict,
+    start_index: int,
+    asset_data: dict | None = None,
+) -> int:
     surfaces = {surface["surface_id"]: surface for surface in scene_data["surfaces"]}
     elements = {element["scene_element_id"]: element for element in scene_data["elements"]}
     has_roof_assemblies = bool(design_data.get("roof_assemblies"))
@@ -433,16 +1331,71 @@ def create_design_details(scene_data: dict, design_data: dict, start_index: int)
         for assembly in design_data.get("roof_assemblies", [])
         for building_id in assembly["building_ids"]
     }
-    palette = _palette(design_data)
+    resolved_materials = build_materials(design_data, asset_data)
     detail_materials = {
-        "seam": material("panel_seam", _hex_color(palette["secondary_hex"]), 0.55, 0.32),
-        "dock": material("loading_dock", (0.035, 0.045, 0.05, 1), 0.25, 0.42),
-        "glass": material("office_glass", _hex_color(palette["glass_hex"]), 0.35, 0.12),
-        "accent": material("facade_accent", _hex_color(palette["accent_hex"]), 0.15, 0.3),
-        "secondary": material("facade_secondary", _hex_color(palette["secondary_hex"]), 0.4, 0.3),
-        "roof": material("designed_roof", (0.62, 0.66, 0.68, 1), 0.48, 0.28),
+        "seam": resolved_materials["panel_seam"],
+        "dock": resolved_materials["loading_dock"],
+        "glass": resolved_materials["office_glass"],
+        "accent": resolved_materials["facade_accent"],
+        "secondary": resolved_materials["facade_secondary"],
+        "roof": resolved_materials["roof"],
+        "shutter": resolved_materials["door_shutter"],
     }
-    detail_index = start_index
+    detail_index = _create_site_fence(
+        scene_data, resolved_materials["site_boundary"], start_index
+    )
+    detail_index = _create_auxiliary_details(scene_data, resolved_materials, detail_index)
+    for entrance in (
+        element
+        for element in scene_data["elements"]
+        if element["semantic_role"] in {"main_entrance", "secondary_entrance"}
+    ):
+        bounds = entrance["bounding_box"]
+        x0, y0, _ = bounds["minimum"]
+        x1, y1, z1 = bounds["maximum"]
+        size_x = x1 - x0
+        size_y = y1 - y0
+        if min(size_x, size_y) <= 0.3:
+            continue
+        span_axis = Vector((1, 0, 0)) if size_x >= size_y else Vector((0, 1, 0))
+        traffic_axis = Vector((0, 1, 0)) if size_x >= size_y else Vector((1, 0, 0))
+        opening_width = max(size_x, size_y)
+        center = Vector(((x0 + x1) / 2, (y0 + y1) / 2, z1))
+        post_height = 4.8
+        post_size = min(0.65, opening_width * 0.06)
+        material_key = "accent" if entrance["semantic_role"] == "main_entrance" else "secondary"
+        for side, direction in (("left", -1), ("right", 1)):
+            detail_index += 1
+            post_center = (
+                center
+                + span_axis * direction * (opening_width / 2 - post_size / 2)
+                + Vector((0, 0, post_height / 2))
+            )
+            _oriented_box(
+                f"{entrance['scene_element_id']}:gate-post-{side}",
+                post_center,
+                (
+                    (span_axis, post_size),
+                    (traffic_axis, max(0.55, post_size)),
+                    (Vector((0, 0, 1)), post_height),
+                ),
+                detail_materials[material_key],
+                detail_index,
+                semantic_role=entrance["semantic_role"],
+            )
+        detail_index += 1
+        _oriented_box(
+            f"{entrance['scene_element_id']}:gate-header",
+            center + Vector((0, 0, post_height - 0.25)),
+            (
+                (span_axis, opening_width),
+                (traffic_axis, 0.5),
+                (Vector((0, 0, 1)), 0.5),
+            ),
+            detail_materials[material_key],
+            detail_index,
+            semantic_role=entrance["semantic_role"],
+        )
     for building in design_data["buildings"]:
         if building.get("treatment", "focus") != "focus":
             continue
@@ -522,10 +1475,47 @@ def create_design_details(scene_data: dict, design_data: dict, start_index: int)
                     detail_materials["dock"],
                     detail_index,
                 )
+                # A recessed dark frame plus a lighter sectional shutter reads as a real
+                # industrial door at both aerial and human eye-level views.
+                detail_index += 1
+                shutter_width = max(0.8, dock["width_m"] - 0.42)
+                _detail_box(
+                    f"{dock['dock_id']}:shutter",
+                    surface,
+                    dock["u"] * width,
+                    2.25,
+                    shutter_width,
+                    4.08,
+                    0.20,
+                    detail_materials["shutter"],
+                    detail_index,
+                )
+                for slat_number in range(1, 9):
+                    detail_index += 1
+                    _detail_box(
+                        f"{dock['dock_id']}:slat-{slat_number:02d}",
+                        surface,
+                        dock["u"] * width,
+                        0.25 + slat_number * 0.45,
+                        shutter_width * 0.94,
+                        0.035,
+                        0.23,
+                        detail_materials["seam"],
+                        detail_index,
+                    )
             entrance = facade.get("office_entrance")
             if entrance:
                 glazing_ratio = articulation.get("office_glazing_ratio", 0.72)
+                element_role = elements[building["building_id"]]["semantic_role"]
                 glazing_width = width * glazing_ratio
+                if element_role == "main_shed":
+                    # An integrated office bay on a shed must not turn most of a 100 m+
+                    # industrial facade into curtain wall.
+                    glazing_width = min(glazing_width, max(8.0, entrance["width_m"] * 4.0))
+                glazing_center_u = entrance["u"] * width
+                glazing_center_u = min(
+                    width - glazing_width / 2, max(glazing_width / 2, glazing_center_u)
+                )
                 glazing_height = max(3.2, height * 0.78)
                 glazing_center_z = glazing_height / 2
                 frame_depth = articulation.get("feature_frame_depth_m", 0.55)
@@ -533,7 +1523,7 @@ def create_design_details(scene_data: dict, design_data: dict, start_index: int)
                 _detail_box(
                     f"{facade['surface_id']}:glass-band",
                     surface,
-                    width / 2,
+                    glazing_center_u,
                     glazing_center_z,
                     glazing_width,
                     glazing_height,
@@ -555,8 +1545,8 @@ def create_design_details(scene_data: dict, design_data: dict, start_index: int)
                 )
                 frame_width = min(0.38, max(0.18, width * 0.025))
                 for side, u_center in (
-                    ("left", (width - glazing_width) / 2),
-                    ("right", (width + glazing_width) / 2),
+                    ("left", glazing_center_u - glazing_width / 2),
+                    ("right", glazing_center_u + glazing_width / 2),
                 ):
                     detail_index += 1
                     _detail_box(
@@ -574,7 +1564,7 @@ def create_design_details(scene_data: dict, design_data: dict, start_index: int)
                 _detail_box(
                     f"{facade['surface_id']}:feature-frame-top",
                     surface,
-                    width / 2,
+                    glazing_center_u,
                     min(height - frame_width / 2, glazing_height),
                     glazing_width,
                     frame_width,
@@ -588,7 +1578,9 @@ def create_design_details(scene_data: dict, design_data: dict, start_index: int)
                     _detail_box(
                         f"{facade['surface_id']}:accent-fin-{fin_number:02d}",
                         surface,
-                        (width - glazing_width) / 2 + glazing_width * fin_number / (fin_count + 1),
+                        glazing_center_u
+                        - glazing_width / 2
+                        + glazing_width * fin_number / (fin_count + 1),
                         glazing_center_z,
                         min(0.18, module * 0.14),
                         glazing_height * 0.94,
@@ -650,6 +1642,7 @@ def create_design_details(scene_data: dict, design_data: dict, start_index: int)
             detail_materials["roof"],
             detail_index,
         )
+    return detail_index
 
 
 def _surface_on_assembly_perimeter(surface: dict, bounding_box: dict) -> bool:
@@ -665,12 +1658,39 @@ def _surface_on_assembly_perimeter(surface: dict, bounding_box: dict) -> bool:
     return True
 
 
-def configure_world(width: int, height: int, design_data: dict | None = None) -> None:
+def _configure_engine(profile: str) -> None:
     scene = bpy.context.scene
+    if profile == "premium_cycles":
+        scene.render.engine = "CYCLES"
+        scene.cycles.device = "GPU"
+        scene.cycles.use_adaptive_sampling = True
+        scene.cycles.adaptive_threshold = 0.02
+        scene.cycles.samples = 128
+        scene.cycles.use_denoising = True
+        preferences = bpy.context.preferences.addons["cycles"].preferences
+        preferences.compute_device_type = "OPTIX"
+        preferences.get_devices()
+        gpu_devices = [device for device in preferences.devices if device.type in {"OPTIX", "CUDA"}]
+        if not gpu_devices:
+            raise RuntimeError("premium_cycles requires an NVIDIA CUDA/OptiX GPU worker")
+        for device in preferences.devices:
+            device.use = device in gpu_devices
+        return
     try:
         scene.render.engine = "BLENDER_EEVEE_NEXT"
     except TypeError:
         scene.render.engine = "BLENDER_EEVEE"
+
+
+def configure_world(
+    width: int,
+    height: int,
+    design_data: dict | None = None,
+    profile: str = "standard_eevee",
+    asset_data: dict | None = None,
+) -> None:
+    scene = bpy.context.scene
+    _configure_engine(profile)
     scene.render.resolution_x = width
     scene.render.resolution_y = height
     scene.render.resolution_percentage = 100
@@ -690,11 +1710,43 @@ def configure_world(width: int, height: int, design_data: dict | None = None) ->
     sky.air_density = 1.1
     sky.dust_density = 1.4
     sky.ozone_density = 1.0
-    background = world_tree.nodes.new("ShaderNodeBackground")
-    background.inputs["Strength"].default_value = 0.45
+    sky_background = world_tree.nodes.new("ShaderNodeBackground")
+    # Keep skylight as fill rather than flattening all facade/ground values. Direct sun then
+    # creates readable contact shadows while AgX protects the light metal roof highlights.
+    sky_background.inputs["Strength"].default_value = 0.45
     output = world_tree.nodes.new("ShaderNodeOutputWorld")
-    world_tree.links.new(sky.outputs["Color"], background.inputs["Color"])
-    world_tree.links.new(background.outputs["Background"], output.inputs["Surface"])
+    world_tree.links.new(sky.outputs["Color"], sky_background.inputs["Color"])
+
+    environment_file = None
+    asset_root = (
+        Path(asset_data["_asset_root"]) if asset_data and asset_data.get("_asset_root") else None
+    )
+    for asset in (asset_data or {}).get("assets", []):
+        if asset.get("kind") != "environment" or "environment_daylight" not in asset.get(
+            "semantic_roles", []
+        ):
+            continue
+        candidate = next(
+            (item for item in asset.get("files", []) if item.get("role") == "environment"),
+            None,
+        )
+        if candidate and asset_root:
+            environment_file = (asset_root / candidate["path"]).resolve()
+        break
+    if environment_file and environment_file.is_file():
+        environment = world_tree.nodes.new("ShaderNodeTexEnvironment")
+        environment.image = bpy.data.images.load(str(environment_file), check_existing=True)
+        environment_background = world_tree.nodes.new("ShaderNodeBackground")
+        environment_background.inputs["Strength"].default_value = 0.7
+        light_path = world_tree.nodes.new("ShaderNodeLightPath")
+        camera_mix = world_tree.nodes.new("ShaderNodeMixShader")
+        world_tree.links.new(environment.outputs["Color"], environment_background.inputs["Color"])
+        world_tree.links.new(light_path.outputs["Is Camera Ray"], camera_mix.inputs[0])
+        world_tree.links.new(environment_background.outputs["Background"], camera_mix.inputs[1])
+        world_tree.links.new(sky_background.outputs["Background"], camera_mix.inputs[2])
+        world_tree.links.new(camera_mix.outputs["Shader"], output.inputs["Surface"])
+    else:
+        world_tree.links.new(sky_background.outputs["Background"], output.inputs["Surface"])
     try:
         scene.view_settings.view_transform = "AgX"
     except TypeError:
@@ -705,8 +1757,8 @@ def configure_world(width: int, height: int, design_data: dict | None = None) ->
         scene.view_settings.look = "Medium High Contrast"
 
     sun_data = bpy.data.lights.new("Sun", type="SUN")
-    sun_data.energy = 2.2
-    sun_data.angle = math.radians(1.2)
+    sun_data.energy = 2.8
+    sun_data.angle = math.radians(0.8)
     sun = bpy.data.objects.new("Sun", sun_data)
     sun.rotation_euler = (math.pi / 2 - sun_elevation, 0.0, sun_azimuth)
     bpy.context.collection.objects.link(sun)
@@ -749,6 +1801,8 @@ def render_pbr(view_dir: Path) -> None:
     tree = scene.node_tree
     tree.nodes.clear()
     render_layers = tree.nodes.new("CompositorNodeRLayers")
+    composite = tree.nodes.new("CompositorNodeComposite")
+    tree.links.new(render_layers.outputs["Image"], composite.inputs["Image"])
     file_output(tree, render_layers, "Depth", view_dir, "depth_", "OPEN_EXR")
     file_output(tree, render_layers, "Normal", view_dir, "normal_", "OPEN_EXR")
     normalized_depth = tree.nodes.new("CompositorNodeNormalize")
@@ -775,6 +1829,8 @@ def _replace_materials(materials_by_object: dict) -> None:
 
 def render_masks(view_dir: Path) -> None:
     scene = bpy.context.scene
+    previous_engine = scene.render.engine
+    _configure_engine("preview_fast")
     mesh_objects = [obj for obj in scene.objects if obj.type == "MESH"]
     original = {obj: obj.data.materials[0] for obj in mesh_objects}
     instance_materials = {}
@@ -806,6 +1862,9 @@ def render_masks(view_dir: Path) -> None:
         "utility_block": (0.95, 0.65, 0.10, 1.0),
         "unknown": (0.55, 0.55, 0.55, 1.0),
         "design_detail": (0.75, 0.20, 0.85, 1.0),
+        "tree": (0.04, 0.62, 0.08, 1.0),
+        "vehicle": (0.92, 0.82, 0.08, 1.0),
+        "person": (0.96, 0.38, 0.08, 1.0),
     }
     semantic_materials = {
         role: emission_material(f"semantic_{role}", color) for role, color in role_colors.items()
@@ -816,21 +1875,153 @@ def render_masks(view_dir: Path) -> None:
     scene.use_nodes = False
     scene.world.color = (0.0, 0.0, 0.0)
     scene.view_settings.view_transform = "Standard"
-    scene.view_settings.look = "Medium High Contrast"
+    # ID passes are data, not presentation imagery.  Applying a contrast look mutates the
+    # encoded bytes and makes object/semantic IDs impossible to decode deterministically.
+    scene.view_settings.look = "None"
     _replace_materials(instance_materials)
     scene.render.filepath = str(view_dir / "instance_id.png")
     bpy.ops.render.render(write_still=True)
     _replace_materials({obj: semantic_materials[obj["semantic_role"]] for obj in mesh_objects})
     scene.render.filepath = str(view_dir / "semantic.png")
     bpy.ops.render.render(write_still=True)
+    (view_dir / "semantic_id_manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0.0",
+                "color_transform": "Standard/None",
+                "roles": [
+                    {
+                        "semantic_role": role,
+                        "linear_rgb": color[:3],
+                        "srgb8": [_linear_channel_to_srgb8(channel) for channel in color[:3]],
+                    }
+                    for role, color in sorted(role_colors.items())
+                ],
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     _replace_materials(original)
     scene.world.color = previous_world
     scene.view_settings.view_transform = previous_transform
     scene.view_settings.look = previous_look
+    scene.render.engine = previous_engine
+
+
+def render_material_ids(view_dir: Path) -> None:
+    """Render stable material regions and persist their versioned asset IDs."""
+
+    scene = bpy.context.scene
+    previous_engine = scene.render.engine
+    _configure_engine("preview_fast")
+    mesh_objects = [obj for obj in scene.objects if obj.type == "MESH"]
+    original = {obj: obj.data.materials[0] for obj in mesh_objects}
+    material_keys = {
+        material: str(material.get("asset_id", f"procedural.{material.name}"))
+        for material in set(original.values())
+    }
+    ordered = sorted(set(material_keys.values()))
+    colors = {
+        asset_id: (*colorsys.hsv_to_rgb(index / max(1, len(ordered)), 0.82, 1.0), 1.0)
+        for index, asset_id in enumerate(ordered)
+    }
+    replacements = {
+        obj: emission_material(f"material_id_{index:03d}", colors[material_keys[material]])
+        for index, (obj, material) in enumerate(original.items(), start=1)
+    }
+    previous_world_nodes = scene.world.use_nodes
+    previous_world_color = scene.world.color[:]
+    previous_scene_nodes = scene.use_nodes
+    previous_transform = scene.view_settings.view_transform
+    previous_look = scene.view_settings.look
+    scene.use_nodes = False
+    scene.world.use_nodes = False
+    scene.world.color = (0.0, 0.0, 0.0)
+    scene.view_settings.view_transform = "Standard"
+    scene.view_settings.look = "None"
+    _replace_materials(replacements)
+    scene.render.filepath = str(view_dir / "material_id.png")
+    bpy.ops.render.render(write_still=True)
+    (view_dir / "material_id_manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0.0",
+                "materials": [
+                    {"asset_id": asset_id, "linear_rgb": colors[asset_id][:3]}
+                    for asset_id in ordered
+                ],
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    _replace_materials(original)
+    scene.world.use_nodes = previous_world_nodes
+    scene.world.color = previous_world_color
+    scene.use_nodes = previous_scene_nodes
+    scene.view_settings.view_transform = previous_transform
+    scene.view_settings.look = previous_look
+    scene.render.engine = previous_engine
+
+
+def render_control_policy(view_dir: Path) -> None:
+    """Render a provider-neutral LOCKED/BOUNDED/FREE policy as RGB channels.
+
+    Red objects are locked in full (authored entrances and site boundaries), green objects may
+    receive bounded appearance refinement, and blue objects/background are non-authoritative
+    context. Structural and silhouette edge bands are promoted to LOCKED later by the control-pack
+    builder, so roof/facade/road interiors can still receive realistic material treatment.
+    """
+
+    scene = bpy.context.scene
+    previous_engine = scene.render.engine
+    _configure_engine("preview_fast")
+    mesh_objects = [obj for obj in scene.objects if obj.type == "MESH"]
+    original = {obj: obj.data.materials[0] for obj in mesh_objects}
+    policy_materials = {
+        "locked": emission_material("policy_locked", (1.0, 0.0, 0.0, 1.0)),
+        "bounded": emission_material("policy_bounded", (0.0, 1.0, 0.0, 1.0)),
+        "free": emission_material("policy_free", (0.0, 0.0, 1.0, 1.0)),
+    }
+    locked_roles = {"main_entrance", "secondary_entrance", "site_boundary"}
+    # Adjoining-building footprints and silhouettes remain spatial evidence. Their appearance
+    # is subdued, but a generative pass must not freely relocate or replace them.
+    free_roles = {"context_landscape"}
+    replacements = {}
+    for obj in mesh_objects:
+        role = obj.get("semantic_role", "unknown")
+        policy = "locked" if role in locked_roles else "free" if role in free_roles else "bounded"
+        replacements[obj] = policy_materials[policy]
+
+    previous_world_nodes = scene.world.use_nodes
+    previous_world_color = scene.world.color[:]
+    previous_scene_nodes = scene.use_nodes
+    previous_transform = scene.view_settings.view_transform
+    previous_look = scene.view_settings.look
+    scene.use_nodes = False
+    scene.world.use_nodes = False
+    scene.world.color = (0.0, 0.0, 1.0)
+    scene.view_settings.view_transform = "Standard"
+    scene.view_settings.look = "None"
+    _replace_materials(replacements)
+    scene.render.filepath = str(view_dir / "control_policy.png")
+    bpy.ops.render.render(write_still=True)
+    _replace_materials(original)
+    scene.world.use_nodes = previous_world_nodes
+    scene.world.color = previous_world_color
+    scene.use_nodes = previous_scene_nodes
+    scene.view_settings.view_transform = previous_transform
+    scene.view_settings.look = previous_look
+    scene.render.engine = previous_engine
 
 
 def render_clay_and_edges(view_dir: Path) -> None:
     scene = bpy.context.scene
+    previous_engine = scene.render.engine
+    _configure_engine("preview_fast")
     clay = material("clay_override", (0.62, 0.64, 0.66, 1), 0.0, 0.62)
     scene.view_layers[0].material_override = clay
     scene.use_nodes = True
@@ -852,6 +2043,7 @@ def render_clay_and_edges(view_dir: Path) -> None:
     if matches:
         os.replace(matches[-1], view_dir / "edges.png")
     scene.view_layers[0].material_override = None
+    scene.render.engine = previous_engine
 
 
 def main() -> None:
@@ -868,12 +2060,54 @@ def main() -> None:
     design_data = None
     if args.design_dna:
         design_data = json.loads(args.design_dna.resolve().read_text(encoding="utf-8"))
-    base_object_count = create_objects(scene_data, scene_path.parent, design_data)
+    asset_data = None
+    if args.asset_library:
+        asset_library_path = args.asset_library.resolve()
+        asset_data = json.loads(asset_library_path.read_text(encoding="utf-8"))
+        asset_data["_asset_root"] = str(asset_library_path.parent)
+        if design_data and asset_data.get("library_version") != design_data.get(
+            "asset_library_version"
+        ):
+            raise ValueError("asset library version does not match Design DNA")
+    base_object_count = create_objects(scene_data, scene_path.parent, design_data, asset_data)
     if design_data:
-        detail_start = create_context_environment(scene_data, design_data, base_object_count)
-        create_design_details(scene_data, design_data, detail_start)
+        detail_start = create_context_environment(
+            scene_data, design_data, base_object_count, asset_data
+        )
+        detail_end = create_design_details(scene_data, design_data, detail_start, asset_data)
+        _, entourage = create_deterministic_entourage(
+            scene_data,
+            scene_path.parent,
+            design_data,
+            detail_end,
+            asset_data,
+        )
+        (output / "entourage_manifest.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0.0",
+                    "design_revision": design_data.get("design_revision"),
+                    "density": design_data.get("presentation", {}).get("entourage_density", "low"),
+                    "instances": entourage,
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
         batch_noncanonical_details(base_object_count)
-    configure_world(args.width, args.height, design_data)
+    default_size = {
+        "preview_fast": (768, 432),
+        "standard_eevee": (1024, 576),
+        "premium_cycles": (2048, 1152),
+    }[args.profile]
+    configure_world(
+        args.width or default_size[0],
+        args.height or default_size[1],
+        design_data,
+        args.profile,
+        asset_data,
+    )
     camera_specs = view_set["cameras"]
     if args.view_ids:
         requested = set(args.view_ids)
@@ -891,7 +2125,9 @@ def main() -> None:
         render_pbr(view_dir)
         if not args.pbr_only:
             render_masks(view_dir)
+            render_material_ids(view_dir)
             render_clay_and_edges(view_dir)
+            render_control_policy(view_dir)
         bpy.data.objects.remove(camera, do_unlink=True)
     bpy.ops.wm.save_as_mainfile(filepath=str(output / "designed_scene.blend"))
 

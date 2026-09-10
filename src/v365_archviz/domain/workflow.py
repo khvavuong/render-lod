@@ -54,6 +54,12 @@ class GenerationProfile(str, Enum):
     MARKETING_HERO = "marketing_hero"
 
 
+class RenderProfile(str, Enum):
+    PREVIEW_FAST = "preview_fast"
+    STANDARD_EEVEE = "standard_eevee"
+    PREMIUM_CYCLES = "premium_cycles"
+
+
 class ConditioningPack(DomainModel):
     view_id: str = Field(min_length=1)
     camera_ref: str = Field(min_length=1)
@@ -65,6 +71,11 @@ class ConditioningPack(DomainModel):
     semantic_ref: str = Field(min_length=1)
     edges_ref: str = Field(min_length=1)
     material_id_ref: str | None = None
+    material_id_manifest_ref: str | None = None
+    control_pack_manifest_ref: str | None = None
+    locked_mask_ref: str | None = None
+    bounded_mask_ref: str | None = None
+    free_mask_ref: str | None = None
     visibility_ref: str | None = None
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from itertools import pairwise
 from pathlib import Path
 
@@ -50,6 +51,63 @@ def _axis_point(
     return center[0] + cross_offset, center[1] + long_offset, z
 
 
+def _fit_camera_to_bounds(
+    minimum: tuple[float, float, float],
+    maximum: tuple[float, float, float],
+    target: tuple[float, float, float],
+    camera_direction: tuple[float, float, float],
+    *,
+    focal_length_mm: float,
+    sensor_width_mm: float,
+    aspect_ratio: float = 16 / 9,
+    frame_margin: float = 0.88,
+) -> tuple[float, float, float]:
+    """Place a camera so all eight world-space bounds corners fit its perspective frame."""
+
+    def normalize(vector: tuple[float, float, float]) -> tuple[float, float, float]:
+        length = math.sqrt(sum(component * component for component in vector))
+        if length <= 1e-9:
+            raise ValueError("camera direction must be non-zero")
+        return tuple(component / length for component in vector)  # type: ignore[return-value]
+
+    def dot(first: tuple[float, float, float], second: tuple[float, float, float]) -> float:
+        return sum(a * b for a, b in zip(first, second, strict=True))
+
+    def cross(
+        first: tuple[float, float, float], second: tuple[float, float, float]
+    ) -> tuple[float, float, float]:
+        return (
+            first[1] * second[2] - first[2] * second[1],
+            first[2] * second[0] - first[0] * second[2],
+            first[0] * second[1] - first[1] * second[0],
+        )
+
+    from_target = normalize(camera_direction)
+    forward = (-from_target[0], -from_target[1], -from_target[2])
+    right = normalize(cross(forward, (0.0, 0.0, 1.0)))
+    camera_up = normalize(cross(right, forward))
+    horizontal_tangent = sensor_width_mm / (2 * focal_length_mm)
+    vertical_tangent = horizontal_tangent / aspect_ratio
+    distance = 0.0
+    for x in (minimum[0], maximum[0]):
+        for y in (minimum[1], maximum[1]):
+            for z in (minimum[2], maximum[2]):
+                delta = (x - target[0], y - target[1], z - target[2])
+                forward_offset = dot(delta, forward)
+                horizontal_need = (
+                    abs(dot(delta, right)) / (horizontal_tangent * frame_margin) - forward_offset
+                )
+                vertical_need = (
+                    abs(dot(delta, camera_up)) / (vertical_tangent * frame_margin) - forward_offset
+                )
+                distance = max(distance, horizontal_need, vertical_need)
+    return (
+        target[0] + from_target[0] * distance,
+        target[1] + from_target[1] * distance,
+        target[2] + from_target[2] * distance,
+    )
+
+
 def _corridor_cross_coordinate(design: DesignDNA | None, long_axis: int) -> float | None:
     """Find the centre of the clearest gap between parallel roof assemblies."""
 
@@ -71,6 +129,48 @@ def _corridor_cross_coordinate(design: DesignDNA | None, long_axis: int) -> floa
         if gap > 0:
             candidates.append((gap, (lower_edge + upper_edge) / 2))
     return max(candidates)[1] if candidates else None
+
+
+def _authored_access_cross_coordinate(
+    scene: CanonicalScene,
+    long_axis: int,
+    architectural_minimum: tuple[float, float, float],
+    architectural_maximum: tuple[float, float, float],
+) -> float | None:
+    """Select an authored circulation strip beside a single building row.
+
+    Loading yards take priority over roads because they expose operational doors without placing
+    the camera outside the site fence. Only strips with meaningful longitudinal overlap qualify.
+    """
+
+    cross_axis = 1 - long_axis
+    long_min = architectural_minimum[long_axis]
+    long_max = architectural_maximum[long_axis]
+    long_span = long_max - long_min
+    candidates: list[tuple[int, float, float]] = []
+    priorities = {
+        SemanticRole.LOADING_ZONE: 0,
+        SemanticRole.SERVICE_YARD: 1,
+        SemanticRole.SITE_ROAD: 2,
+    }
+    for element in scene.elements:
+        priority = priorities.get(element.semantic_role)
+        if priority is None:
+            continue
+        bounds = element.bounding_box
+        overlap = max(
+            0.0,
+            min(long_max, bounds.maximum[long_axis]) - max(long_min, bounds.minimum[long_axis]),
+        )
+        if overlap < long_span * 0.18:
+            continue
+        cross_center = (bounds.minimum[cross_axis] + bounds.maximum[cross_axis]) / 2
+        distance = min(
+            abs(cross_center - architectural_minimum[cross_axis]),
+            abs(cross_center - architectural_maximum[cross_axis]),
+        )
+        candidates.append((priority, distance, cross_center))
+    return min(candidates)[2] if candidates else None
 
 
 def _preferred_long_axis(design: DesignDNA | None, fallback: int) -> int:
@@ -95,6 +195,73 @@ def _preferred_long_axis(design: DesignDNA | None, fallback: int) -> int:
         )
         votes[roof_long_axis] += max(extent_x, extent_y)
     return 0 if votes[0] >= votes[1] else 1
+
+
+def _arrival_shot(
+    scene: CanonicalScene,
+    focus_minimum: tuple[float, float, float],
+    focus_maximum: tuple[float, float, float],
+    site_center: tuple[float, float, float],
+    site_span: float,
+) -> tuple[tuple[float, float, float], tuple[float, float, float]] | None:
+    """Place a human-eye camera on an authored entrance, looking into the site.
+
+    The entrance geometry is the only reliable generic source for a gate-facing shot.
+    Deriving the direction from the site centre avoids project-specific axis assumptions.
+    """
+
+    entrances = [
+        element
+        for element in scene.elements
+        if element.semantic_role is SemanticRole.MAIN_ENTRANCE
+    ]
+    if not entrances:
+        return None
+    focus_center = tuple(
+        (focus_minimum[index] + focus_maximum[index]) / 2 for index in range(3)
+    )
+    entrance = min(
+        entrances,
+        key=lambda element: math.dist(
+            (
+                (element.bounding_box.minimum[0] + element.bounding_box.maximum[0]) / 2,
+                (element.bounding_box.minimum[1] + element.bounding_box.maximum[1]) / 2,
+            ),
+            (focus_center[0], focus_center[1]),
+        ),
+    )
+    gate_center = (
+        (entrance.bounding_box.minimum[0] + entrance.bounding_box.maximum[0]) / 2,
+        (entrance.bounding_box.minimum[1] + entrance.bounding_box.maximum[1]) / 2,
+    )
+    outward = (gate_center[0] - site_center[0], gate_center[1] - site_center[1])
+    length = math.hypot(*outward)
+    if length <= 1e-6:
+        return None
+    outward = (outward[0] / length, outward[1] / length)
+    setback = max(28.0, site_span * 0.13)
+    # Stand to one side of the portal instead of directly under its head beam.
+    # This keeps the gate legible as foreground architecture without occluding the
+    # arrival axis or the factory behind it.
+    tangent = (-outward[1], outward[0])
+    gate_width = max(
+        entrance.bounding_box.maximum[0] - entrance.bounding_box.minimum[0],
+        entrance.bounding_box.maximum[1] - entrance.bounding_box.minimum[1],
+    )
+    lateral_offset = max(12.0, gate_width)
+    position = (
+        gate_center[0] + outward[0] * setback + tangent[0] * lateral_offset,
+        gate_center[1] + outward[1] * setback + tangent[1] * lateral_offset,
+        focus_minimum[2] + 1.65,
+    )
+    # Aim beyond the gate toward the focus building, but retain enough foreground
+    # for the fence opening and external approach road to remain understandable.
+    target = (
+        gate_center[0] + (focus_center[0] - gate_center[0]) * 0.45,
+        gate_center[1] + (focus_center[1] - gate_center[1]) * 0.45,
+        focus_minimum[2] + min(4.0, (focus_maximum[2] - focus_minimum[2]) * 0.25),
+    )
+    return position, target
 
 
 class PlanStandardCameras:
@@ -134,16 +301,23 @@ class PlanStandardCameras:
         ground_target_z = minimum[2] + height * 0.42
         aerial_target_z = minimum[2] + height * 0.25
         detected_corridor = _corridor_cross_coordinate(design, long_axis)
+        authored_access = _authored_access_cross_coordinate(scene, long_axis, minimum, maximum)
         has_internal_corridor = detected_corridor is not None
         corridor_cross = (
             detected_corridor
             if detected_corridor is not None
-            else minimum[cross_axis] - max(10.0, cross_span * 0.18)
+            else authored_access
+            if authored_access is not None
+            else minimum[cross_axis] - max(24.0, cross_span * 0.25)
         )
         corridor_target_cross = (
             corridor_cross
-            if has_internal_corridor
+            if has_internal_corridor or authored_access is not None
             else minimum[cross_axis] + min(3.0, cross_span * 0.06)
+        )
+        access_facade_cross = min(
+            (minimum[cross_axis], maximum[cross_axis]),
+            key=lambda coordinate: abs(coordinate - corridor_cross),
         )
         site_roles = {
             SemanticRole.SITE_ROAD,
@@ -164,10 +338,33 @@ class PlanStandardCameras:
             (site_minimum[1] + site_maximum[1]) / 2,
             (site_minimum[2] + site_maximum[2]) / 2,
         )
-        site_span_x = site_maximum[0] - site_minimum[0]
-        site_span_y = site_maximum[1] - site_minimum[1]
-        site_long_span = (site_span_x, site_span_y)[long_axis]
-        site_span = max(site_span_x, site_span_y)
+        overall_target = (
+            site_center[0],
+            site_center[1],
+            minimum[2] + height * 0.15,
+        )
+        overall_direction = _axis_point(
+            (0.0, 0.0, 0.0),
+            long_axis,
+            -1.0,
+            -0.85,
+            0.9,
+        )
+        overall_position = _fit_camera_to_bounds(
+            site_minimum,
+            site_maximum,
+            overall_target,
+            overall_direction,
+            focal_length_mm=42.0,
+            sensor_width_mm=36.0,
+        )
+        arrival_shot = _arrival_shot(
+            scene,
+            minimum,
+            maximum,
+            site_center,
+            max(site_maximum[0] - site_minimum[0], site_maximum[1] - site_minimum[1]),
+        )
 
         def point(long_offset: float, cross_offset: float, z: float) -> tuple[float, float, float]:
             return _axis_point(center, long_axis, long_offset, cross_offset, z)
@@ -180,19 +377,56 @@ class PlanStandardCameras:
             coordinate[cross_axis] = corridor_target_cross if target else corridor_cross
             return tuple(coordinate)  # type: ignore[return-value]
 
+        loading_shot: tuple[
+            tuple[float, float, float], tuple[float, float, float]
+        ] | None = None
+        if design is not None:
+            surfaces_by_id = {surface.surface_id: surface for surface in scene.surfaces}
+            loading_facades = [
+                (facade, surfaces_by_id.get(facade.surface_id))
+                for building in design.buildings
+                if building.treatment is BuildingTreatment.FOCUS
+                for facade in building.facades
+                if facade.loading_docks
+            ]
+            if loading_facades:
+                facade, surface = loading_facades[0]
+                if surface is not None:
+                    dock = facade.loading_docks[len(facade.loading_docks) // 2]
+                    frame = surface.frame
+                    door = tuple(
+                        frame.origin[index]
+                        + frame.u_axis[index] * (dock.u * surface.width_m)
+                        for index in range(3)
+                    )
+                    lateral_distance = min(18.0, max(10.0, surface.width_m * 0.1))
+                    outward_distance = min(10.0, max(6.0, cross_span * 0.1))
+                    loading_shot = (
+                        (
+                            door[0]
+                            - frame.u_axis[0] * lateral_distance
+                            + frame.normal[0] * outward_distance,
+                            door[1]
+                            - frame.u_axis[1] * lateral_distance
+                            + frame.normal[1] * outward_distance,
+                            minimum[2] + 1.65,
+                        ),
+                        (door[0], door[1], minimum[2] + min(3.0, height * 0.28)),
+                    )
+
+        def access_facade_point(long_coordinate: float, z: float) -> tuple[float, float, float]:
+            coordinate = [center[0], center[1], z]
+            coordinate[long_axis] = long_coordinate
+            coordinate[cross_axis] = access_facade_cross
+            return tuple(coordinate)  # type: ignore[return-value]
+
         cameras = (
             Camera(
                 view_id="view-01",
                 role=ViewRole.OVERALL,
-                position=_axis_point(
-                    site_center,
-                    long_axis,
-                    -site_long_span * 1.45,
-                    -site_span * 1.25,
-                    maximum[2] + site_span * 1.05,
-                ),
-                target=(site_center[0], site_center[1], minimum[2] + height * 0.15),
-                focal_length_mm=46,
+                position=overall_position,
+                target=overall_target,
+                focal_length_mm=42,
                 sensor_width_mm=36,
                 aspect_ratio="16:9",
             ),
@@ -208,14 +442,22 @@ class PlanStandardCameras:
             Camera(
                 view_id="view-03",
                 role=ViewRole.HERO,
-                position=corridor_point(
-                    long_min - max(24.0, long_span * 0.10),
-                    minimum[2] + max(7.0, height * 0.48),
+                # An oblique approach exposes both the long facade and operational
+                # forecourt. Looking almost parallel from a narrow service strip makes
+                # the nearest wall fill half the frame and hides doors, fence and depth.
+                position=_axis_point(
+                    center,
+                    long_axis,
+                    -(long_span / 2 + max(20.0, long_span * 0.08)),
+                    (corridor_cross - center[cross_axis])
+                    - max(24.0, cross_span * 0.25),
+                    minimum[2] + max(10.0, height * 0.55),
                 ),
-                target=corridor_point(
-                    long_min + long_span * 0.38, height * 0.32, target=True
+                target=access_facade_point(
+                    long_min + long_span * 0.38,
+                    minimum[2] + height * 0.30,
                 ),
-                focal_length_mm=36,
+                focal_length_mm=34,
                 sensor_width_mm=36,
                 aspect_ratio="16:9",
             ),
@@ -248,13 +490,34 @@ class PlanStandardCameras:
             Camera(
                 view_id="view-06",
                 role=ViewRole.LOADING_DETAIL,
-                position=corridor_point(long_min + long_span * 0.10, minimum[2] + 1.65),
-                target=corridor_point(
-                    long_min + long_span * 0.40,
-                    minimum[2] + min(3.2, height * 0.3),
-                    target=True,
+                # When the model contains an authored loading/road strip, stand inside that
+                # circulation space so the perimeter fence does not obscure the operational
+                # facade. For a model without authored access, remain outside the envelope.
+                position=(
+                    arrival_shot[0]
+                    if arrival_shot is not None
+                    else loading_shot[0]
+                    if loading_shot is not None
+                    else corridor_point(
+                        (
+                            long_min + long_span * 0.40
+                            if authored_access is not None or has_internal_corridor
+                            else long_min - max(16.0, long_span * 0.08)
+                        ),
+                        minimum[2] + 1.65,
+                    )
                 ),
-                focal_length_mm=32,
+                target=(
+                    arrival_shot[1]
+                    if arrival_shot is not None
+                    else loading_shot[1]
+                    if loading_shot is not None
+                    else access_facade_point(
+                        long_min + long_span * 0.52,
+                        minimum[2] + min(3.2, height * 0.3),
+                    )
+                ),
+                focal_length_mm=30,
                 sensor_width_mm=36,
                 aspect_ratio="16:9",
             ),
@@ -268,7 +531,7 @@ class PlanStandardCameras:
         if design is not None:
             design_revision = design.design_revision
         view_set = ViewSet(
-            view_set_id=f"{revision_key}-{design_revision}-standard-v8",
+            view_set_id=f"{revision_key}-{design_revision}-standard-v16",
             design_revision=design_revision,
             cameras=cameras,
         )

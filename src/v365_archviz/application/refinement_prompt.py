@@ -23,6 +23,9 @@ def build_refinement_prompt(
     roof_types = sorted({building.roof.roof_type for building in design.buildings})
     focus_count = sum(building.treatment.value == "focus" for building in design.buildings)
     context_count = sum(building.treatment.value == "context" for building in design.buildings)
+    auxiliary_count = sum(
+        building.treatment.value == "auxiliary" for building in design.buildings
+    )
     solar_policy = (
         "permitted only on buildings explicitly marked true"
         if any(building.roof.solar_panels for building in design.buildings)
@@ -53,11 +56,14 @@ def build_refinement_prompt(
         f"- solar-panel policy: {solar_policy}\n"
         "- road, sidewalk, gate and landscape geometry: preserve exactly\n"
         f"- approved focus building count: {focus_count}\n"
+        f"- approved opaque auxiliary building count: {auxiliary_count}; preserve each as a "
+        "restrained support building, not focus architecture or translucent context\n"
         f"- approved context building count: {context_count}; generate exactly this count, "
         "plus only the deterministic perimeter massings explicitly present in semantic pixels; "
         "never infer additional context\n"
-        f"- context buildings: {site_design.context_render_mode}, opacity reference "
-        f"{site_design.context_opacity:.2f}, no facade design\n"
+        f"- context buildings: {site_design.context_render_mode}, visual-prominence reference "
+        f"{site_design.context_opacity:.2f}; pale frosted translucent planning massing with "
+        "ground contact, no facade design and no glass-building appearance\n"
         f"- surrounding context mode: {site_design.surrounding_context_mode}; "
         f"perimeter massing count: {site_design.surrounding_context_count}\n"
         f"- surrounding landscape buffer: {site_design.surrounding_landscape_buffer}"

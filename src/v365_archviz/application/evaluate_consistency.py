@@ -37,8 +37,14 @@ class EvaluateConsistency:
         project_id = self._required_string(technical, "project_id")
         design_revision = self._required_string(technical, "design_revision")
         findings = self._technical_findings(technical)
-        if not findings:
-            findings.extend(self._unresolved_visual_gates(technical))
+        if not any(item.status is QAStatus.FAIL for item in findings):
+            findings.extend(self._measured_findings(technical))
+            measured_gates = {item.gate for item in findings}
+            findings.extend(
+                item
+                for item in self._unresolved_visual_gates(technical)
+                if item.gate not in measured_gates
+            )
 
         status = (
             QAStatus.FAIL
@@ -99,14 +105,49 @@ class EvaluateConsistency:
         )
         for index, (view_id, finding) in enumerate(raw_findings, start=1):
             code = str(finding.get("code", "unknown_integrity_error"))
+            gate = (
+                QAGate.GEOMETRY
+                if code.startswith("protected_")
+                else QAGate.MATERIAL
+                if code.startswith("palette_")
+                else QAGate.CAMERA
+                if code.startswith("camera_")
+                else QAGate.ARTIFACT_INTEGRITY
+            )
             findings.append(
                 QAFinding(
                     finding_id=f"artifact-{index:03d}-{code}",
-                    gate=QAGate.ARTIFACT_INTEGRITY,
+                    gate=gate,
                     status=QAStatus.FAIL,
                     code=code,
                     message=str(finding.get("message", code)),
                     view_ids=() if view_id == "view-set" else (view_id,),
+                    repairable=False,
+                )
+            )
+        return findings
+
+    @staticmethod
+    def _measured_findings(document: dict[str, Any]) -> list[QAFinding]:
+        views = [view for view in document.get("views", []) if isinstance(view, dict)]
+        view_ids = tuple(str(view.get("view_id")) for view in views if view.get("view_id"))
+        findings: list[QAFinding] = []
+        for gate in (QAGate.GEOMETRY, QAGate.MATERIAL, QAGate.CAMERA):
+            evidence = [
+                view.get("gate_evidence", {}).get(gate.value, {}) for view in views
+            ]
+            if not evidence or not all(item.get("status") == "pass" for item in evidence):
+                continue
+            findings.append(
+                QAFinding(
+                    finding_id=f"measured-{gate.value}",
+                    gate=gate,
+                    status=QAStatus.PASS,
+                    code=f"{gate.value}_evidence_passed",
+                    message=f"Measured {gate.value} evidence passed for every generated view.",
+                    view_ids=view_ids,
+                    score=1.0,
+                    threshold=1.0,
                     repairable=False,
                 )
             )
@@ -122,8 +163,14 @@ class EvaluateConsistency:
         messages = {
             QAGate.GEOMETRY: "Silhouette and structural edge conformance require review.",
             QAGate.SEMANTIC: "Architectural element presence and role require review.",
+            QAGate.MATERIAL: "Material identity and palette compliance require review.",
             QAGate.CROSS_VIEW_APPEARANCE: (
                 "Material, color, and identity consistency across views require review."
+            ),
+            QAGate.CAMERA: "Coverage, occupancy, and major occlusion require review.",
+            QAGate.REALISM: (
+                "Photographic material response, contact, atmosphere, and scale cues "
+                "require review."
             ),
             QAGate.AESTHETIC: "Bid-quality composition and visual appeal require review.",
         }

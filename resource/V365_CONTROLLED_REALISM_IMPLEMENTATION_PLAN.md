@@ -90,6 +90,12 @@ nguồn đúng cho footprint, camera, facade motif, bố cục hay một phong c
 
 Policy phải tồn tại dưới dạng dữ liệu/mask, không chỉ là câu chữ trong prompt.
 
+Khi chiếu policy thành pixel mask, `LOCKED` ưu tiên silhouette, boundary, ridge và các structural
+edge bands; interior của facade/roof/road có thể là `BOUNDED` để vẫn cải thiện vật liệu. Không khóa
+toàn bộ pixel bề mặt, nhưng cũng không được bỏ khóa cửa, cổng hoặc internal topology. Chi tiết triển
+khai và đánh giá mức sẵn sàng được chốt trong
+[`V365_CONTROLLED_REALISM_IMPLEMENTATION_READINESS_REPORT.md`](V365_CONTROLLED_REALISM_IMPLEMENTATION_READINESS_REPORT.md).
+
 ### 4.2. Preset cho người dùng
 
 - `conservative`: giữ tối đa hình ảnh PBR; AI chủ yếu chỉnh ánh sáng và vi sai bề mặt.
@@ -416,6 +422,7 @@ Chương trình chỉ được coi là hoàn thành khi:
 
 ## 12. Tài liệu và cơ sở nghiên cứu
 
+- [Controlled Realism — implementation readiness](V365_CONTROLLED_REALISM_IMPLEMENTATION_READINESS_REPORT.md)
 - [V365 Multi-view Realism — nghiên cứu và kiểm nghiệm](V365_MULTIVIEW_REALISM_RESEARCH_AND_EXPERIMENTS.md)
 - [V365 feasibility report](V365_LOD100_MultiView_ArchViz_FEASIBILITY_REPORT.md)
 - [ControlNet](https://arxiv.org/abs/2302.05543)

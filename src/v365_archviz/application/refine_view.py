@@ -21,7 +21,7 @@ from v365_archviz.providers.contracts import (
     ViewConditioningInput,
 )
 
-PROMPT_VERSION = "photoreal-balanced-v1"
+PROMPT_VERSION = "photoreal-balanced-v3"
 DEFAULT_PROMPT = """Create a photorealistic professional architectural visualization of this
 Vietnamese industrial project. Treat the base render and auxiliary passes as immutable spatial
 geometry: preserve the exact camera, site boundary, authored road and sidewalk centerlines and
@@ -40,12 +40,17 @@ Avoid flat-box roof imagery, luxury-resort styling, parametric fantasy forms, ex
 arbitrary curves and decorative
 features without construction logic. Use a coherent material palette across every view.
 
-COLOR-LOCK RULE: use only the exact approved Design DNA palette. Every factory roof must keep the
-same approved light-neutral metal finish in every view. Accent elements must use only the approved
-accent color. Do not introduce red, orange, purple, cyan, electric blue or a dark/black roof unless
-that exact color is explicitly present in the approved palette. In particular, red pixels in the
-semantic-ID image mean "focus factory" only: they are not a material or facade color and no trace
-of semantic red may survive in the photorealistic output.
+COLOR-ROLE LOCK: use the exact approved Design DNA palette as a material specification, not a loose
+color suggestion. Apply roof to the continuous profiled-metal roof; primary to the dominant
+focus-factory wall cladding; secondary to plinths, structural grids, eaves, flashings, dock frames
+and doors; boundary to fence posts, infill and gate metalwork; glass only to authored glazing;
+accent only to a small entrance/signage datum occupying
+no more than roughly 8 percent of the focus facade; paving only to authored roads and yards. Keep
+these five role assignments, hue families, finish roughness and relative prominence identical in
+all six views despite distance, haze and exposure. Never collapse a user-selected chromatic primary
+or secondary back to generic white/black. Do not introduce red, orange, purple, cyan or electric
+blue unless that exact color is explicitly present in the approved palette. Red semantic-ID pixels
+mean "focus factory" only and must never survive as material color.
 
 REFERENCE-USAGE RULE: any attached reference is a non-binding realism sample. Borrow only its
 photographic credibility, material response, construction-detail density, plausible finish and
@@ -79,8 +84,13 @@ Keep all authored entrance locations simultaneously visible when the camera fram
 Never relocate an entrance or block it with planting, vehicles or invented construction. Draw a
 perimeter fence only where boundary geometry is explicitly present in the conditioning passes.
 Keep every visible fence run continuous except at an authored gate opening; retain its plinth,
-posts and rails instead of replacing it with planting. Read the gate as a controlled vehicular
-entrance connected to the authored internal and external roads, with its exact opening preserved.
+posts and rails instead of replacing it with planting. Use one buildable boundary family throughout:
+a low durable concrete plinth where supported by geometry, regular galvanized or secondary-color
+steel posts, and restrained vertical-bar or welded-mesh infill. Read the gate as a controlled
+vehicular entrance connected to the authored internal and external roads, with its exact opening
+preserved. Use the same gate leaf count, post spacing, height, secondary-color metal finish and
+fence connection in every view. The gate must be structurally anchored to fence posts; never render
+a floating accent rectangle, ceremonial portal, disconnected frame or arbitrary duplicate gate.
 UTILITY-BUILDING RULE: every authored utility/auxiliary mass is an opaque, secondary support
 building on the subject site. Preserve its exact footprint, height, service door and ventilation
 details. Give it restrained durable industrial finishes; never turn it into another main shed,
@@ -92,12 +102,13 @@ frosted translucent conceptual massing with credible ground contact, soft shadow
 and atmospheric fade: preserve exact size and position, add no facade design, and keep attention
 on focus buildings. It must read as an intentional neutral planning proxy, never glass architecture,
 ghost buildings or floating blocks. CONTEXT SETTING RULE: this is a developed Vietnamese industrial
-park, not a forest or rural wilderness. In explicitly FREE off-site context pixels, create a
-subdued industrial-estate background of broad asphalt collector roads, curbs, drainage edges,
-divided plots, low grass and
-simple secondary warehouses. Trees must be limited to narrow verges, regularly spaced street-tree
-rows, small setbacks and a distant belt; they must not form continuous dense canopy. Context must
-remain visually secondary and may not spill into the protected project site.
+park, not a forest or rural wilderness. Complete FREE off-site pixels only with photographic sky,
+atmospheric continuity and a subdued neutral ground continuation; never invent buildings, roads,
+plots, fences or other site geometry there. Render industrial-estate roads, curbs, drainage,
+divided plots, low grass, street-tree rows and secondary warehouses only where their geometry is
+visible in the Base RGB or semantic passes. Trees must remain limited to authored verges, rows,
+setbacks and belts; they must not form continuous dense canopy. Context must remain visually
+secondary and may not spill into the protected project site.
 Add sparse entourage only where it cannot hide protected architecture or circulation.
 Use physically plausible daylight and materials, premium bid-presentation quality, no text, no
 logos or aerial labels. Semantic-pass annotation colors must never leak into the final image;

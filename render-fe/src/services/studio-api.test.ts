@@ -33,6 +33,35 @@ describe('HttpStudioGateway', () => {
     expect(fetchMock).toHaveBeenCalledWith('/v1/design-options', expect.anything());
   });
 
+  it('analyzes model capabilities before allowing design choices', async () => {
+    const capabilities = {
+      schema_version: '1.0.0',
+      model_revision: 'model-revision-01',
+      components: [{
+        key: 'gate', label: 'Cổng', supported: false, evidence_count: 0,
+        evidence_ids: [], reason: 'Không có cổng.',
+      }],
+      warnings: ['Không có cổng.'],
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({
+        model_revision: 'model-revision-01', file_name: 'factory.rvt', ready: true,
+      }, 201))
+      .mockResolvedValueOnce(jsonResponse(capabilities));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await new HttpStudioGateway().prepareModel(
+      new File(['rvt-content'], 'factory.rvt'),
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][0]).toBe(
+      '/v1/models/model-revision-01/design-capabilities',
+    );
+    expect(result.capabilities.components[0].supported).toBe(false);
+  });
+
   it('creates an immutable design revision before requesting the view set', async () => {
     const fetchMock = vi
       .fn()
@@ -90,11 +119,11 @@ describe('HttpStudioGateway', () => {
     const firstRequest = fetchMock.mock.calls[1][1] as RequestInit;
     const payload = JSON.parse(firstRequest.body as string) as {
       model_revision: string;
-      intent: { style_preset: string; context_presentation: string };
+      intent: { design_package: string; facade_rhythm_kit: string };
     };
     expect(payload.model_revision).toBe('model-revision-01');
-    expect(payload.intent.style_preset).toBe('contemporary_industrial');
-    expect(payload.intent.context_presentation).toBe('authored_only');
+    expect(payload.intent.design_package).toBe('premium_practical');
+    expect(payload.intent.facade_rhythm_kit).toBe('mixed_restrained');
     expect(fetchMock.mock.calls[2][0]).toBe('/v1/design-revisions/R01-design/view-sets');
     expect(fetchMock.mock.calls[3][0]).toBe('/v1/view-sets/viewset-01/outputs');
     expect(result).toMatchObject({

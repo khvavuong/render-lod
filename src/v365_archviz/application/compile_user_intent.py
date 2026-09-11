@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import colorsys
 import re
 from dataclasses import dataclass
 
@@ -16,10 +17,17 @@ from v365_archviz.domain.design import (
 )
 from v365_archviz.domain.render_intent import (
     DESIGN_OPTIONS,
+    BoundaryKit,
     ContextPresentation,
+    DesignPackage,
+    FacadeRhythmKit,
+    GateKit,
     IntentWarning,
     LandscapePreset,
     LoadingDockPolicy,
+    LogisticsKit,
+    ModelDesignCapabilities,
+    OfficeEntranceKit,
     RealismPreset,
     UserRenderIntent,
 )
@@ -101,7 +109,45 @@ DECOR_ARTICULATION = {
     ),
 }
 
+PACKAGE_STYLE = {
+    DesignPackage.PREMIUM_PRACTICAL: "contemporary_industrial",
+    DesignPackage.CORPORATE_IDENTITY: "corporate_industrial",
+    DesignPackage.TROPICAL_INDUSTRIAL: "sustainable_industrial",
+    DesignPackage.MINIMAL_LOGISTICS: "minimal_industrial",
+}
+
+RHYTHM_ARTICULATION = {
+    FacadeRhythmKit.HORIZONTAL_RESTRAINED: FacadeArticulation(
+        plinth_height_m=0.9,
+        parapet_band_height_m=0.55,
+        office_glazing_ratio=0.42,
+        feature_frame_depth_m=0.35,
+        entrance_canopy_projection_m=1.8,
+        vertical_fin_count=0,
+        accent_bay_interval=14,
+    ),
+    FacadeRhythmKit.VERTICAL_BAYS: FacadeArticulation(
+        plinth_height_m=0.85,
+        parapet_band_height_m=0.45,
+        office_glazing_ratio=0.46,
+        feature_frame_depth_m=0.55,
+        entrance_canopy_projection_m=2.1,
+        vertical_fin_count=4,
+        accent_bay_interval=10,
+    ),
+    FacadeRhythmKit.MIXED_RESTRAINED: FacadeArticulation(
+        plinth_height_m=0.9,
+        parapet_band_height_m=0.6,
+        office_glazing_ratio=0.48,
+        feature_frame_depth_m=0.65,
+        entrance_canopy_projection_m=2.4,
+        vertical_fin_count=3,
+        accent_bay_interval=12,
+    ),
+}
+
 LANDSCAPE_LANGUAGE = {
+    LandscapePreset.PRESERVE_MODEL: "preserve authored landscape zones without expansion",
     LandscapePreset.TROPICAL_RESTRAINED: "restrained climate-appropriate tropical planting",
     LandscapePreset.CORPORATE_LINEAR: "ordered linear corporate landscape planting",
     LandscapePreset.LOW_MAINTENANCE: "low-maintenance climate-resilient industrial planting",
@@ -144,16 +190,36 @@ class CompiledUserIntent:
 class CompileUserRenderIntent:
     """Resolve public enums server-side and strip attempts to override locked geometry."""
 
-    def execute(self, project_id: str, intent: UserRenderIntent) -> CompiledUserIntent:
+    def execute(
+        self,
+        project_id: str,
+        intent: UserRenderIntent,
+        capabilities: ModelDesignCapabilities | None = None,
+    ) -> CompiledUserIntent:
         normalized_text, warnings = self._normalize_free_text(intent.free_text)
         normalized = intent.model_copy(update={"free_text": normalized_text})
+        if capabilities is not None:
+            normalized, capability_warnings = self._apply_capability_constraints(
+                normalized, capabilities
+            )
+            warnings += capability_warnings
+        warnings += self._palette_warnings(normalized)
         hour, minute = (int(value) for value in normalized.time.split(":"))
         daylight_hour = hour + minute / 60
         environment = self._environment(normalized.time, daylight_hour)
+        articulation = (
+            self._semantic_articulation(normalized)
+            if capabilities is not None
+            else DECOR_ARTICULATION[normalized.decor_level.value]
+        )
         dock_count = (
             0
-            if normalized.loading_dock_policy is LoadingDockPolicy.PRESERVE_EXISTING
-            else normalized.loading_dock_count
+            if capabilities is not None
+            else (
+                0
+                if normalized.loading_dock_policy is LoadingDockPolicy.PRESERVE_EXISTING
+                else normalized.loading_dock_count
+            )
         )
         if normalized.loading_dock_policy is LoadingDockPolicy.SUGGEST_IF_MISSING and dock_count:
             warnings += (
@@ -171,29 +237,52 @@ class CompileUserRenderIntent:
             if normalized.context_presentation is ContextPresentation.NEUTRAL_INDUSTRIAL_MASSING
             else 0.28
         )
-        creative_direction = " | ".join(
-            part
-            for part in (
+        direction_parts = (
+            (
+                "controlled construction-detail budget",
+                f"factory design package={normalized.design_package.value}",
+                f"envelope kit={normalized.envelope_kit.value}",
+                f"office entrance kit={normalized.office_entrance_kit.value}",
+                f"facade rhythm={normalized.facade_rhythm_kit.value}",
+                f"logistics kit={normalized.logistics_kit.value}",
+                f"boundary kit={normalized.boundary_kit.value}",
+                f"gate kit={normalized.gate_kit.value}",
+                f"brand accent maximum={normalized.accent_coverage_percent}% of facade",
+                f"realism={REALISM_LANGUAGE[normalized.realism_preset]}",
+                normalized_text,
+            )
+            if capabilities is not None
+            else (
                 f"creative budget={normalized.creative_budget.value}",
                 f"realism={REALISM_LANGUAGE[normalized.realism_preset]}",
                 f"loading dock policy={normalized.loading_dock_policy.value}",
                 f"context presentation={normalized.context_presentation.value}",
                 normalized_text,
             )
-            if part
         )
+        creative_direction = " | ".join(part for part in direction_parts if part)
         brief = DesignBrief(
             project_id=project_id,
-            design_language=STYLE_LANGUAGE[normalized.style_preset.value],
+            design_language=STYLE_LANGUAGE[
+                PACKAGE_STYLE[normalized.design_package]
+                if capabilities is not None
+                else normalized.style_preset.value
+            ],
             environment=environment,
             material_palette=normalized.material_palette,
-            facade_articulation=DECOR_ARTICULATION[normalized.decor_level.value],
+            facade_articulation=articulation,
             presentation=PresentationStrategy(
                 landscape_character=LANDSCAPE_LANGUAGE[normalized.landscape_preset],
                 paving_character=(
                     "credible light-grey industrial concrete with drainage, joints and subtle wear"
                 ),
-                entourage_density=normalized.entourage_density.value,
+                entourage_density=(
+                    {"clean": "low", "active": "medium", "logistics": "medium"}[
+                        normalized.operating_scene.value
+                    ]
+                    if capabilities is not None
+                    else normalized.entourage_density.value
+                ),
             ),
             site_design=SiteDesign(
                 preserve_transport_geometry=True,
@@ -207,22 +296,36 @@ class CompileUserRenderIntent:
             design_preferences=DesignPreferences(
                 style_preset=normalized.style_preset,
                 decor_level=normalized.decor_level,
-                requested_office_storeys=normalized.office_facade_rhythm,
+                requested_office_storeys=(
+                    None if capabilities is not None else normalized.office_facade_rhythm
+                ),
                 creative_prompt=creative_direction,
+                design_package=normalized.design_package.value,
+                envelope_kit=normalized.envelope_kit.value,
+                office_entrance_kit=normalized.office_entrance_kit.value,
+                facade_rhythm_kit=normalized.facade_rhythm_kit.value,
+                logistics_kit=normalized.logistics_kit.value,
+                boundary_kit=normalized.boundary_kit.value,
+                gate_kit=normalized.gate_kit.value,
+                accent_coverage_percent=normalized.accent_coverage_percent,
             ),
             focus_building_ids=(),
             context_building_ids=(),
             panel_module_m=1.2,
             loading_docks_per_main_facade=dock_count,
-            add_office_entrances=True,
-            roof_type="model-derived continuous profiled-metal industrial roof",
+            add_office_entrances=(
+                normalized.office_entrance_kit is not OfficeEntranceKit.PRESERVE_MODEL
+                if capabilities is not None
+                else True
+            ),
+            roof_type="model-derived continuous low-slope gable profiled-metal industrial roof",
             roof_slope_deg=7.0,
             roof_eave_overhang_m=0.75,
             roof_ridge_orientation="long_axis",
             roof_grouping_mode="continuous_rows",
             roof_group_gap_tolerance_m=10.0,
             solar_panels=False,
-            grammar_version=f"industrial-grammar-v4-intent-{DESIGN_OPTIONS.catalog_version}",
+            grammar_version=f"industrial-grammar-v6-intent-{DESIGN_OPTIONS.catalog_version}",
             asset_library_version="baseline-assets-v2",
         )
         return CompiledUserIntent(
@@ -231,6 +334,129 @@ class CompileUserRenderIntent:
             warnings=warnings,
             catalog_version=DESIGN_OPTIONS.catalog_version,
         )
+
+    @staticmethod
+    def _apply_capability_constraints(
+        intent: UserRenderIntent,
+        capabilities: ModelDesignCapabilities,
+    ) -> tuple[UserRenderIntent, tuple[IntentWarning, ...]]:
+        available = {component.key: component.supported for component in capabilities.components}
+        updates: dict[str, object] = {}
+        findings: list[IntentWarning] = []
+        guarded = (
+            ("office_entrance_kit", "office_entrance", OfficeEntranceKit.PRESERVE_MODEL),
+            ("logistics_kit", "logistics", LogisticsKit.PRESERVE_MODEL),
+            ("boundary_kit", "boundary", BoundaryKit.PRESERVE_MODEL),
+            ("gate_kit", "gate", GateKit.PRESERVE_MODEL),
+        )
+        for field, capability, preserve_value in guarded:
+            requested = getattr(intent, field)
+            if requested.value != "preserve_model" and not available.get(capability, False):
+                updates[field] = preserve_value
+                findings.append(
+                    IntentWarning(
+                        code="unsupported_component_preserved",
+                        field=field,
+                        message=(
+                            f"Không có semantic evidence cho {capability}; lựa chọn đã được "
+                            "chuyển về giữ theo model."
+                        ),
+                    )
+                )
+        if intent.landscape_preset is not LandscapePreset.PRESERVE_MODEL and not available.get(
+            "landscape", False
+        ):
+            updates["landscape_preset"] = LandscapePreset.PRESERVE_MODEL
+            findings.append(
+                IntentWarning(
+                    code="unsupported_component_preserved",
+                    field="landscape_preset",
+                    message="Không có vùng xanh authored; cảnh quan được chuyển về giữ theo model.",
+                )
+            )
+        return intent.model_copy(update=updates), tuple(findings)
+
+    @staticmethod
+    def _semantic_articulation(intent: UserRenderIntent) -> FacadeArticulation:
+        base = RHYTHM_ARTICULATION[intent.facade_rhythm_kit]
+        updates: dict[str, float | int] = {
+            "accent_bay_interval": max(8, round(55 / intent.accent_coverage_percent)),
+        }
+        if intent.envelope_kit.value == "panel_concrete_plinth":
+            updates["plinth_height_m"] = 1.15
+        office_updates = {
+            OfficeEntranceKit.PRESERVE_MODEL: {},
+            OfficeEntranceKit.FRAMED_GLAZED_BAY: {
+                "vertical_fin_count": 2,
+                "feature_frame_depth_m": 0.7,
+                "entrance_canopy_projection_m": 1.5,
+            },
+            OfficeEntranceKit.CANOPY_ENTRY: {
+                "vertical_fin_count": 0,
+                "feature_frame_depth_m": 0.45,
+                "entrance_canopy_projection_m": 3.0,
+            },
+            OfficeEntranceKit.CLIMATE_SCREEN: {
+                "vertical_fin_count": 6,
+                "feature_frame_depth_m": 0.85,
+                "entrance_canopy_projection_m": 1.8,
+            },
+        }
+        updates.update(office_updates[intent.office_entrance_kit])
+        return base.model_copy(update=updates)
+
+    @staticmethod
+    def _palette_warnings(intent: UserRenderIntent) -> tuple[IntentWarning, ...]:
+        palette = intent.material_palette
+
+        def properties(value: str) -> tuple[float, float]:
+            normalized = value.lstrip("#")
+            red, green, blue = (int(normalized[index : index + 2], 16) / 255 for index in (0, 2, 4))
+            _, saturation, _ = colorsys.rgb_to_hsv(red, green, blue)
+            lightness = (max(red, green, blue) + min(red, green, blue)) / 2
+            return lightness, saturation
+
+        roof_lightness, _ = properties(palette.roof_hex)
+        _, primary_saturation = properties(palette.primary_hex)
+        _, secondary_saturation = properties(palette.secondary_hex)
+        _, boundary_saturation = properties(palette.boundary_hex)
+        findings: list[IntentWarning] = []
+        if roof_lightness < 0.68:
+            findings.append(
+                IntentWarning(
+                    code="dark_roof_finish",
+                    field="material_palette.roof_hex",
+                    message=(
+                        "Màu mái tối; cần xác nhận tải nhiệt và cảm giác thị giác "
+                        "trước khi sinh ảnh."
+                    ),
+                )
+            )
+        if secondary_saturation > 0.72:
+            findings.append(
+                IntentWarning(
+                    code="saturated_structure_finish",
+                    field="material_palette.secondary_hex",
+                    message="Màu kết cấu quá bão hòa; nên chuyển hue mạnh sang điểm nhấn.",
+                )
+            )
+        if primary_saturation > 0.65 and secondary_saturation > 0.65:
+            findings.append(
+                IntentWarning(
+                    code="competing_facade_colors",
+                    field="material_palette",
+                    message="Thân nhà và kết cấu đều quá rực cho một facade công nghiệp tiết chế.",
+                )
+            )
+        if boundary_saturation > 0.45:
+            findings.append(
+                IntentWarning(
+                    code="saturated_boundary_finish",
+                    field="material_palette.boundary_hex",
+                    message="Cổng và hàng rào nên dùng màu trung tính để giữ focus cho nhà xưởng.",
+                )
+            )
+        return tuple(findings)
 
     @staticmethod
     def _environment(time: str, daylight_hour: float) -> EnvironmentDesign:

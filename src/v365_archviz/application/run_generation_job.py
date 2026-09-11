@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 
@@ -13,10 +14,11 @@ from v365_archviz.application.compose_viewset_board import ComposeViewSetBoard
 from v365_archviz.application.create_certification_report import CreateCertificationReport
 from v365_archviz.application.evaluate_consistency import EvaluateConsistency
 from v365_archviz.application.protect_refinement import ProtectRefinement
-from v365_archviz.application.refine_viewset import RefineViewSet
+from v365_archviz.application.refine_viewset import RefineViewSet, _select_master_view_id
 from v365_archviz.application.refinement_prompt import build_refinement_prompt
 from v365_archviz.application.validate_conditioning import ValidateConditioningViewSet
 from v365_archviz.application.validate_viewset import ValidateGeneratedViewSet
+from v365_archviz.artifacts import atomic_write
 from v365_archviz.config import Settings
 from v365_archviz.domain.jobs import GenerationJob
 from v365_archviz.domain.workflow import Camera, ViewSet, WorkflowState
@@ -72,29 +74,88 @@ class RunGenerationJob:
 
         if job.state is WorkflowState.GENERATING_VIEWSET:
             _, prompt = build_refinement_prompt(paths.design_dna)
-            with create_image_renderer(settings, job.image_provider) as renderer:
-                generated = RefineViewSet().execute(
-                    renderer,
+            review_path = paths.generated_root / "design_master_review.json"
+            review = self._read_master_review(review_path)
+            if not review.get("approved", False):
+                master_view_id = _select_master_view_id(paths.render_root, view_set.cameras)
+                with create_image_renderer(settings, job.image_provider) as renderer:
+                    generated = RefineViewSet().execute(
+                        renderer,
+                        paths.render_root,
+                        paths.generated_root,
+                        paths.view_set,
+                        paths.design_dna,
+                        job.model_revision,
+                        prompt,
+                        profile=job.profile,
+                        view_ids=(master_view_id,),
+                    )
+                protected = ProtectRefinement().execute(
                     paths.render_root,
                     paths.generated_root,
-                    paths.view_set,
-                    paths.design_dna,
-                    job.model_revision,
-                    prompt,
-                    profile=job.profile,
+                    restore_locked_pixels=False,
                 )
-            protected = ProtectRefinement().execute(
-                paths.render_root,
-                paths.generated_root,
-                restore_locked_pixels=False,
-            )
-            job = self._advance(
-                repository,
-                job,
-                WorkflowState.VALIDATING,
-                generated.manifest_path,
-                protected.manifest_path,
-            )
+                master_path = self._refined_image(paths.generated_root / master_view_id)
+                atomic_write(
+                    review_path,
+                    json.dumps(
+                        {
+                            "schema_version": "1.0.0",
+                            "status": "pending",
+                            "approved": False,
+                            "master_view_id": master_view_id,
+                            "master_image_ref": str(master_path),
+                            "geometry_screen_passed": protected.rejected_count == 0,
+                            "next_stage": "generate_remaining_views_after_explicit_approval",
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    ).encode("utf-8")
+                    + b"\n",
+                )
+                job = self._advance(
+                    repository,
+                    job,
+                    WorkflowState.DESIGN_MASTER_REVIEW,
+                    generated.manifest_path,
+                    protected.manifest_path,
+                    review_path,
+                    master_path,
+                )
+            else:
+                master_view_id = str(review["master_view_id"])
+                master_path = Path(str(review["master_image_ref"]))
+                remaining_view_ids = tuple(
+                    camera.view_id
+                    for camera in view_set.cameras
+                    if camera.view_id != master_view_id
+                )
+                with create_image_renderer(settings, job.image_provider) as renderer:
+                    generated = RefineViewSet().execute(
+                        renderer,
+                        paths.render_root,
+                        paths.generated_root,
+                        paths.view_set,
+                        paths.design_dna,
+                        job.model_revision,
+                        prompt,
+                        profile=job.profile,
+                        view_ids=remaining_view_ids,
+                        approved_master_path=master_path,
+                        approved_master_view_id=master_view_id,
+                    )
+                protected = ProtectRefinement().execute(
+                    paths.render_root,
+                    paths.generated_root,
+                    restore_locked_pixels=False,
+                )
+                job = self._advance(
+                    repository,
+                    job,
+                    WorkflowState.VALIDATING,
+                    generated.manifest_path,
+                    protected.manifest_path,
+                )
 
         if job.state is WorkflowState.VALIDATING:
             validation = ValidateGeneratedViewSet().execute(
@@ -152,6 +213,23 @@ class RunGenerationJob:
         if job.state is WorkflowState.GENERATING_VIDEO:
             job = self._advance(repository, job, WorkflowState.COMPLETED)
         return job
+
+    @staticmethod
+    def _read_master_review(path: Path) -> dict[str, object]:
+        if not path.is_file():
+            return {}
+        try:
+            document = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return document if isinstance(document, dict) else {}
+
+    @staticmethod
+    def _refined_image(view_directory: Path) -> Path:
+        images = tuple(path for path in view_directory.glob("refined.*") if path.is_file())
+        if len(images) != 1:
+            raise V365Error(f"{view_directory.name} has no unique Design Master image")
+        return images[0]
 
     def _ensure_conditioning(
         self,

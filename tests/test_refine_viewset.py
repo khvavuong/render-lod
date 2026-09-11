@@ -4,7 +4,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from v365_archviz.application.refine_viewset import RefineViewSet
+from v365_archviz.application.refine_viewset import RefineViewSet, _select_master_view_id
 from v365_archviz.domain.design import DesignDNA, DesignLanguage, EnvironmentDesign
 from v365_archviz.domain.workflow import Camera, ViewRole, ViewSet
 from v365_archviz.providers.contracts import (
@@ -41,6 +41,46 @@ class FakeViewSetRenderer:
                 for view in request.views
             ),
         )
+
+
+def test_selects_a_design_readable_master_instead_of_a_distant_overall(tmp_path: Path) -> None:
+    cameras = tuple(
+        Camera(
+            view_id=f"view-{index:02d}",
+            role=role,
+            position=(index, index, index),
+            target=(0, 0, 0),
+            focal_length_mm=35,
+            sensor_width_mm=36,
+            aspect_ratio="16:9",
+        )
+        for index, role in ((1, ViewRole.OVERALL), (2, ViewRole.DETAIL))
+    )
+    (tmp_path / "conditioning_qa.json").write_text(
+        json.dumps(
+            {
+                "views": [
+                    {
+                        "view_id": "view-01",
+                        "status": "pass",
+                        "focus_coverage": 0.12,
+                        "circulation_coverage": 0.03,
+                        "context_coverage": 0.04,
+                    },
+                    {
+                        "view_id": "view-02",
+                        "status": "pass",
+                        "focus_coverage": 0.62,
+                        "circulation_coverage": 0.10,
+                        "context_coverage": 0.01,
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert _select_master_view_id(tmp_path, cameras) == "view-02"
 
 
 def test_refines_an_ordered_view_set_as_one_unit(tmp_path: Path) -> None:
@@ -120,7 +160,28 @@ def test_refines_an_ordered_view_set_as_one_unit(tmp_path: Path) -> None:
     assert identity["master_view_id"] == "view-01"
     assert identity["authority_order"][0] == "current_view_base_geometry"
     assert identity["render_intent_sha256"] == manifest["render_intent_sha256"]
+    assert (
+        identity["material_role_contract"]["dominant_focus_wall_cladding"]
+        == design.material_palette.primary_hex
+    )
+    assert (
+        identity["material_role_contract"]["plinth_structure_eaves_doors_and_docks"]
+        == design.material_palette.secondary_hex
+    )
+    assert (
+        identity["material_role_contract"]["continuous_profiled_metal_roof"]
+        == design.material_palette.roof_hex
+    )
+    assert (
+        identity["material_role_contract"]["continuous_fence_and_gate"]
+        == design.material_palette.boundary_hex
+    )
+    assert "floating portal" in identity["site_boundary_contract"]["prohibited"]
+    assert "invented warehouse" in identity["context_contract"]["prohibited"]
     assert [view["view_id"] for view in manifest["views"]] == ["view-01", "view-02"]
     assert renderer.last_request is not None
+    assert "material roles=" in renderer.last_request.identity_prompt
+    assert "site boundary family=" in renderer.last_request.identity_prompt
+    assert "context policy=" in renderer.last_request.identity_prompt
     assert "PRIMARY VISIBLE FACADE" in renderer.last_request.views[0].prompt
     assert "approved generated loading docks=0" in renderer.last_request.views[0].prompt

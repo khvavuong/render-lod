@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type {
   DesignFormValues,
+  DesignPreview,
+  PreparedModel,
   StudioGateway,
   StudioJob,
   StudioVideoJob,
@@ -13,6 +15,10 @@ export function useStudioJob(gateway: StudioGateway) {
   const [job, setJob] = useState<StudioJob | null>(null);
   const [videoJob, setVideoJob] = useState<StudioVideoJob | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isPreparingModel, setIsPreparingModel] = useState(false);
+  const [isPreviewingDesign, setIsPreviewingDesign] = useState(false);
+  const [preparedModel, setPreparedModel] = useState<PreparedModel | null>(null);
+  const [designPreview, setDesignPreview] = useState<DesignPreview | null>(null);
   const [isSubmittingVideo, setIsSubmittingVideo] = useState(false);
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -21,8 +27,55 @@ export function useStudioJob(gateway: StudioGateway) {
   const activeVideoJob = useRef<string | null>(null);
   const terminalOutputRetries = useRef(0);
 
+  const prepareModel = useCallback(async (file: File) => {
+    setIsPreparingModel(true);
+    setError(null);
+    setErrorTitle('Không thể phân tích mô hình');
+    setDesignPreview(null);
+    try {
+      const prepared = await gateway.prepareModel(file);
+      setPreparedModel(prepared);
+    } catch (reason) {
+      setPreparedModel(null);
+      setError(reason instanceof Error ? reason.message : 'Không thể phân tích mô hình');
+    } finally {
+      setIsPreparingModel(false);
+    }
+  }, [gateway]);
+
+  const previewDesign = useCallback(async (values: DesignFormValues) => {
+    if (!preparedModel) {
+      setErrorTitle('Chưa phân tích mô hình');
+      setError('Hãy phân tích file RVT trước khi kiểm tra phương án.');
+      return;
+    }
+    setIsPreviewingDesign(true);
+    setError(null);
+    setErrorTitle('Không thể kiểm tra phương án');
+    try {
+      setDesignPreview(await gateway.previewDesign(values, preparedModel));
+    } catch (reason) {
+      setDesignPreview(null);
+      setError(reason instanceof Error ? reason.message : 'Không thể kiểm tra phương án');
+    } finally {
+      setIsPreviewingDesign(false);
+    }
+  }, [gateway, preparedModel]);
+
+  const invalidateDesignPreview = useCallback(() => setDesignPreview(null), []);
+
+  const resetPreparedModel = useCallback(() => {
+    setPreparedModel(null);
+    setDesignPreview(null);
+  }, []);
+
   const submit = useCallback(
     async (values: DesignFormValues) => {
+      if (!preparedModel || !designPreview) {
+        setErrorTitle('Chưa xác nhận phương án');
+        setError('Hãy phân tích model và kiểm tra phương án trước khi tạo Design Master.');
+        return;
+      }
       setIsSubmitting(true);
       setError(null);
       setErrorTitle('Không thể tạo phương án diễn họa');
@@ -30,7 +83,11 @@ export function useStudioJob(gateway: StudioGateway) {
       activeVideoJob.current = null;
       terminalOutputRetries.current = 0;
       try {
-        const created = await gateway.createDesign(values);
+        const created = await gateway.createDesign(
+          values,
+          preparedModel,
+          designPreview.previewToken,
+        );
         activeViewSet.current = created.viewSetId;
         window.localStorage.setItem(ACTIVE_VIEW_SET_KEY, created.viewSetId);
         setJob(created);
@@ -45,7 +102,7 @@ export function useStudioJob(gateway: StudioGateway) {
         setIsSubmitting(false);
       }
     },
-    [gateway],
+    [designPreview, gateway, preparedModel],
   );
 
   const refresh = useCallback(async () => {
@@ -148,7 +205,7 @@ export function useStudioJob(gateway: StudioGateway) {
   }, [gateway, refresh]);
 
   useEffect(() => {
-    if (!job || ['failed', 'human_review'].includes(job.state)) return undefined;
+    if (!job || ['failed', 'human_review', 'design_master_review'].includes(job.state)) return undefined;
     if (job.state === 'completed') {
       if (job.outputs.length || terminalOutputRetries.current >= 5) return undefined;
       terminalOutputRetries.current += 1;
@@ -169,11 +226,19 @@ export function useStudioJob(gateway: StudioGateway) {
     job,
     videoJob,
     isSubmitting,
+    isPreparingModel,
+    isPreviewingDesign,
+    preparedModel,
+    designPreview,
     isSubmittingVideo,
     isSubmittingReview,
     error,
     errorTitle,
     submit,
+    prepareModel,
+    previewDesign,
+    invalidateDesignPreview,
+    resetPreparedModel,
     refresh,
     approve,
     retry,

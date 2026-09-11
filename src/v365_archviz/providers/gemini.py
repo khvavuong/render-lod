@@ -214,14 +214,6 @@ class GeminiImageRenderer:
             provider_request_id=request_id if isinstance(request_id, str) else None,
         )
 
-    @staticmethod
-    def _view_direction(prompt: str) -> str:
-        marker = "VIEW PURPOSE"
-        position = prompt.rfind(marker)
-        if position >= 0:
-            return prompt[position:].strip()
-        return prompt.strip()
-
     def _photoreal_balanced_input(
         self,
         request: ViewConditioningInput,
@@ -229,14 +221,16 @@ class GeminiImageRenderer:
         style_anchor: GeneratedImage | None,
         identity_prompt: str,
     ) -> list[dict[str, str]]:
-        view_direction = self._view_direction(request.prompt)
+        refinement_specification = request.prompt.strip()
         design_authority = identity_prompt.strip() or "Use the approved project Design DNA."
         prompt = (
             "AUTHORITY\n"
             "The BASE RGB is the sole authority for camera, composition, massing, footprint, "
             "building count, roof orientation and continuity, roads, gates, fences, authored "
-            "landscape zones and object placement. Its flat materials, simplified vegetation, "
-            "background, lighting and CGI appearance are not visual-quality references.\n\n"
+            "landscape zones, object placement and major material-color regions. Preserve its "
+            "approved palette hue families and their placement while upgrading flat shader "
+            "response, simplified vegetation, lighting and CGI appearance to photographic "
+            "quality.\n\n"
             "IMMUTABLE GEOMETRY\n"
             "Preserve those elements exactly. Do not add, delete, duplicate, move, crop or "
             "redesign primary or auxiliary buildings and site circulation. Preserve the exact "
@@ -246,10 +240,12 @@ class GeminiImageRenderer:
             "BOUNDED DESIGN FREEDOM\n"
             "Within the existing envelopes, add construction-plausible industrial materials, "
             "facade joints, doors, canopies, drainage, planting texture and sparse correctly "
-            "scaled entourage. Treat the setting as a developed Vietnamese industrial estate "
-            "with rational collector roads, curbs, drainage, divided plots, low grass and sparse "
-            "street-tree rows. Keep authored context buildings as quiet neutral low-detail factory "
-            "massing with reduced contrast and atmospheric fade, not transparent glass boxes. "
+            "scaled entourage. Treat authored site and context geometry as a developed Vietnamese "
+            "industrial estate, refining only visible collector roads, curbs, drainage, divided "
+            "plots, low grass and sparse street-tree rows. Keep authored context buildings as "
+            "quiet neutral low-detail factory massing with reduced contrast and atmospheric fade, "
+            "not transparent glass boxes. Never create context buildings or infrastructure in "
+            "unmarked empty pixels. "
             "Do not invent forest, wilderness, desert, mountains, water, dense urban towers or "
             "rural scenery unless visible in the Base RGB.\n\n"
             "PHOTOGRAPHIC DIRECTION\n"
@@ -261,7 +257,10 @@ class GeminiImageRenderer:
             "result must look captured at a real built site, not exported from architectural "
             "software. Avoid a clean BIM/CGI illustration, miniature/isometric appearance, "
             "futuristic forms, semantic colors, text and invented logos.\n\n"
-            f"{view_direction}"
+            "APPROVED REFINEMENT SPECIFICATION\n"
+            "Apply every applicable rule below. These project rules are not legacy context and "
+            "must not be summarized away:\n"
+            f"{refinement_specification}"
         )
         blocks: list[dict[str, str]] = [
             {"type": "text", "text": prompt},
@@ -278,7 +277,9 @@ class GeminiImageRenderer:
                         "type": "text",
                         "text": (
                             "APPROVED DESIGN MASTER — appearance identity only; never copy its "
-                            "camera, layout or object positions:"
+                            "camera, layout or object positions. If it conflicts with the explicit "
+                            "palette or current Base RGB material regions, the palette and current "
+                            "Base RGB win:"
                         ),
                     },
                     _generated_image_block(style_anchor),
@@ -407,7 +408,15 @@ class GeminiImageRenderer:
             views = tuple(
                 GeneratedView(
                     view_id=view.view_id,
-                    image=self._generate(view, identity_prompt=request.identity_prompt),
+                    image=self._generate(
+                        view,
+                        identity_prompt=request.identity_prompt,
+                        model=(
+                            self._settings.gemini_master_image_model
+                            if view.view_id == request.master_view_id
+                            else None
+                        ),
+                    ),
                 )
                 for view in request.views
             )

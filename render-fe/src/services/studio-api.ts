@@ -4,7 +4,10 @@ import type {
   DesignOptions,
   CertificationState,
   IntentWarning,
+  DesignPreview,
+  ModelDesignCapabilities,
   OutputArtifact,
+  PreparedModel,
   StudioGateway,
   StudioJob,
   StudioVideoJob,
@@ -20,6 +23,15 @@ interface DesignRevisionResponse {
 interface LatestModelResponse {
   model_revision: string;
   ready: boolean;
+  file_name?: string;
+}
+
+interface DesignPreviewResponse {
+  model_revision: string;
+  preview_token: string;
+  normalized_intent: DesignPreview['normalizedIntent'];
+  capabilities: ModelDesignCapabilities;
+  warnings: IntentWarning[];
 }
 
 interface ViewSetResponse {
@@ -132,30 +144,65 @@ export class HttpStudioGateway implements StudioGateway {
     return request<DesignOptions>('/v1/design-options');
   }
 
-  async createDesign(values: DesignFormValues): Promise<StudioJob> {
-    if (!values.modelFile) {
-      throw new Error('Chưa chọn file RVT');
-    }
+  async prepareModel(file: File): Promise<PreparedModel> {
     const model = await request<LatestModelResponse>('/v1/models', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/octet-stream',
-        'X-Filename': encodeURIComponent(values.modelFile.name),
+        'X-Filename': encodeURIComponent(file.name),
       },
-      body: values.modelFile,
+      body: file,
     });
     if (!model.ready) {
       throw new Error(
         `Model ${model.model_revision} đã tải lên nhưng máy chủ chưa cấu hình đầy đủ APS để trích xuất hình học.`,
       );
     }
+    const capabilities = await request<ModelDesignCapabilities>(
+      `/v1/models/${encodeURIComponent(model.model_revision)}/design-capabilities`,
+    );
+    return {
+      modelRevision: model.model_revision,
+      fileName: model.file_name ?? file.name,
+      capabilities,
+    };
+  }
+
+  async previewDesign(values: DesignFormValues, model: PreparedModel): Promise<DesignPreview> {
+    const preview = await request<DesignPreviewResponse>(
+      `/v1/models/${encodeURIComponent(model.modelRevision)}/design-preview`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          project_id: values.projectId,
+          intent: buildUserRenderIntent(values),
+        }),
+      },
+    );
+    return {
+      modelRevision: preview.model_revision,
+      previewToken: preview.preview_token,
+      normalizedIntent: preview.normalized_intent,
+      capabilities: preview.capabilities,
+      warnings: preview.warnings,
+    };
+  }
+
+  async createDesign(
+    values: DesignFormValues,
+    preparedModel?: PreparedModel,
+    previewToken?: string,
+  ): Promise<StudioJob> {
+    if (!preparedModel && !values.modelFile) throw new Error('Chưa chọn file RVT');
+    const model = preparedModel ?? await this.uploadWithoutAnalysis(values.modelFile as File);
     const revision = await request<DesignRevisionResponse>(
       `/v1/projects/${encodeURIComponent(values.projectId)}/design-revisions`,
       {
         method: 'POST',
         body: JSON.stringify({
-          model_revision: model.model_revision,
+          model_revision: model.modelRevision,
           intent: buildUserRenderIntent(values),
+          preview_token: previewToken,
         }),
       },
     );
@@ -164,8 +211,8 @@ export class HttpStudioGateway implements StudioGateway {
       {
         method: 'POST',
         body: JSON.stringify({
-          model_revision: model.model_revision,
-          profile: 'marketing_hero',
+          model_revision: model.modelRevision,
+          profile: values.deliveryQuality === 'preview' ? 'preview_fast' : 'marketing_hero',
           render_profile: 'standard_eevee',
         }),
       },
@@ -174,6 +221,27 @@ export class HttpStudioGateway implements StudioGateway {
       `/v1/view-sets/${encodeURIComponent(job.view_set_id)}/outputs`,
     ).catch(() => ({ outputs: [] }));
     return toJob(job, outputResponse.outputs, revision.warnings);
+  }
+
+  private async uploadWithoutAnalysis(file: File): Promise<PreparedModel> {
+    const model = await request<LatestModelResponse>('/v1/models', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'X-Filename': encodeURIComponent(file.name),
+      },
+      body: file,
+    });
+    if (!model.ready) {
+      throw new Error(
+        `Model ${model.model_revision} đã tải lên nhưng máy chủ chưa cấu hình đầy đủ APS để trích xuất hình học.`,
+      );
+    }
+    return {
+      modelRevision: model.model_revision,
+      fileName: model.file_name ?? file.name,
+      capabilities: { schema_version: '1.0.0', model_revision: model.model_revision, components: [], warnings: [] },
+    };
   }
 
   async getJob(viewSetId: string): Promise<StudioJob> {

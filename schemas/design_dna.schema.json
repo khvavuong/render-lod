@@ -144,6 +144,19 @@
       "additionalProperties": false,
       "description": "User-facing intent that may refine finishes but never override LOD geometry.",
       "properties": {
+        "accent_coverage_percent": {
+          "default": 5,
+          "maximum": 8,
+          "minimum": 3,
+          "title": "Accent Coverage Percent",
+          "type": "integer"
+        },
+        "boundary_kit": {
+          "default": "preserve_model",
+          "minLength": 1,
+          "title": "Boundary Kit",
+          "type": "string"
+        },
         "creative_prompt": {
           "anyOf": [
             {
@@ -160,6 +173,42 @@
         "decor_level": {
           "$ref": "#/$defs/DecorLevel",
           "default": "balanced"
+        },
+        "design_package": {
+          "default": "premium_practical",
+          "minLength": 1,
+          "title": "Design Package",
+          "type": "string"
+        },
+        "envelope_kit": {
+          "default": "profiled_metal_vertical",
+          "minLength": 1,
+          "title": "Envelope Kit",
+          "type": "string"
+        },
+        "facade_rhythm_kit": {
+          "default": "mixed_restrained",
+          "minLength": 1,
+          "title": "Facade Rhythm Kit",
+          "type": "string"
+        },
+        "gate_kit": {
+          "default": "preserve_model",
+          "minLength": 1,
+          "title": "Gate Kit",
+          "type": "string"
+        },
+        "logistics_kit": {
+          "default": "preserve_model",
+          "minLength": 1,
+          "title": "Logistics Kit",
+          "type": "string"
+        },
+        "office_entrance_kit": {
+          "default": "preserve_model",
+          "minLength": 1,
+          "title": "Office Entrance Kit",
+          "type": "string"
         },
         "requested_office_storeys": {
           "anyOf": [
@@ -386,6 +435,12 @@
           "title": "Accent Hex",
           "type": "string"
         },
+        "boundary_hex": {
+          "default": "#626B70",
+          "pattern": "^#[0-9A-Fa-f]{6}$",
+          "title": "Boundary Hex",
+          "type": "string"
+        },
         "glass_hex": {
           "default": "#315263",
           "pattern": "^#[0-9A-Fa-f]{6}$",
@@ -402,6 +457,12 @@
           "default": "#E7E5DF",
           "pattern": "^#[0-9A-Fa-f]{6}$",
           "title": "Primary Hex",
+          "type": "string"
+        },
+        "roof_hex": {
+          "default": "#E8E7E1",
+          "pattern": "^#[0-9A-Fa-f]{6}$",
+          "title": "Roof Hex",
           "type": "string"
         },
         "secondary_hex": {

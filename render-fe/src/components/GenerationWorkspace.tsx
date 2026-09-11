@@ -57,6 +57,7 @@ const STATE_META: Record<WorkflowState, { label: string; percent: number }> = {
   planning_cameras: { label: "Đang lập góc nhìn", percent: 27 },
   rendering_passes: { label: "Đang dựng geometry passes", percent: 28 },
   generating_viewset: { label: "Đang tạo ảnh", percent: 58 },
+  design_master_review: { label: "Chờ duyệt Design Master", percent: 48 },
   validating: { label: "Đang kiểm tra chất lượng", percent: 76 },
   human_review: { label: "Chờ duyệt thiết kế", percent: 84 },
   repairing: { label: "Đang hiệu chỉnh", percent: 67 },
@@ -187,7 +188,9 @@ export function GenerationWorkspace({
       ) ?? [],
     [filter, job],
   );
-  const active = Boolean(job && !["completed", "failed"].includes(job.state));
+  const active = Boolean(
+    job && !["completed", "failed", "human_review", "design_master_review"].includes(job.state),
+  );
   const hasVideo = Boolean(job?.outputs.some((item) => item.kind === "video"));
   const videoActive = Boolean(
     videoJob && !["completed", "failed"].includes(videoJob.state),
@@ -262,6 +265,21 @@ export function GenerationWorkspace({
           action={
             <Button type="primary" loading={submittingReview} onClick={onApprove}>
               Duyệt và hoàn thiện board
+            </Button>
+          }
+        />
+      )}
+
+      {job?.state === "design_master_review" && (
+        <Alert
+          className="review-action-panel"
+          type="info"
+          showIcon
+          message="Duyệt Design Master trước khi sinh toàn bộ view set"
+          description="Hệ thống mới chỉ tạo một ảnh đại diện. Hãy kiểm tra ngôn ngữ facade, mái, màu vật liệu, cổng và hàng rào; chỉ khi duyệt mới phát sinh chi phí cho 5 ảnh còn lại."
+          action={
+            <Button type="primary" loading={submittingReview} onClick={onApprove}>
+              Duyệt và tạo 5 góc còn lại
             </Button>
           }
         />
@@ -354,7 +372,7 @@ export function GenerationWorkspace({
               },
               {
                 color: meta.percent >= 58 ? "green" : "gray",
-                children: "Tạo bộ 6 ảnh đồng nhất",
+                children: "Duyệt Design Master và tạo bộ 6 ảnh đồng nhất",
               },
               {
                 color: meta.percent >= 76 ? "green" : "gray",

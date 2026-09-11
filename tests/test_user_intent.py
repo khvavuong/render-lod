@@ -1,10 +1,25 @@
 from v365_archviz.application.compile_user_intent import CompileUserRenderIntent
-from v365_archviz.domain.render_intent import DESIGN_OPTIONS, UserRenderIntent
+from v365_archviz.domain.design import MaterialPalette
+from v365_archviz.domain.render_intent import (
+    DESIGN_OPTIONS,
+    ComponentCapability,
+    ModelDesignCapabilities,
+    UserRenderIntent,
+)
 
 
 def test_server_catalog_has_unique_versioned_options() -> None:
-    assert DESIGN_OPTIONS.catalog_version == "industrial-intent-v1"
+    assert DESIGN_OPTIONS.catalog_version == "industrial-intent-v2"
     for options in (
+        DESIGN_OPTIONS.design_packages,
+        DESIGN_OPTIONS.envelope_kits,
+        DESIGN_OPTIONS.office_entrance_kits,
+        DESIGN_OPTIONS.facade_rhythm_kits,
+        DESIGN_OPTIONS.logistics_kits,
+        DESIGN_OPTIONS.boundary_kits,
+        DESIGN_OPTIONS.gate_kits,
+        DESIGN_OPTIONS.operating_scenes,
+        DESIGN_OPTIONS.delivery_qualities,
         DESIGN_OPTIONS.styles,
         DESIGN_OPTIONS.decor_levels,
         DESIGN_OPTIONS.landscapes,
@@ -86,3 +101,103 @@ def test_compiler_rejects_instruction_override_text() -> None:
 
     assert compiled.normalized_intent.free_text == "Giữ vật liệu có độ nhám tự nhiên."
     assert compiled.warnings[0].code == "instruction_override_ignored"
+
+
+def test_compiler_preserves_the_exact_custom_material_palette() -> None:
+    palette = MaterialPalette(
+        roof_hex="#F0EFEA",
+        primary_hex="#D45500",
+        secondary_hex="#17324D",
+        glass_hex="#547789",
+        accent_hex="#C9A227",
+        boundary_hex="#59636A",
+        paving_hex="#6B6F72",
+    )
+
+    compiled = CompileUserRenderIntent().execute(
+        "factory-01",
+        UserRenderIntent(material_palette=palette),
+    )
+
+    assert compiled.brief.material_palette == palette
+    assert compiled.normalized_intent.material_palette == palette
+    assert compiled.brief.grammar_version.startswith("industrial-grammar-v6-intent-")
+
+
+def test_compiler_warns_about_an_unrestrained_industrial_palette() -> None:
+    compiled = CompileUserRenderIntent().execute(
+        "factory-01",
+        UserRenderIntent(
+            material_palette=MaterialPalette(
+                roof_hex="#303030",
+                primary_hex="#A92828",
+                secondary_hex="#0A95F9",
+                boundary_hex="#00A8FF",
+            )
+        ),
+    )
+
+    codes = {warning.code for warning in compiled.warnings}
+    assert codes >= {
+        "dark_roof_finish",
+        "saturated_structure_finish",
+        "competing_facade_colors",
+        "saturated_boundary_finish",
+    }
+
+
+def test_semantic_compiler_preserves_unsupported_components_and_never_invents_docks() -> None:
+    capabilities = ModelDesignCapabilities(
+        model_revision="model-01",
+        components=(
+            ComponentCapability(
+                key="office_entrance",
+                label="Văn phòng",
+                supported=True,
+                evidence_count=1,
+                evidence_ids=("office-01",),
+                reason="Có khối văn phòng.",
+            ),
+            ComponentCapability(
+                key="gate",
+                label="Cổng",
+                supported=False,
+                evidence_count=0,
+                reason="Không có cổng.",
+            ),
+            ComponentCapability(
+                key="logistics",
+                label="Logistics",
+                supported=True,
+                evidence_count=1,
+                evidence_ids=("yard-01",),
+                reason="Có service yard.",
+            ),
+            ComponentCapability(
+                key="landscape",
+                label="Cảnh quan",
+                supported=False,
+                evidence_count=0,
+                reason="Không có vùng xanh.",
+            ),
+        ),
+    )
+    compiled = CompileUserRenderIntent().execute(
+        "factory-01",
+        UserRenderIntent(
+            design_package="corporate_identity",
+            office_entrance_kit="framed_glazed_bay",
+            gate_kit="industrial_sliding",
+            logistics_kit="authored_dock_finish",
+            loading_dock_count=12,
+        ),
+        capabilities,
+    )
+
+    assert compiled.normalized_intent.gate_kit.value == "preserve_model"
+    assert compiled.normalized_intent.landscape_preset.value == "preserve_model"
+    assert compiled.brief.loading_docks_per_main_facade == 0
+    assert compiled.brief.add_office_entrances is True
+    assert compiled.brief.design_preferences.requested_office_storeys is None
+    assert compiled.brief.design_preferences.design_package == "corporate_identity"
+    assert "exploratory" not in (compiled.brief.design_preferences.creative_prompt or "")

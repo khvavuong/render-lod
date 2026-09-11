@@ -112,6 +112,7 @@ class WorkflowState(str, Enum):
     PLANNING_CAMERAS = "planning_cameras"
     RENDERING_PASSES = "rendering_passes"
     GENERATING_VIEWSET = "generating_viewset"
+    DESIGN_MASTER_REVIEW = "design_master_review"
     VALIDATING = "validating"
     REPAIRING = "repairing"
     HUMAN_REVIEW = "human_review"

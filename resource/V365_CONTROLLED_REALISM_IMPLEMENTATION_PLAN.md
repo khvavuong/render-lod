@@ -97,13 +97,14 @@ Khi có xung đột:
 Policy phải tồn tại dưới dạng dữ liệu, semantic role và mask. Prompt chỉ mô tả lại policy; prompt
 không phải cơ chế khóa duy nhất.
 
-### 3.2. Preset người dùng
+### 3.2. Input người dùng đã chốt
 
-- `conservative`: ít thay đổi bề mặt, ưu tiên mô hình.
-- `balanced`: mức mặc định; đủ chi tiết và chân thật cho hồ sơ trình bày.
-- `expressive`: tăng tự do trong vùng `BOUNDED`, không nới vùng `LOCKED`.
+Production không còn cho chọn một “creative budget” chung. Người dùng chọn design package và các
+component kit có nghĩa về cấu tạo: envelope, facade rhythm, office entrance, logistics, boundary,
+gate và landscape. Mỗi kit chỉ được bật khi model capability có semantic evidence tương ứng.
 
-Mọi preset dùng cùng hard geometry gates.
+Màu nhận diện bị giới hạn ở 3%, 5% hoặc 8% diện tích facade nhìn thấy. Không có control “số tầng”
+hoặc “số cửa dock”; các giá trị này phải đến từ model, không được dùng làm proxy trang trí.
 
 ## 4. Dữ liệu đầu vào
 
@@ -544,6 +545,17 @@ Routing đề xuất:
 Cost manifest phải tính output, input và retry thực tế; giá tài liệu chỉ là ước lượng lập kế hoạch.
 
 ## 18. Kế hoạch triển khai
+
+### 18.0. Trạng thái baseline ngày 2026-09-11
+
+- Hoàn tất: Photoreal Balanced request contract, six-view camera plan, semantic material QA,
+  Design Master approval gate, image/video flow độc lập và output publishing.
+- Hoàn tất: model capability API, semantic design-kit catalog, form hai bước, deterministic preview
+  token, capability fallback, kit-aware conditioning và Playwright flow.
+- Có baseline: correspondence map, consistency report, repair planning và certification states.
+- Chưa bật mặc định vì cần benchmark có phí: hai master candidate, chained overlap reference và
+  Gemini masked repair. Các mục này không được coi là điều kiện để form production phát sinh chi phí;
+  chúng chỉ được mở khi A/B chứng minh lợi ích.
 
 ### Phase 0 — Baseline và contract
 

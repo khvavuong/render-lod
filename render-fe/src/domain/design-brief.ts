@@ -1,69 +1,86 @@
-import type {
-  DesignFormValues,
-  DesignOptions,
-  UserRenderIntent,
-} from '../types/studio';
+import type { DesignFormValues, DesignOptions, UserRenderIntent } from '../types/studio';
 
-// Resilient labels only. The server catalog replaces these as soon as the application loads.
+const option = (value: string, label: string, description: string, requires_capability?: string) => ({
+  value, label, description, requires_capability,
+});
+
 export const FALLBACK_DESIGN_OPTIONS: DesignOptions = {
   schema_version: '1.0.0',
-  catalog_version: 'fallback-ui-v1',
-  styles: [
-    { value: 'contemporary_industrial', label: 'Công nghiệp đương đại', description: 'Phong cách mặc định.' },
-    { value: 'minimal_industrial', label: 'Tối giản tinh tế', description: 'Facade tối giản.' },
-    { value: 'corporate_industrial', label: 'Nhận diện doanh nghiệp', description: 'Nhấn mạnh nhận diện.' },
-    { value: 'sustainable_industrial', label: 'Công nghiệp xanh', description: 'Thích ứng khí hậu.' },
-    { value: 'refined_high_tech', label: 'High-tech tiết chế', description: 'Chi tiết kỹ thuật.' },
+  catalog_version: 'fallback-industrial-intent-v2',
+  design_packages: [
+    option('premium_practical', 'Thực dụng cao cấp', 'Cân bằng hồ sơ thầu và khả năng thi công.'),
+    option('corporate_identity', 'Nhận diện doanh nghiệp', 'Nhấn tại khối văn phòng và điểm đến.'),
+    option('tropical_industrial', 'Công nghiệp nhiệt đới', 'Giải pháp phù hợp khí hậu Việt Nam.'),
+    option('minimal_logistics', 'Logistics tối giản', 'Ưu tiên vận hành và độ bền.'),
   ],
-  decor_levels: [
-    { value: 'minimal', label: 'Tối giản', description: 'Ít chi tiết.' },
-    { value: 'subtle', label: 'Nhẹ', description: 'Chi tiết nhẹ.' },
-    { value: 'balanced', label: 'Cân bằng', description: 'Mức mặc định.' },
-    { value: 'expressive', label: 'Nổi bật', description: 'Nhiều điểm nhấn hơn.' },
+  envelope_kits: [
+    option('profiled_metal_vertical', 'Tôn đứng công nghiệp', 'Tôn định hình và module thực tế.'),
+    option('sandwich_panel_flat', 'Panel phẳng', 'Panel cách nhiệt với joint kỷ luật.'),
+    option('panel_concrete_plinth', 'Panel + chân bê tông', 'Chân tường chịu va đập.'),
+  ],
+  office_entrance_kits: [
+    option('preserve_model', 'Giữ theo model', 'Không thêm cấu kiện mới.'),
+    option('framed_glazed_bay', 'Khung kính có chiều sâu', 'Điểm đến văn phòng tiết chế.', 'office_entrance'),
+    option('canopy_entry', 'Sảnh mái đón', 'Mái đón thực dụng.', 'office_entrance'),
+    option('climate_screen', 'Lam chắn nắng', 'Giải pháp khí hậu.', 'office_entrance'),
+  ],
+  facade_rhythm_kits: [
+    option('horizontal_restrained', 'Dải ngang tiết chế', 'Giữ khối xưởng liền mạch.'),
+    option('vertical_bays', 'Nhịp đứng', 'Đọc rõ module kết cấu.'),
+    option('mixed_restrained', 'Kết hợp cân bằng', 'Nhịp đứng và dải ngang mảnh.'),
+  ],
+  logistics_kits: [
+    option('preserve_model', 'Giữ theo model', 'Không tự thêm cửa dock.'),
+    option('authored_dock_finish', 'Hoàn thiện vùng dock', 'Chỉ tại vùng có chứng cứ.', 'logistics'),
+  ],
+  boundary_kits: [
+    option('preserve_model', 'Giữ theo model', 'Không phát sinh ranh mới.'),
+    option('mesh_low_plinth', 'Lưới + chân tường thấp', 'Hàng rào thoáng.', 'boundary'),
+    option('vertical_bar', 'Song đứng', 'Hàng rào trung tính.', 'boundary'),
+  ],
+  gate_kits: [
+    option('preserve_model', 'Giữ theo model', 'Không đổi cổng.'),
+    option('industrial_sliding', 'Cổng trượt công nghiệp', 'Tại opening authored.', 'gate'),
+    option('hinged', 'Cổng mở cánh', 'Tại opening authored.', 'gate'),
+  ],
+  operating_scenes: [
+    option('clean', 'Gọn, ít hoạt động', 'Ưu tiên đọc kiến trúc.'),
+    option('active', 'Vận hành vừa phải', 'Người và xe có kiểm soát.'),
+    option('logistics', 'Nhấn vận hành logistics', 'Xe tải chỉ ở service/loading.', 'logistics'),
+  ],
+  delivery_qualities: [
+    option('preview', 'Preview tiết kiệm', 'Duyệt nhanh Design Master.'),
+    option('tender', 'Hồ sơ thầu', 'Chất lượng cao sau khi chốt ý đồ.'),
   ],
   landscapes: [
-    { value: 'tropical_restrained', label: 'Nhiệt đới tiết chế', description: 'Phù hợp khí hậu.' },
-    { value: 'corporate_linear', label: 'Tuyến tính doanh nghiệp', description: 'Cảnh quan có nhịp.' },
-    { value: 'low_maintenance', label: 'Ít bảo trì', description: 'Cây xanh bền vững.' },
-  ],
-  creative_budgets: [
-    { value: 'strict', label: 'Chặt chẽ', description: 'Bám model tối đa.' },
-    { value: 'balanced', label: 'Cân bằng', description: 'Làm đẹp có kiểm soát.' },
-    { value: 'exploratory', label: 'Khám phá', description: 'Tăng biến thể vùng tự do.' },
-  ],
-  loading_dock_policies: [
-    { value: 'preserve_existing', label: 'Giữ theo model', description: 'Không thêm cửa.' },
-    { value: 'suggest_if_missing', label: 'Đề xuất khi thiếu', description: 'Đặt trên facade phù hợp.' },
-    { value: 'exact_on_eligible_facade', label: 'Đúng số lượng', description: 'Theo số lượng yêu cầu.' },
-  ],
-  context_presentations: [
-    { value: 'authored_only', label: 'Chỉ theo model', description: 'Không phát sinh context.' },
-    { value: 'neutral_industrial_massing', label: 'Khối công nghiệp trung tính', description: 'Làm dịu context.' },
+    option('preserve_model', 'Giữ theo model', 'Không mở rộng vùng xanh.'),
+    option('tropical_restrained', 'Nhiệt đới tiết chế', 'Cây phù hợp khí hậu.', 'landscape'),
+    option('corporate_linear', 'Tuyến tính doanh nghiệp', 'Cảnh quan theo nhịp.', 'landscape'),
+    option('low_maintenance', 'Ít bảo trì', 'Cây bền vững.', 'landscape'),
   ],
   realism_presets: [
-    { value: 'documentary_architectural_photo', label: 'Ảnh kiến trúc chân thật', description: 'Gần ảnh chụp.' },
-    { value: 'premium_bid_photo', label: 'Ảnh hồ sơ thầu cao cấp', description: 'Sạch và thuyết phục.' },
+    option('documentary_architectural_photo', 'Ảnh kiến trúc chân thật', 'Gần ảnh chụp hiện trường.'),
+    option('premium_bid_photo', 'Ảnh hồ sơ thầu cao cấp', 'Sạch nhưng vẫn thực tế.'),
   ],
 };
 
 export const DEFAULT_FORM_VALUES: DesignFormValues = {
   projectId: '',
-  stylePreset: 'contemporary_industrial',
+  designPackage: 'premium_practical',
+  envelopeKit: 'profiled_metal_vertical',
+  officeEntranceKit: 'preserve_model',
+  facadeRhythmKit: 'mixed_restrained',
+  logisticsKit: 'preserve_model',
+  boundaryKit: 'preserve_model',
+  gateKit: 'preserve_model',
+  accentCoveragePercent: 5,
+  operatingScene: 'active',
+  deliveryQuality: 'preview',
   palette: {
-    primary: '#ECE9E1',
-    secondary: '#202A31',
-    glass: '#294B5B',
-    accent: '#176B4D',
-    paving: '#74797A',
+    roof: '#E8E7E1', primary: '#ECE9E1', secondary: '#202A31',
+    glass: '#294B5B', accent: '#176B4D', boundary: '#626B70', paving: '#74797A',
   },
-  decorLevel: 'balanced',
-  officeStoreys: 2,
-  loadingDocks: 3,
-  loadingDockPolicy: 'suggest_if_missing',
   landscapePreset: 'tropical_restrained',
-  entourageDensity: 'low',
-  creativeBudget: 'balanced',
-  contextPresentation: 'authored_only',
   realismPreset: 'documentary_architectural_photo',
   time: '09:30',
   creativePrompt: '',
@@ -72,23 +89,27 @@ export const DEFAULT_FORM_VALUES: DesignFormValues = {
 export function buildUserRenderIntent(values: DesignFormValues): UserRenderIntent {
   return {
     schema_version: '1.0.0',
-    style_preset: values.stylePreset,
-    creative_budget: values.creativeBudget,
+    design_package: values.designPackage,
+    envelope_kit: values.envelopeKit,
+    office_entrance_kit: values.officeEntranceKit,
+    facade_rhythm_kit: values.facadeRhythmKit,
+    logistics_kit: values.logisticsKit,
+    boundary_kit: values.boundaryKit,
+    gate_kit: values.gateKit,
+    accent_coverage_percent: values.accentCoveragePercent,
+    operating_scene: values.operatingScene,
+    delivery_quality: values.deliveryQuality,
     material_palette: {
+      roof_hex: values.palette.roof,
       primary_hex: values.palette.primary,
       secondary_hex: values.palette.secondary,
       glass_hex: values.palette.glass,
       accent_hex: values.palette.accent,
+      boundary_hex: values.palette.boundary,
       paving_hex: values.palette.paving,
     },
-    decor_level: values.decorLevel,
-    office_facade_rhythm: values.officeStoreys,
-    loading_dock_policy: values.loadingDockPolicy,
-    loading_dock_count: values.loadingDocks,
     landscape_preset: values.landscapePreset,
-    entourage_density: values.entourageDensity,
     time: values.time,
-    context_presentation: values.contextPresentation,
     realism_preset: values.realismPreset,
     free_text: values.creativePrompt?.trim() || null,
   };

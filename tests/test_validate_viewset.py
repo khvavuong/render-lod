@@ -133,3 +133,79 @@ def test_detects_stale_conditioning_input(tmp_path: Path) -> None:
     report = json.loads(result.report_path.read_text(encoding="utf-8"))
     codes = {finding["code"] for finding in report["views"][0]["findings"]}
     assert "input_hash_mismatch" in codes
+
+
+def test_material_role_evidence_rejects_wrong_facade_color(tmp_path: Path) -> None:
+    output = tmp_path / "output.png"
+    semantic = tmp_path / "semantic.png"
+    semantic_manifest = tmp_path / "semantic_id_manifest.json"
+    Image.new("RGB", (20, 20), "white").save(output)
+    Image.new("RGB", (20, 20), (10, 20, 30)).save(semantic)
+    semantic_manifest.write_text(
+        json.dumps(
+            {
+                "roles": [
+                    {"semantic_role": "primary_facade", "srgb8": [10, 20, 30]},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    palette = {
+        "roof_hex": "#E8E7E1",
+        "primary_hex": "#A92828",
+        "secondary_hex": "#26343D",
+        "glass_hex": "#294B5B",
+        "accent_hex": "#176B4D",
+        "boundary_hex": "#626B70",
+        "paving_hex": "#74797A",
+    }
+
+    evidence = ValidateGeneratedViewSet._material_role_evidence(
+        output,
+        semantic,
+        semantic_manifest,
+        palette,
+    )
+
+    assert evidence["status"] == "fail"
+    assert evidence["failed_roles"] == ["primary_facade"]
+    assert evidence["roles"]["primary_facade"]["match_ratio"] == 0.0
+
+
+def test_material_role_evidence_accepts_approved_facade_color(tmp_path: Path) -> None:
+    output = tmp_path / "output.png"
+    semantic = tmp_path / "semantic.png"
+    semantic_manifest = tmp_path / "semantic_id_manifest.json"
+    Image.new("RGB", (20, 20), "#A92828").save(output)
+    Image.new("RGB", (20, 20), (10, 20, 30)).save(semantic)
+    semantic_manifest.write_text(
+        json.dumps(
+            {
+                "roles": [
+                    {"semantic_role": "primary_facade", "srgb8": [10, 20, 30]},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    palette = {
+        "roof_hex": "#E8E7E1",
+        "primary_hex": "#A92828",
+        "secondary_hex": "#26343D",
+        "glass_hex": "#294B5B",
+        "accent_hex": "#176B4D",
+        "boundary_hex": "#626B70",
+        "paving_hex": "#74797A",
+    }
+
+    evidence = ValidateGeneratedViewSet._material_role_evidence(
+        output,
+        semantic,
+        semantic_manifest,
+        palette,
+    )
+
+    assert evidence["status"] == "pass"
+    assert evidence["failed_roles"] == []
+    assert evidence["roles"]["primary_facade"]["match_ratio"] == 1.0

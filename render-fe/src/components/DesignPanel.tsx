@@ -2,77 +2,110 @@ import {
   ArrowRightOutlined,
   BgColorsOutlined,
   BuildOutlined,
-  BulbOutlined,
+  CheckCircleFilled,
   CloudUploadOutlined,
+  EyeOutlined,
   SettingOutlined,
-} from "@ant-design/icons";
+} from '@ant-design/icons';
 import {
+  Alert,
   Button,
   Card,
   Collapse,
   Flex,
   Form,
   Input,
-  InputNumber,
   Segmented,
   Select,
   Space,
+  Steps,
+  Tag,
   Typography,
   Upload,
-} from "antd";
-import type { UploadFile } from "antd";
-import type { ReactNode } from "react";
-import { useState } from "react";
+} from 'antd';
+import type { UploadFile } from 'antd';
+import type { ReactNode } from 'react';
+import { useMemo, useState } from 'react';
 
-import { DEFAULT_FORM_VALUES } from "../domain/design-brief";
-import type { DesignFormValues, DesignOptions } from "../types/studio";
-import { PaletteEditor } from "./PaletteEditor";
+import { DEFAULT_FORM_VALUES } from '../domain/design-brief';
+import type {
+  DesignFormValues,
+  DesignOption,
+  DesignOptions,
+  DesignPreview,
+  PreparedModel,
+} from '../types/studio';
+import { PaletteEditor } from './PaletteEditor';
 
 interface DesignPanelProps {
   submitting: boolean;
+  preparingModel: boolean;
+  previewingDesign: boolean;
+  preparedModel: PreparedModel | null;
+  designPreview: DesignPreview | null;
   designOptions: DesignOptions;
+  onPrepareModel: (file: File) => void;
+  onPreview: (values: DesignFormValues) => void;
+  onIntentChange: () => void;
+  onModelChange: () => void;
   onSubmit: (values: DesignFormValues) => void;
 }
 
 const MAX_RVT_FILE_BYTES = 2 * 1024 * 1024 * 1024;
 
-const ENTOURAGE_OPTIONS = [
-  { value: "none", label: "Không có" },
-  { value: "low", label: "Ít" },
-  { value: "medium", label: "Vừa phải" },
-  { value: "high", label: "Nhiều" },
-];
-
 function SectionTitle({ icon, title }: { icon: ReactNode; title: string }) {
-  return (
-    <Space size={8} className="section-title">
-      {icon}
-      <Typography.Text strong>{title}</Typography.Text>
-    </Space>
-  );
+  return <Space size={8} className="section-title">{icon}<Typography.Text strong>{title}</Typography.Text></Space>;
 }
 
-export function DesignPanel({ submitting, designOptions, onSubmit }: DesignPanelProps) {
+export function DesignPanel(props: DesignPanelProps) {
+  const {
+    submitting, preparingModel, previewingDesign, preparedModel, designPreview,
+    designOptions, onPrepareModel, onPreview, onIntentChange, onModelChange, onSubmit,
+  } = props;
   const [form] = Form.useForm<DesignFormValues>();
   const [modelFiles, setModelFiles] = useState<UploadFile[]>([]);
   const [modelError, setModelError] = useState<string>();
+  const capabilities = useMemo(
+    () => new Map(preparedModel?.capabilities.components.map((item) => [item.key, item]) ?? []),
+    [preparedModel],
+  );
 
-  const handleSubmit = (values: DesignFormValues) => {
-    const modelFile = modelFiles[0]?.originFileObj;
-    if (!modelFile) {
-      setModelError("Chọn một file Revit trước khi tạo phương án");
+  const constrainedOptions = (items: DesignOption[]) => items.map((item) => ({
+    ...item,
+    disabled: Boolean(item.requires_capability && !capabilities.get(item.requires_capability)?.supported),
+    label: item.requires_capability && !capabilities.get(item.requires_capability)?.supported
+      ? `${item.label} · model chưa hỗ trợ`
+      : item.label,
+  }));
+
+  const currentStep = designPreview ? 2 : preparedModel ? 1 : 0;
+
+  const modelFile = () => modelFiles[0]?.originFileObj;
+
+  const handlePrepare = () => {
+    const file = modelFile();
+    if (!file) {
+      setModelError('Chọn một file Revit trước khi phân tích');
       return;
     }
     setModelError(undefined);
-    onSubmit({
-      ...DEFAULT_FORM_VALUES,
-      ...values,
-      palette: {
-        ...DEFAULT_FORM_VALUES.palette,
-        ...values.palette,
-      },
-      modelFile,
-    });
+    onPrepareModel(file);
+  };
+
+  const handleFinish = (values: DesignFormValues) => {
+    const file = modelFile();
+    if (!file) {
+      setModelError('Chọn một file Revit trước khi tiếp tục');
+      return;
+    }
+    const completeValues = { ...DEFAULT_FORM_VALUES, ...values, modelFile: file };
+    if (!preparedModel) {
+      handlePrepare();
+    } else if (!designPreview) {
+      onPreview(completeValues);
+    } else {
+      onSubmit(completeValues);
+    }
   };
 
   return (
@@ -81,189 +114,151 @@ export function DesignPanel({ submitting, designOptions, onSubmit }: DesignPanel
         form={form}
         layout="vertical"
         initialValues={DEFAULT_FORM_VALUES}
-        onFinish={handleSubmit}
+        onFinish={handleFinish}
+        onValuesChange={() => { if (designPreview) onIntentChange(); }}
         requiredMark={false}
         className="design-form"
       >
+        <Steps
+          size="small"
+          current={currentStep}
+          items={[{ title: 'Model' }, { title: 'Thiết kế' }, { title: 'Xác nhận' }]}
+          className="design-steps"
+        />
         <Flex vertical gap={16}>
-          <Card
-            size="small"
-            title={
-              <SectionTitle icon={<BuildOutlined />} title="Thông tin dự án" />
-            }
-          >
-            <Form.Item
-              label="LOD 100"
-              validateStatus={modelError ? "error" : undefined}
-              help={modelError}
-              required
-            >
+          <Card size="small" title={<SectionTitle icon={<BuildOutlined />} title="01 · Nguồn mô hình" />}>
+            <Form.Item label="Mô hình LOD 100 (.rvt)" validateStatus={modelError ? 'error' : undefined} help={modelError} required>
               <Upload.Dragger
                 accept=".rvt"
                 beforeUpload={(file) => {
-                  if (!file.name.toLowerCase().endsWith(".rvt")) {
-                    setModelError("Chỉ hỗ trợ định dạng .rvt");
+                  if (!file.name.toLowerCase().endsWith('.rvt')) {
+                    setModelError('Chỉ hỗ trợ định dạng .rvt');
                     return Upload.LIST_IGNORE;
                   }
                   if (file.size > MAX_RVT_FILE_BYTES) {
-                    setModelError("Dung lượng file không được vượt quá 2 GiB");
+                    setModelError('Dung lượng file không được vượt quá 2 GiB');
                     return Upload.LIST_IGNORE;
                   }
                   setModelError(undefined);
+                  onModelChange();
                   return false;
                 }}
                 fileList={modelFiles}
                 maxCount={1}
                 multiple={false}
-                onChange={({ fileList }) => setModelFiles(fileList.slice(-1))}
+                onChange={({ fileList }) => {
+                  setModelFiles(fileList.slice(-1));
+                  onModelChange();
+                }}
               >
                 <Flex vertical align="center" gap={2}>
                   <CloudUploadOutlined className="upload-icon" />
-                  <Typography.Text italic>Upload file</Typography.Text>
+                  <Typography.Text>Thả file RVT hoặc bấm để chọn</Typography.Text>
+                  <Typography.Text type="secondary">Hệ thống sẽ đọc cổng, hàng rào, đường và các khối chức năng.</Typography.Text>
                 </Flex>
               </Upload.Dragger>
             </Form.Item>
-            <Form.Item
-              label="Mã dự án"
-              name="projectId"
-              rules={[
-                { required: true, message: "Nhập mã dự án" },
-                {
-                  pattern: /^[A-Za-z0-9][A-Za-z0-9._-]*$/,
-                  message:
-                    "Chỉ dùng chữ, số, dấu chấm, gạch ngang hoặc gạch dưới",
-                },
-              ]}
-            >
+            {!preparedModel && (
+              <Button block onClick={handlePrepare} loading={preparingModel} disabled={!modelFiles.length}>
+                Phân tích cấu kiện có thể thiết kế
+              </Button>
+            )}
+            {preparedModel && (
+              <Flex vertical gap={8}>
+                <Typography.Text type="success"><CheckCircleFilled /> Đã phân tích {preparedModel.fileName}</Typography.Text>
+                <Flex wrap gap={6}>
+                  {preparedModel.capabilities.components.map((item) => (
+                    <Tag key={item.key} color={item.supported ? 'blue' : 'default'}>
+                      {item.label} · {item.supported ? item.evidence_count : 'không có'}
+                    </Tag>
+                  ))}
+                </Flex>
+              </Flex>
+            )}
+            <Form.Item label="Mã dự án" name="projectId" rules={[
+              { required: true, message: 'Nhập mã dự án' },
+              { pattern: /^[A-Za-z0-9][A-Za-z0-9._-]*$/, message: 'Chỉ dùng chữ, số, dấu chấm, gạch ngang hoặc gạch dưới' },
+            ]} className="last-form-item">
               <Input placeholder="Ví dụ: factory-campus-01" />
             </Form.Item>
           </Card>
 
-          <Card
-            size="small"
-            title={
-              <SectionTitle
-                icon={<SettingOutlined />}
-                title="Định hướng kiến trúc"
-              />
-            }
+          <fieldset
+            disabled={!preparedModel}
+            className={`semantic-controls${preparedModel ? '' : ' is-disabled'}`}
           >
-            <Form.Item label="Phong cách" name="stylePreset">
-              <Select options={designOptions.styles} />
-            </Form.Item>
-            <Form.Item label="Mức độ chi tiết mặt đứng" name="decorLevel">
-              <Segmented block options={designOptions.decor_levels} />
-            </Form.Item>
-            <Flex gap={16}>
-              <Form.Item
-                className="flex-field"
-                label="Số tầng"
-                name="officeStoreys"
-                tooltip="Điều khiển nhịp mặt đứng trong envelope của model."
-              >
-                <InputNumber min={1} max={8} className="full-width-control" />
+            <Card size="small" title={<SectionTitle icon={<SettingOutlined />} title="02 · Hệ kiến trúc công nghiệp" />}>
+              <Form.Item label="Gói thiết kế" name="designPackage" tooltip="Một hệ ngôn ngữ đồng nhất cho toàn bộ 6 góc nhìn.">
+                <Select options={designOptions.design_packages} optionRender={(option) => (
+                  <Flex vertical><span>{option.label}</span><Typography.Text type="secondary">{option.data.description}</Typography.Text></Flex>
+                )} />
               </Form.Item>
-              <Form.Item
-                className="flex-field"
-                label="Cửa xuất nhập hàng"
-                name="loadingDocks"
-              >
-                <InputNumber min={0} max={12} className="full-width-control" />
+              <Form.Item label="Hệ bao che" name="envelopeKit"><Select options={designOptions.envelope_kits} /></Form.Item>
+              <Form.Item label="Nhịp mặt đứng" name="facadeRhythmKit"><Segmented block options={designOptions.facade_rhythm_kits} /></Form.Item>
+              <Form.Item label="Lối vào văn phòng" name="officeEntranceKit"><Select options={constrainedOptions(designOptions.office_entrance_kits)} /></Form.Item>
+              <Form.Item label="Khu xuất nhập hàng" name="logisticsKit"><Select options={constrainedOptions(designOptions.logistics_kits)} /></Form.Item>
+              <Form.Item label="Hàng rào" name="boundaryKit"><Select options={constrainedOptions(designOptions.boundary_kits)} /></Form.Item>
+              <Form.Item label="Cổng" name="gateKit"><Select options={constrainedOptions(designOptions.gate_kits)} /></Form.Item>
+              <Form.Item label="Diện tích màu nhận diện tối đa" name="accentCoveragePercent" className="last-form-item">
+                <Segmented block options={[{ label: '3% · Rất nhẹ', value: 3 }, { label: '5% · Cân bằng', value: 5 }, { label: '8% · Rõ nét', value: 8 }]} />
               </Form.Item>
-            </Flex>
-          </Card>
+            </Card>
 
-          <Card
-            size="small"
-            title={
-              <SectionTitle
-                icon={<BgColorsOutlined />}
-                title="Bảng màu vật liệu"
-              />
-            }
-          >
-            <Form.Item name="palette" className="last-form-item">
-              <PaletteEditor />
-            </Form.Item>
-          </Card>
+            <Card size="small" title={<SectionTitle icon={<BgColorsOutlined />} title="03 · Vật liệu và màu" />}>
+              <Typography.Paragraph type="secondary" className="card-intro">
+                Màu được khóa theo vai trò: mái, thân xưởng, chi tiết, kính, nhận diện, hàng rào và paving.
+              </Typography.Paragraph>
+              <Form.Item name="palette" className="last-form-item"><PaletteEditor /></Form.Item>
+            </Card>
 
-          <Collapse
-            items={[
-              {
-                key: "presentation",
-                forceRender: true,
-                label: (
-                  <SectionTitle
-                    icon={<BulbOutlined />}
-                    title="Bối cảnh và trình bày"
-                  />
-                ),
-                children: (
-                  <>
-                    <Form.Item label="Cảnh quan" name="landscapePreset">
-                      <Select options={designOptions.landscapes} />
-                    </Form.Item>
-                    <Form.Item
-                      label="Mật độ người và xe"
-                      name="entourageDensity"
-                    >
-                      <Select options={ENTOURAGE_OPTIONS} />
-                    </Form.Item>
-                    <Form.Item
-                      label="Thời điểm"
-                      name="time"
-                    >
-                      <Input type="time" />
-                    </Form.Item>
-                    <Form.Item label="Mức sáng tạo" name="creativeBudget">
-                      <Select options={designOptions.creative_budgets} />
-                    </Form.Item>
-                    <Form.Item label="Độ chân thật" name="realismPreset">
-                      <Select options={designOptions.realism_presets} />
-                    </Form.Item>
-                    <Form.Item label="Chính sách cửa xuất hàng" name="loadingDockPolicy">
-                      <Select options={designOptions.loading_dock_policies} />
-                    </Form.Item>
-                    <Form.Item
-                      label="Công trình xung quanh"
-                      name="contextPresentation"
-                      className="last-form-item"
-                    >
-                      <Select options={designOptions.context_presentations} />
-                    </Form.Item>
-                  </>
-                ),
-              },
-            ]}
-          />
+            <Collapse items={[{
+              key: 'presentation', forceRender: true,
+              label: <SectionTitle icon={<EyeOutlined />} title="04 · Bối cảnh và chất lượng" />,
+              children: <>
+                <Form.Item label="Cảnh quan" name="landscapePreset"><Select options={constrainedOptions(designOptions.landscapes)} /></Form.Item>
+                <Form.Item label="Hoạt động vận hành" name="operatingScene"><Select options={constrainedOptions(designOptions.operating_scenes)} /></Form.Item>
+                <Form.Item label="Thời điểm" name="time"><Input type="time" /></Form.Item>
+                <Form.Item label="Mục tiêu hình ảnh" name="realismPreset"><Select options={designOptions.realism_presets} /></Form.Item>
+                <Form.Item label="Chất lượng lượt sinh" name="deliveryQuality" className="last-form-item"><Segmented block options={designOptions.delivery_qualities} /></Form.Item>
+              </>,
+            }]} />
 
-          <Card
-            size="small"
-            title={
-              <SectionTitle icon={<BulbOutlined />} title="Yêu cầu bổ sung" />
-            }
-          >
-            <Form.Item name="creativePrompt" className="last-form-item">
-              <Input.TextArea
-                rows={3}
-                maxLength={1000}
-                showCount
-                placeholder="Mô tả ngắn những yêu cầu chưa có trong các lựa chọn trên."
-              />
-            </Form.Item>
-          </Card>
+            <Card size="small" title={<SectionTitle icon={<SettingOutlined />} title="Yêu cầu bổ sung" />}>
+              <Form.Item name="creativePrompt" className="last-form-item">
+                <Input.TextArea rows={3} maxLength={1000} showCount placeholder="Chỉ mô tả ưu tiên về vật liệu, ánh sáng hoặc cảm giác không gian; không yêu cầu đổi hình học." />
+              </Form.Item>
+            </Card>
+          </fieldset>
+
+          {designPreview && (
+            <Alert
+              type={designPreview.warnings.length ? 'warning' : 'success'}
+              showIcon
+              message="Phương án đã được kiểm tra"
+              description={designPreview.warnings.length
+                ? designPreview.warnings.map((item) => item.message).join(' ')
+                : 'Các lựa chọn phù hợp với semantic evidence của model. Có thể tạo Design Master.'}
+            />
+          )}
         </Flex>
 
         <Flex vertical gap={8} className="form-actions">
           <Button
             type="primary"
             htmlType="submit"
-            loading={submitting}
+            loading={preparingModel || previewingDesign || submitting}
             icon={<ArrowRightOutlined />}
             block
           >
-            Tạo phương án diễn họa
+            {!preparedModel ? 'Phân tích model' : !designPreview ? 'Kiểm tra phương án' : 'Tạo Design Master'}
           </Button>
+          <Typography.Text type="secondary" className="action-caption">
+            {!preparedModel
+              ? 'Chưa gọi AI sinh ảnh.'
+              : !designPreview
+                ? 'Preview và kiểm tra rule trước khi phát sinh chi phí.'
+                : 'Chỉ sinh một góc master để duyệt trước 5 góc còn lại.'}
+          </Typography.Text>
         </Flex>
       </Form>
     </aside>

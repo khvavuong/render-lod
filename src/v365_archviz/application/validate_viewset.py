@@ -69,6 +69,7 @@ class ValidateGeneratedViewSet:
                 "geometry": {"status": "review", "code": "evidence_not_available"},
                 "semantic": {"status": "review", "code": "evidence_not_available"},
                 "material": {"status": "review", "code": "evidence_not_available"},
+                "material_roles": {"status": "review", "code": "evidence_not_available"},
                 "camera": camera_evidence.get(
                     camera.view_id,
                     {"status": "review", "code": "conditioning_qa_not_available"},
@@ -192,6 +193,19 @@ class ValidateGeneratedViewSet:
                     if material["status"] == "fail":
                         findings.append(
                             self._finding("error", str(material["code"]), camera.view_id)
+                        )
+                    material_roles = self._material_role_evidence(
+                        image_path,
+                        render_root / camera.view_id / "semantic.png",
+                        render_root / camera.view_id / "semantic_id_manifest.json",
+                        design.material_palette.model_dump(),
+                    )
+                    gate_evidence["material_roles"] = material_roles
+                    if material_roles["status"] == "fail":
+                        findings.append(
+                            self._finding(
+                                "error", str(material_roles["code"]), camera.view_id
+                            )
                         )
 
             references = tuple(
@@ -509,4 +523,100 @@ class ValidateGeneratedViewSet:
             "sample_pixels": sample_count,
             "leakage_ratio": leakage,
             "threshold": maximum_leakage,
+        }
+
+    @staticmethod
+    def _material_role_evidence(
+        output_path: Path,
+        semantic_path: Path,
+        semantic_manifest_path: Path,
+        palette: dict[str, str],
+        *,
+        minimum_pixels: int = 180,
+        minimum_match_ratio: float = 0.30,
+    ) -> dict[str, Any]:
+        """Verify that approved colors occur on their authored semantic material roles."""
+
+        if not semantic_path.is_file() or not semantic_manifest_path.is_file():
+            return {"status": "review", "code": "material_role_input_missing"}
+        try:
+            manifest = json.loads(semantic_manifest_path.read_text(encoding="utf-8"))
+            role_colors = {
+                str(item["semantic_role"]): np.asarray(item["srgb8"], dtype=np.int16)
+                for item in manifest["roles"]
+            }
+            with Image.open(output_path) as source:
+                output = source.convert("RGB")
+                output_hsv = np.asarray(output.convert("HSV"), dtype=np.uint8)
+            with Image.open(semantic_path) as source:
+                semantic = np.asarray(
+                    source.convert("RGB").resize(output.size, Image.Resampling.NEAREST),
+                    dtype=np.int16,
+                )
+        except (OSError, KeyError, TypeError, ValueError, UnidentifiedImageError):
+            return {"status": "fail", "code": "material_role_input_invalid"}
+
+        expected_roles = {
+            "roof": ({"roof"}, palette["roof_hex"]),
+            "primary_facade": (
+                {"primary_facade", "main_shed", "office_block"},
+                palette["primary_hex"],
+            ),
+            "facade_secondary": ({"facade_secondary"}, palette["secondary_hex"]),
+            "glazing": ({"glazing"}, palette["glass_hex"]),
+            "brand_accent": ({"brand_accent"}, palette["accent_hex"]),
+            "site_boundary": (
+                {"site_boundary", "main_entrance", "secondary_entrance"},
+                palette["boundary_hex"],
+            ),
+        }
+        evidence: dict[str, dict[str, Any]] = {}
+        failures: list[str] = []
+        for role, (source_roles, expected_hex) in expected_roles.items():
+            semantic_colors = [
+                role_colors[source_role]
+                for source_role in source_roles
+                if source_role in role_colors
+            ]
+            if not semantic_colors:
+                continue
+            mask = np.zeros(semantic.shape[:2], dtype=np.bool_)
+            for semantic_color in semantic_colors:
+                mask |= np.max(np.abs(semantic - semantic_color), axis=2) <= 20
+            pixel_count = int(np.count_nonzero(mask))
+            if pixel_count < minimum_pixels:
+                continue
+            normalized = expected_hex.lstrip("#")
+            expected_rgb = tuple(
+                int(normalized[index : index + 2], 16) / 255 for index in (0, 2, 4)
+            )
+            expected_hue, expected_saturation, _ = colorsys.rgb_to_hsv(*expected_rgb)
+            pixels = output_hsv[mask]
+            if expected_saturation < 0.12:
+                matches = pixels[:, 1] <= 80
+            else:
+                hue = pixels[:, 0].astype(np.float32)
+                expected_hue_byte = expected_hue * 255
+                hue_distance = np.minimum(
+                    np.abs(hue - expected_hue_byte), 255 - np.abs(hue - expected_hue_byte)
+                )
+                matches = (hue_distance <= 22) & (
+                    pixels[:, 1] >= max(28, expected_saturation * 255 * 0.25)
+                )
+            match_ratio = float(np.count_nonzero(matches)) / pixel_count
+            passed = match_ratio >= minimum_match_ratio
+            evidence[role] = {
+                "status": "pass" if passed else "fail",
+                "expected": expected_hex,
+                "sample_pixels": pixel_count,
+                "match_ratio": match_ratio,
+                "threshold": minimum_match_ratio,
+            }
+            if not passed:
+                failures.append(role)
+        return {
+            "status": "fail" if failures else "pass",
+            "code": "material_role_mismatch" if failures else "material_roles_within_tolerance",
+            "failed_roles": failures,
+            "roles": evidence,
         }

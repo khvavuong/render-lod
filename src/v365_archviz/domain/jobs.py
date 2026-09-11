@@ -33,7 +33,16 @@ _ALLOWED_TRANSITIONS: dict[WorkflowState, frozenset[WorkflowState]] = {
     WorkflowState.RENDERING_PASSES: frozenset(
         {WorkflowState.GENERATING_VIEWSET, WorkflowState.FAILED}
     ),
-    WorkflowState.GENERATING_VIEWSET: frozenset({WorkflowState.VALIDATING, WorkflowState.FAILED}),
+    WorkflowState.GENERATING_VIEWSET: frozenset(
+        {
+            WorkflowState.DESIGN_MASTER_REVIEW,
+            WorkflowState.VALIDATING,
+            WorkflowState.FAILED,
+        }
+    ),
+    WorkflowState.DESIGN_MASTER_REVIEW: frozenset(
+        {WorkflowState.GENERATING_VIEWSET, WorkflowState.FAILED}
+    ),
     WorkflowState.VALIDATING: frozenset(
         {
             WorkflowState.REPAIRING,

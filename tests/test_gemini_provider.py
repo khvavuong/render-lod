@@ -161,6 +161,7 @@ def test_photoreal_balanced_uses_only_clean_authority_inputs(tmp_path: Path) -> 
         prompt = labels[0]
         assert "AUTHORITY" in prompt
         assert "PHOTOGRAPHIC DIRECTION" in prompt
+        assert "COLOR ROLE CONTRACT — KEEP THE APPROVED PALETTE" in prompt
         assert "VIEW PURPOSE — TEST" in prompt
         assert any("BASE RGB" in label for label in labels)
         assert any("REALISM REFERENCE" in label for label in labels)
@@ -186,7 +187,10 @@ def test_photoreal_balanced_uses_only_clean_authority_inputs(tmp_path: Path) -> 
         instance_id=image,
         semantic=image,
         edges=image,
-        prompt="legacy prompt that must not leak\n\nVIEW PURPOSE — TEST",
+        prompt=(
+            "COLOR ROLE CONTRACT — KEEP THE APPROVED PALETTE\n\n"
+            "VIEW PURPOSE — TEST"
+        ),
         reference_images=(reference, image),
     )
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
@@ -318,6 +322,52 @@ def test_viewset_can_route_only_the_master_to_a_quality_model(tmp_path: Path) ->
         renderer.generate_view_set(generation_request)
 
     assert models == ["gemini-3-pro-image", "gemini-3.1-flash-image"]
+
+
+def test_single_design_master_uses_the_quality_model(tmp_path: Path) -> None:
+    image = tmp_path / "pass.png"
+    Image.new("RGB", (2, 2), "white").save(image)
+    models: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = __import__("json").loads(request.content)
+        models.append(body["model"])
+        return httpx.Response(
+            200,
+            json={
+                "id": "interaction-master",
+                "output": {
+                    "mime_type": "image/png",
+                    "data": base64.b64encode(b"master-output").decode(),
+                },
+            },
+        )
+
+    master = ViewConditioningInput(
+        view_id="view-04",
+        base_rgb=image,
+        depth=image,
+        instance_id=image,
+        semantic=image,
+        edges=image,
+        prompt="VIEW PURPOSE — DESIGN MASTER",
+    )
+    generation_request = ViewSetGenerationInput(
+        request_id="generation-master",
+        project_id="project-1",
+        model_revision="model-1",
+        design_revision="design-1",
+        view_set_id="views-1",
+        profile="marketing_hero",
+        views=(master,),
+        master_view_id="view-04",
+    )
+    settings = replace(_settings(), gemini_master_image_model="gemini-3-pro-image")
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        GeminiImageRenderer(settings, client=client).generate_view_set(generation_request)
+
+    assert models == ["gemini-3-pro-image"]
 
 
 def test_viewset_reuses_an_external_approved_master(tmp_path: Path) -> None:

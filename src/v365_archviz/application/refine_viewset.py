@@ -101,12 +101,49 @@ def _identity_contract(design: DesignDNA) -> tuple[dict[str, object], str]:
     entrance_facades = [facade for facade in focus_facades if facade.office_entrance is not None]
     loading_dock_count = sum(len(facade.loading_docks) for facade in focus_facades)
     panel_modules = sorted({facade.panel_module_m for facade in focus_facades})
+    articulation = focus_facades[0].articulation if focus_facades else None
+    articulation_grammar = (
+        f"plinth={articulation.plinth_height_m:g}m; top band="
+        f"{articulation.parapet_band_height_m:g}m; feature-frame depth="
+        f"{articulation.feature_frame_depth_m:g}m; entrance canopy="
+        f"{articulation.entrance_canopy_projection_m:g}m; vertical fins="
+        f"{articulation.vertical_fin_count}; accent interval="
+        f"{articulation.accent_bay_interval}. "
+        if articulation is not None
+        else ""
+    )
     facade_grammar = (
         f"cladding module={','.join(f'{value:g}m' for value in panel_modules) or 'model-derived'}; "
         f"office entrance bays={len(entrance_facades)}; loading docks={loading_dock_count}. "
+        f"{articulation_grammar}"
         "Confine office glazing and feature fins to authored entrance/design-detail bays; do not "
         "spread an office glazing ratio across plain factory elevations or shed end walls."
     )
+    material_role_contract = {
+        "continuous_profiled_metal_roof": palette["roof_hex"],
+        "dominant_focus_wall_cladding": palette["primary_hex"],
+        "plinth_structure_eaves_doors_and_docks": palette["secondary_hex"],
+        "authored_glazing_only": palette["glass_hex"],
+        (
+            "limited_entrance_and_signage_under_"
+            f"{design.design_preferences.accent_coverage_percent}_percent"
+        ): palette["accent_hex"],
+        "continuous_fence_and_gate": palette["boundary_hex"],
+        "authored_roads_and_yards": palette["paving_hex"],
+    }
+    site_boundary_contract = {
+        "geometry": "authored boundary and gate openings only",
+        "fence_family": design.design_preferences.boundary_kit,
+        "gate_family": design.design_preferences.gate_kit,
+        "consistency": "same height, leaf count, spacing, material and color in every view",
+        "prohibited": "floating portal, disconnected frame, duplicate or relocated gate",
+    }
+    context_contract = {
+        "mode": design.site_design.surrounding_context_mode,
+        "allowed_geometry": "only context geometry visible in base RGB or semantic passes",
+        "free_pixels": "sky, atmospheric continuity and neutral ground only",
+        "prohibited": "invented warehouse, road, plot, fence or copied context object",
+    }
     contract: dict[str, object] = {
         "project_id": design.project_id,
         "design_revision": design.design_revision,
@@ -116,6 +153,20 @@ def _identity_contract(design: DesignDNA) -> tuple[dict[str, object], str]:
         "presentation": design.presentation.model_dump(),
         "roof_assemblies": roof_assemblies,
         "solar_panel_building_ids": solar_panel_building_ids,
+        "facade_grammar": facade_grammar,
+        "material_role_contract": material_role_contract,
+        "site_boundary_contract": site_boundary_contract,
+        "context_contract": context_contract,
+        "factory_design_system": {
+            "package": design.design_preferences.design_package,
+            "envelope": design.design_preferences.envelope_kit,
+            "facade_rhythm": design.design_preferences.facade_rhythm_kit,
+            "office_entrance": design.design_preferences.office_entrance_kit,
+            "logistics": design.design_preferences.logistics_kit,
+            "boundary": design.design_preferences.boundary_kit,
+            "gate": design.design_preferences.gate_kit,
+            "accent_coverage_percent": design.design_preferences.accent_coverage_percent,
+        },
     }
     prompt = (
         "PROJECT DESIGN IDENTITY — immutable across all six cameras: "
@@ -128,10 +179,13 @@ def _identity_contract(design: DesignDNA) -> tuple[dict[str, object], str]:
         f"white balance={environment['white_balance_k']}K. "
         f"landscape={design.presentation.landscape_character}; "
         f"paving={design.presentation.paving_character}; "
-        f"decor={design.design_preferences.decor_level.value}; "
+        f"factory design system={contract['factory_design_system']}; "
         f"user direction={design.design_preferences.creative_prompt or 'none'}. "
         f"solar panels={solar_policy}. "
         f"facade grammar={facade_grammar} "
+        f"material roles={material_role_contract}. "
+        f"site boundary family={site_boundary_contract}. "
+        f"context policy={context_contract}. "
         "Use one restrained, buildable facade family, roof finish, fence/gate family, landscape "
         "vocabulary, weather, exposure and color grade throughout the view set. The Design Master "
         "controls appearance only; each current base render controls geometry and camera."
@@ -140,7 +194,7 @@ def _identity_contract(design: DesignDNA) -> tuple[dict[str, object], str]:
 
 
 def _select_master_view_id(render_root: Path, cameras: tuple[Camera, ...]) -> str:
-    """Choose an overview with useful site coverage without relying on a view identifier."""
+    """Choose the strongest visible design-identity view, falling back to an overview."""
 
     evidence: dict[str, dict[str, object]] = {}
     report_path = render_root / "conditioning_qa.json"
@@ -155,7 +209,7 @@ def _select_master_view_id(render_root: Path, cameras: tuple[Camera, ...]) -> st
         except (OSError, json.JSONDecodeError, KeyError, TypeError):
             evidence = {}
 
-    role_priority = {
+    fallback_priority = {
         ViewRole.OVERALL: 6.0,
         ViewRole.CONTEXT: 5.0,
         ViewRole.DETAIL: 4.0,
@@ -163,22 +217,38 @@ def _select_master_view_id(render_root: Path, cameras: tuple[Camera, ...]) -> st
         ViewRole.HERO: 2.0,
         ViewRole.LOADING_DETAIL: 1.0,
     }
+    identity_bonus = {
+        ViewRole.DETAIL: 8.0,
+        ViewRole.OFFICE_HERO: 7.0,
+        ViewRole.HERO: 6.0,
+        ViewRole.OVERALL: 4.0,
+        ViewRole.CONTEXT: 3.0,
+        ViewRole.LOADING_DETAIL: 2.0,
+    }
 
     def score(camera: Camera) -> tuple[float, str]:
         view_id = camera.view_id
         role = camera.role
         item = evidence.get(view_id, {})
-        values = (
-            item.get(name)
-            for name in (
-                "focus_coverage",
-                "circulation_coverage",
-                "context_coverage",
-            )
+        if not item:
+            return fallback_priority.get(role, 0.0), view_id
+
+        def numeric(name: str) -> float:
+            value = item.get(name, 0.0)
+            return float(value) if isinstance(value, (int, float)) else 0.0
+
+        focus = numeric("focus_coverage")
+        circulation = numeric("circulation_coverage")
+        context = numeric("context_coverage")
+        passed = 5.0 if item.get("status") == "pass" else -100.0
+        return (
+            focus * 100.0
+            + circulation * 15.0
+            + context * 5.0
+            + identity_bonus.get(role, 0.0)
+            + passed,
+            view_id,
         )
-        coverage = sum(float(value) for value in values if isinstance(value, (int, float)))
-        passed = 1.0 if item.get("status") == "pass" else 0.0
-        return role_priority.get(role, 0.0) * 10.0 + passed + coverage, view_id
 
     return max(cameras, key=score).view_id
 
@@ -427,7 +497,11 @@ class RefineViewSet:
             "reference_roles": ["quality_only" for _ in reference_images],
             "design_identity_pack": str(identity_pack_path),
             "master_view_id": master_view_id,
-            "generated_view_ids": [camera.view_id for camera in selected_cameras],
+            "generated_view_ids": [
+                camera.view_id
+                for camera in view_set.cameras
+                if (output_directory / camera.view_id / "generation_manifest.json").is_file()
+            ],
             "resumed_from_approved_master": approved_master_path is not None,
             "approved_master_ref": (
                 str(approved_master_path) if approved_master_path is not None else None

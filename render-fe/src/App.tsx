@@ -27,11 +27,19 @@ function StudioShell({ gateway }: Required<AppProps>) {
     job,
     videoJob,
     isSubmitting,
+    isPreparingModel,
+    isPreviewingDesign,
+    preparedModel,
+    designPreview,
     isSubmittingVideo,
     isSubmittingReview,
     error,
     errorTitle,
     submit,
+    prepareModel,
+    previewDesign,
+    invalidateDesignPreview,
+    resetPreparedModel,
     refresh,
     approve,
     retry,
@@ -90,7 +98,15 @@ function StudioShell({ gateway }: Required<AppProps>) {
         <div className="studio-layout">
           <DesignPanel
             submitting={isSubmitting}
+            preparingModel={isPreparingModel}
+            previewingDesign={isPreviewingDesign}
+            preparedModel={preparedModel}
+            designPreview={designPreview}
             designOptions={designOptions}
+            onPrepareModel={(file) => void prepareModel(file)}
+            onPreview={(values) => void previewDesign(values)}
+            onIntentChange={invalidateDesignPreview}
+            onModelChange={resetPreparedModel}
             onSubmit={(values) => void submit(values)}
           />
           <GenerationWorkspace

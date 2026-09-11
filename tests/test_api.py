@@ -30,7 +30,9 @@ def test_design_options_are_served_from_a_versioned_backend_catalog() -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["catalog_version"] == "industrial-intent-v1"
+    assert payload["catalog_version"] == "industrial-intent-v2"
+    assert payload["design_packages"]
+    assert payload["gate_kits"]
     assert {item["value"] for item in payload["styles"]} >= {
         "contemporary_industrial",
         "corporate_industrial",
@@ -113,6 +115,57 @@ def test_capabilities_never_expose_credentials(monkeypatch) -> None:  # type: ig
     assert response.json()["openai_image_generation"] is True
     assert "secret-value" not in response.text
     assert "openai-secret-value" not in response.text
+
+
+def test_model_capabilities_and_preview_are_semantic_evidence_gated(
+    tmp_path,
+    monkeypatch,
+    valid_scene: CanonicalScene,  # type: ignore[no-untyped-def]
+) -> None:
+    monkeypatch.setenv("V365_ARTIFACT_DIR", str(tmp_path))
+    model_revision = "capability-model"
+    scene_path = tmp_path / "scenes" / model_revision / "canonical_scene.json"
+    scene_path.parent.mkdir(parents=True)
+    scene_path.write_text(valid_scene.model_dump_json(), encoding="utf-8")
+
+    capabilities = client.get(f"/v1/models/{model_revision}/design-capabilities")
+    assert capabilities.status_code == 200
+    by_key = {item["key"]: item for item in capabilities.json()["components"]}
+    assert by_key["envelope"]["supported"] is True
+    assert by_key["office_entrance"]["supported"] is True
+    assert by_key["gate"]["supported"] is False
+
+    preview = client.post(
+        f"/v1/models/{model_revision}/design-preview",
+        json={
+            "project_id": "factory-01",
+            "intent": {
+                "gate_kit": "industrial_sliding",
+                "office_entrance_kit": "framed_glazed_bay",
+            },
+        },
+    )
+    assert preview.status_code == 200
+    payload = preview.json()
+    assert len(payload["preview_token"]) == 64
+    assert payload["normalized_intent"]["gate_kit"] == "preserve_model"
+    assert payload["normalized_intent"]["office_entrance_kit"] == "framed_glazed_bay"
+    assert {warning["field"] for warning in payload["warnings"]} >= {"gate_kit"}
+
+    stale = client.post(
+        "/v1/projects/factory-01/design-revisions",
+        json={
+            "model_revision": model_revision,
+            "preview_token": payload["preview_token"],
+            "intent": {
+                "gate_kit": "industrial_sliding",
+                "office_entrance_kit": "framed_glazed_bay",
+                "accent_coverage_percent": 8,
+            },
+        },
+    )
+    assert stale.status_code == 409
+    assert "changed after preview" in stale.json()["detail"]
 
 
 def test_design_revision_and_view_set_are_idempotent(
@@ -227,6 +280,53 @@ def test_review_approval_resumes_board_worker(tmp_path, monkeypatch) -> None:  #
     assert dispatched == ["job-review"]
 
 
+def test_design_master_approval_resumes_remaining_view_generation(
+    tmp_path, monkeypatch  # type: ignore[no-untyped-def]
+) -> None:
+    monkeypatch.setenv("V365_ARTIFACT_DIR", str(tmp_path))
+    monkeypatch.setenv("V365_ENABLE_LOCAL_WORKER", "1")
+    dispatched: list[str] = []
+    monkeypatch.setattr(
+        "v365_archviz.api._generation_dispatcher.submit",
+        lambda job_id: dispatched.append(job_id) or True,
+    )
+    repository = LocalJobRepository(tmp_path / "metadata")
+    job = GenerationJob.create(
+        job_id="job-master-review",
+        idempotency_key="key-master-review",
+        project_id="project",
+        model_revision="model",
+        design_revision="design",
+        view_set_id="view-set-master-review",
+        profile=GenerationProfile.MARKETING_HERO,
+        initial_state=WorkflowState.GENERATING_VIEWSET,
+    ).transition(WorkflowState.DESIGN_MASTER_REVIEW)
+    repository.create_or_get(job)
+    generated = tmp_path / "generated" / "model" / "design"
+    master = generated / "view-04" / "refined.jpg"
+    master.parent.mkdir(parents=True)
+    master.write_bytes(b"master-image")
+    review = generated / "design_master_review.json"
+    review.write_text(
+        json.dumps(
+            {
+                "status": "pending",
+                "approved": False,
+                "master_view_id": "view-04",
+                "master_image_ref": str(master),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    response = client.post("/v1/view-sets/view-set-master-review/approve")
+
+    assert response.status_code == 202
+    assert response.json()["state"] == "generating_viewset"
+    assert json.loads(review.read_text())["approved"] is True
+    assert dispatched == ["job-master-review"]
+
+
 def test_failed_job_retries_from_persisted_generated_checkpoint(
     tmp_path, monkeypatch
 ) -> None:  # type: ignore[no-untyped-def]
@@ -291,7 +391,7 @@ def test_design_revision_compiles_safe_user_intent(
 
     assert response.status_code == 201
     payload = response.json()
-    assert payload["preset_catalog_version"] == "industrial-intent-v1"
+    assert payload["preset_catalog_version"] == "industrial-intent-v2"
     assert payload["normalized_intent"]["free_text"] == (
         "Ưu tiên tôn có độ nhám và ánh sáng tự nhiên."
     )

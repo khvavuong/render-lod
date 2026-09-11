@@ -22,10 +22,12 @@ class Entrance(DomainModel):
 
 
 class MaterialPalette(DomainModel):
+    roof_hex: str = Field(default="#E8E7E1", pattern=r"^#[0-9A-Fa-f]{6}$")
     primary_hex: str = Field(default="#E7E5DF", pattern=r"^#[0-9A-Fa-f]{6}$")
     secondary_hex: str = Field(default="#252B31", pattern=r"^#[0-9A-Fa-f]{6}$")
     glass_hex: str = Field(default="#315263", pattern=r"^#[0-9A-Fa-f]{6}$")
     accent_hex: str = Field(default="#2F6B4F", pattern=r"^#[0-9A-Fa-f]{6}$")
+    boundary_hex: str = Field(default="#626B70", pattern=r"^#[0-9A-Fa-f]{6}$")
     paving_hex: str = Field(default="#777B7A", pattern=r"^#[0-9A-Fa-f]{6}$")
 
 
@@ -100,6 +102,14 @@ class DesignPreferences(DomainModel):
     decor_level: DecorLevel = DecorLevel.BALANCED
     requested_office_storeys: int | None = Field(default=None, ge=1, le=8)
     creative_prompt: str | None = Field(default=None, max_length=1000)
+    design_package: str = Field(default="premium_practical", min_length=1)
+    envelope_kit: str = Field(default="profiled_metal_vertical", min_length=1)
+    office_entrance_kit: str = Field(default="preserve_model", min_length=1)
+    facade_rhythm_kit: str = Field(default="mixed_restrained", min_length=1)
+    logistics_kit: str = Field(default="preserve_model", min_length=1)
+    boundary_kit: str = Field(default="preserve_model", min_length=1)
+    gate_kit: str = Field(default="preserve_model", min_length=1)
+    accent_coverage_percent: int = Field(default=5, ge=3, le=8)
 
 
 class BuildingDesign(DomainModel):

@@ -305,6 +305,8 @@ Các endpoint control plane hiện có:
 - `GET /v1/system/capabilities`
 - `GET /v1/models/latest`
 - `POST /v1/models` (upload và kiểm tra file RVT)
+- `GET /v1/models/{model_revision}/design-capabilities`
+- `POST /v1/models/{model_revision}/design-preview`
 - `GET /v1/brand/logo`
 - `POST /v1/projects/{project_id}/design-revisions`
 - `POST /v1/design-revisions/{design_revision}/view-sets`
@@ -322,19 +324,32 @@ Các endpoint control plane hiện có:
 
 ## Render Studio frontend
 
-Frontend React + Ant Design nằm trong `render-fe/`. Giao diện hai panel nhận file RVT và
-gửi phong cách, palette, mức decor, nhịp tầng văn phòng, loading dock, cảnh quan, realism và prompt
-tự do dưới contract `UserRenderIntentV1`. Frontend chỉ gửi enum/value; backend lấy định nghĩa từ
-preset catalog, lọc yêu cầu xung đột geometry rồi compile thành `DesignBrief` và `DesignDNA` có
-revision. File được kiểm tra và lưu content-addressed theo SHA. Revision mới được tự động dịch
+Frontend React + Ant Design nằm trong `render-fe/`. Giao diện hai panel dùng flow ba gate:
+phân tích model, kiểm tra phương án, rồi mới tạo Design Master. Sau upload, backend trả capability
+có semantic evidence cho envelope, office entrance, logistics, boundary, gate, landscape,
+circulation và roof; UI chỉ mở component kit mà model hỗ trợ. Form dùng design package, hệ bao che,
+nhịp facade, kit văn phòng/logistics/cổng/hàng rào, giới hạn accent 3/5/8%, palette, bối cảnh vận
+hành, realism và prompt tự do. Không còn dùng số tầng hoặc số dock như một control trang trí.
+
+Frontend chỉ gửi enum/value; backend lấy định nghĩa từ preset catalog, lọc yêu cầu xung đột geometry
+rồi compile thành `DesignBrief` và `DesignDNA` có revision. Bước preview trả normalized intent,
+cảnh báo và token SHA-256; thay đổi form sau preview buộc kiểm tra lại trước khi sinh ảnh. File được
+kiểm tra và lưu content-addressed theo SHA. Revision mới được tự động dịch
 RVT sang IFC bằng APS rồi canonicalize trong luồng upload; revision đã xử lý sẽ dùng lại Canonical
 Scene. Mái, đường, cổng, hàng rào, massing và ranh cây xanh không nằm trong quyền override của form.
+Palette được tách thành đúng vai trò mái, thân nhà, kết cấu, kính, điểm nhấn, boundary và paving;
+UI có preset công nghiệp, preview tỷ lệ màu, cảnh báo phối màu không phù hợp và nút cân bằng có chủ
+đích. Màu mái/cổng không còn kế thừa màu facade hoặc accent.
 Panel đầu ra poll trạng thái job, hiển thị sáu view, board và showreel trực tiếp từ artifact API.
 Nếu prompt tự do cố thay đổi vùng khóa, phần đó bị bỏ qua và UI nhận notification giải thích.
 View set và ảnh hiện tại được lưu trong trình duyệt để tiếp tục theo dõi sau khi reload. Nếu QA
 tự động không đạt nhưng sáu ảnh hợp lệ đã tồn tại, job chuyển sang `human_review`: ảnh vẫn hiển
 thị đầy đủ và board/video chỉ được mở khóa sau khi người dùng duyệt. Lỗi kỹ thuật chuyển sang
 `failed` và có thể tiếp tục từ checkpoint gần nhất bằng nút retry, tránh gọi lại AI không cần thiết.
+Trước giai đoạn sáu ảnh, worker chỉ sinh một Design Master bằng camera có coverage tốt nhất rồi dừng
+ở `design_master_review`. Người dùng kiểm tra mái, facade, màu, cổng và hàng rào trên ảnh này; nút
+**Duyệt và tạo 5 góc còn lại** mới tiếp tục gọi image provider. Nếu master sai, năm lượt sinh còn
+lại chưa phát sinh.
 
 Chạy backend và frontend ở hai terminal:
 
@@ -361,8 +376,9 @@ make fe-build
 ```
 
 `fe-e2e` chạy luồng trình duyệt Chromium bằng Playwright với API được cô lập, vì vậy không gọi
-Gemini/Veo và không phát sinh chi phí. Khi dùng giao diện thật, nhập mã dự án, chọn phong cách,
-mức chi tiết, màu sắc và bối cảnh, thêm yêu cầu tự do nếu cần rồi bấm **Tạo phương án diễn họa**.
+Gemini/Veo và không phát sinh chi phí. Khi dùng giao diện thật: upload RVT, bấm **Phân tích cấu kiện
+có thể thiết kế**, nhập mã dự án và chọn các kit được mở, bấm **Kiểm tra phương án**, sau đó bấm
+**Tạo Design Master**.
 Frontend upload và khóa đúng revision của file được chọn, sau đó theo dõi job và cập nhật
 ảnh ở panel phải; video chỉ xuất hiện sau yêu cầu riêng có xác nhận chi phí. Nếu máy chủ thiếu cấu
 hình APS, giao diện dừng an toàn trước khi phát sinh tác vụ sinh ảnh.

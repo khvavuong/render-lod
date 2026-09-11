@@ -231,10 +231,12 @@ def _linear_channel_to_srgb8(value: float) -> int:
 
 def _palette(design_data: dict | None) -> dict[str, str]:
     defaults = {
+        "roof_hex": "#E8E7E1",
         "primary_hex": "#E7E5DF",
         "secondary_hex": "#252B31",
         "glass_hex": "#315263",
         "accent_hex": "#2F6B4F",
+        "boundary_hex": "#626B70",
         "paving_hex": "#777B7A",
     }
     if design_data:
@@ -317,9 +319,11 @@ def build_materials(
         "secondary_entrance": material(
             "secondary_entrance", _hex_color(palette["secondary_hex"]), 0.25, 0.42
         ),
-        "site_boundary": material("site_boundary", (0.22, 0.24, 0.24, 1), 0.15, 0.55),
+        "site_boundary": material(
+            "site_boundary", _hex_color(palette["boundary_hex"]), 0.15, 0.55
+        ),
         "loading_zone": resolved("loading_zone", _hex_color(palette["paving_hex"]), 0.0, 0.75),
-        "roof": resolved("roof", (0.62, 0.66, 0.68, 1), 0.48, 0.28),
+        "roof": resolved("roof", _hex_color(palette["roof_hex"]), 0.48, 0.28),
         "primary_facade": resolved("primary_facade", _hex_color(palette["primary_hex"]), 0.35, 0.3),
         # A restrained frosted proxy keeps neighbouring factories legible but secondary. The
         # minimum opacity retains contact shadows and avoids floating/ghost geometry.
@@ -433,6 +437,7 @@ def _detail_box(
     depth: float,
     detail_material,
     pass_index: int,
+    semantic_role: str | None = None,
 ) -> None:
     frame = surface["frame"]
     origin = Vector(frame["origin"])
@@ -446,7 +451,20 @@ def _detail_box(
         ((u_axis, width), (v_axis, height), (normal, depth)),
         detail_material,
         pass_index,
+        semantic_role=semantic_role,
     )
+
+
+def _material_semantic_role(detail_material) -> str:
+    material_role = detail_material.name.split(".", maxsplit=1)[0]
+    return {
+        "facade_accent": "brand_accent",
+        "office_glass": "glazing",
+        "facade_secondary": "facade_secondary",
+        "loading_dock": "facade_secondary",
+        "door_shutter": "facade_secondary",
+        "panel_seam": "facade_secondary",
+    }.get(material_role, "design_detail")
 
 
 def _oriented_box(
@@ -455,7 +473,7 @@ def _oriented_box(
     axes_and_sizes: tuple,
     detail_material,
     pass_index: int,
-    semantic_role: str = "design_detail",
+    semantic_role: str | None = None,
 ):
     first_axis, first_size = axes_and_sizes[0]
     second_axis, second_size = axes_and_sizes[1]
@@ -491,7 +509,7 @@ def _oriented_box(
     mesh.update()
     obj = bpy.data.objects.new(name, mesh)
     obj.pass_index = pass_index
-    obj["semantic_role"] = semantic_role
+    obj["semantic_role"] = semantic_role or _material_semantic_role(detail_material)
     obj.data.materials.append(detail_material)
     bpy.context.collection.objects.link(obj)
     return obj
@@ -1106,6 +1124,9 @@ def batch_noncanonical_details(base_object_count: int) -> None:
 
     for role in (
         "design_detail",
+        "facade_secondary",
+        "glazing",
+        "brand_accent",
         "roof",
         "site_boundary",
         "context_building",
@@ -1157,6 +1178,7 @@ def _create_site_fence(
     scene_data: dict,
     material,
     start_index: int,
+    boundary_kit: str = "preserve_model",
 ) -> int:
     """Build a model-derived perimeter fence, preserving openings at authored gates."""
 
@@ -1208,10 +1230,11 @@ def _create_site_fence(
                     else Vector((fixed, run_center, ground_z))
                 )
                 index += 1
+                plinth_height = 0.4 if boundary_kit == "mesh_low_plinth" else 0.22
                 _oriented_box(
                     f"{boundary['scene_element_id']}:{side_name}-{run_number}:plinth",
-                    center + up * 0.20,
-                    ((axis, length), (cross, 0.22), (up, 0.40)),
+                    center + up * (plinth_height / 2),
+                    ((axis, length), (cross, 0.22), (up, plinth_height)),
                     material,
                     index,
                     semantic_role="site_boundary",
@@ -1239,6 +1262,30 @@ def _create_site_fence(
                         f"{boundary['scene_element_id']}:{side_name}-{run_number}:post-{post_number}",
                         post_center,
                         ((axis, 0.12), (cross, 0.16), (up, 2.10)),
+                        material,
+                        index,
+                        semantic_role="site_boundary",
+                    )
+                infill_spacing = {
+                    "preserve_model": 1.8,
+                    "mesh_low_plinth": 0.9,
+                    "vertical_bar": 0.42,
+                }.get(boundary_kit, 1.8)
+                infill_count = min(240, max(1, int(length / infill_spacing)))
+                infill_width = 0.035 if boundary_kit == "mesh_low_plinth" else 0.055
+                for infill_number in range(1, infill_count):
+                    position = left + length * infill_number / infill_count
+                    infill_center = (
+                        Vector((position, fixed, ground_z + 1.05))
+                        if run_axis == "x"
+                        else Vector((fixed, position, ground_z + 1.05))
+                    )
+                    index += 1
+                    _oriented_box(
+                        f"{boundary['scene_element_id']}:{side_name}-{run_number}:"
+                        f"infill-{infill_number}",
+                        infill_center,
+                        ((axis, infill_width), (cross, 0.055), (up, 1.65)),
                         material,
                         index,
                         semantic_role="site_boundary",
@@ -1338,11 +1385,20 @@ def create_design_details(
         "glass": resolved_materials["office_glass"],
         "accent": resolved_materials["facade_accent"],
         "secondary": resolved_materials["facade_secondary"],
+        "boundary": resolved_materials["site_boundary"],
         "roof": resolved_materials["roof"],
         "shutter": resolved_materials["door_shutter"],
     }
+    preferences = design_data.get("design_preferences", {})
+    boundary_kit = preferences.get("boundary_kit", "preserve_model")
+    gate_kit = preferences.get("gate_kit", "preserve_model")
+    envelope_kit = preferences.get("envelope_kit", "profiled_metal_vertical")
+    facade_rhythm_kit = preferences.get("facade_rhythm_kit", "mixed_restrained")
     detail_index = _create_site_fence(
-        scene_data, resolved_materials["site_boundary"], start_index
+        scene_data,
+        resolved_materials["site_boundary"],
+        start_index,
+        boundary_kit,
     )
     detail_index = _create_auxiliary_details(scene_data, resolved_materials, detail_index)
     for entrance in (
@@ -1361,9 +1417,9 @@ def create_design_details(
         traffic_axis = Vector((0, 1, 0)) if size_x >= size_y else Vector((1, 0, 0))
         opening_width = max(size_x, size_y)
         center = Vector(((x0 + x1) / 2, (y0 + y1) / 2, z1))
-        post_height = 4.8
-        post_size = min(0.65, opening_width * 0.06)
-        material_key = "accent" if entrance["semantic_role"] == "main_entrance" else "secondary"
+        post_height = 2.2
+        post_size = min(0.28, opening_width * 0.035)
+        gate_material = detail_materials["boundary"]
         for side, direction in (("left", -1), ("right", 1)):
             detail_index += 1
             post_center = (
@@ -1379,23 +1435,43 @@ def create_design_details(
                     (traffic_axis, max(0.55, post_size)),
                     (Vector((0, 0, 1)), post_height),
                 ),
-                detail_materials[material_key],
+                gate_material,
                 detail_index,
                 semantic_role=entrance["semantic_role"],
             )
-        detail_index += 1
-        _oriented_box(
-            f"{entrance['scene_element_id']}:gate-header",
-            center + Vector((0, 0, post_height - 0.25)),
-            (
-                (span_axis, opening_width),
-                (traffic_axis, 0.5),
-                (Vector((0, 0, 1)), 0.5),
-            ),
-            detail_materials[material_key],
-            detail_index,
-            semantic_role=entrance["semantic_role"],
-        )
+        # Buildable two-leaf steel gate: low horizontal rails and regular pickets, with no
+        # overhead ceremonial portal. The gate shares the exact fence material family.
+        for rail_name, rail_height in (("bottom", 0.35), ("top", 1.85)):
+            detail_index += 1
+            _oriented_box(
+                f"{entrance['scene_element_id']}:gate-rail-{rail_name}",
+                center + Vector((0, 0, rail_height)),
+                (
+                    (span_axis, opening_width - post_size * 2),
+                    (traffic_axis, 0.10),
+                    (Vector((0, 0, 1)), 0.10),
+                ),
+                gate_material,
+                detail_index,
+                semantic_role=entrance["semantic_role"],
+            )
+        gate_spacing = 0.55 if gate_kit == "industrial_sliding" else 0.32
+        picket_count = max(6, int(opening_width / gate_spacing))
+        for picket_number in range(1, picket_count):
+            detail_index += 1
+            offset = -opening_width / 2 + opening_width * picket_number / picket_count
+            _oriented_box(
+                f"{entrance['scene_element_id']}:gate-picket-{picket_number:02d}",
+                center + span_axis * offset + Vector((0, 0, 1.1)),
+                (
+                    (span_axis, 0.055),
+                    (traffic_axis, 0.08),
+                    (Vector((0, 0, 1)), 1.65),
+                ),
+                gate_material,
+                detail_index,
+                semantic_role=entrance["semantic_role"],
+            )
     for building in design_data["buildings"]:
         if building.get("treatment", "focus") != "focus":
             continue
@@ -1434,19 +1510,37 @@ def create_design_details(
                     detail_index,
                 )
             seam_count = int(width // module)
-            for seam_number in range(1, seam_count + 1):
-                detail_index += 1
-                _detail_box(
-                    f"{facade['surface_id']}:seam-{seam_number:03d}",
-                    surface,
-                    min(seam_number * module, width - 0.03),
-                    height / 2,
-                    0.035,
-                    height * 0.96,
-                    0.06,
-                    detail_materials["seam"],
-                    detail_index,
-                )
+            if facade_rhythm_kit == "horizontal_restrained":
+                horizontal_count = max(2, min(8, int(height / 1.8)))
+                for seam_number in range(1, horizontal_count):
+                    detail_index += 1
+                    _detail_box(
+                        f"{facade['surface_id']}:horizontal-joint-{seam_number:02d}",
+                        surface,
+                        width / 2,
+                        height * seam_number / horizontal_count,
+                        width * 0.99,
+                        0.028,
+                        0.045,
+                        detail_materials["seam"],
+                        detail_index,
+                    )
+            else:
+                seam_step = module * (0.5 if envelope_kit == "profiled_metal_vertical" else 1.0)
+                seam_count = int(width // seam_step)
+                for seam_number in range(1, seam_count + 1):
+                    detail_index += 1
+                    _detail_box(
+                        f"{facade['surface_id']}:seam-{seam_number:03d}",
+                        surface,
+                        min(seam_number * seam_step, width - 0.03),
+                        height / 2,
+                        0.025 if envelope_kit == "sandwich_panel_flat" else 0.035,
+                        height * 0.96,
+                        0.045 if envelope_kit == "sandwich_panel_flat" else 0.06,
+                        detail_materials["seam"],
+                        detail_index,
+                    )
             accent_interval = articulation.get("accent_bay_interval", 0)
             if accent_interval:
                 for seam_number in range(accent_interval, seam_count, accent_interval):
@@ -1714,8 +1808,19 @@ def configure_world(
     # Keep skylight as fill rather than flattening all facade/ground values. Direct sun then
     # creates readable contact shadows while AgX protects the light metal roof highlights.
     sky_background.inputs["Strength"].default_value = 0.45
+    camera_background = world_tree.nodes.new("ShaderNodeBackground")
+    # Headless EGL can return a black camera background for Nishita even while its lighting is
+    # valid.  A neutral daylight plate keeps Base RGB useful as image-generation authority.
+    camera_background.inputs["Color"].default_value = (0.32, 0.52, 0.78, 1.0)
+    camera_background.inputs["Strength"].default_value = 0.55
     output = world_tree.nodes.new("ShaderNodeOutputWorld")
     world_tree.links.new(sky.outputs["Color"], sky_background.inputs["Color"])
+    camera_mix = None
+    if profile == "premium_cycles":
+        light_path = world_tree.nodes.new("ShaderNodeLightPath")
+        camera_mix = world_tree.nodes.new("ShaderNodeMixShader")
+        world_tree.links.new(light_path.outputs["Is Camera Ray"], camera_mix.inputs[0])
+        world_tree.links.new(camera_background.outputs["Background"], camera_mix.inputs[2])
 
     environment_file = None
     asset_root = (
@@ -1738,15 +1843,24 @@ def configure_world(
         environment.image = bpy.data.images.load(str(environment_file), check_existing=True)
         environment_background = world_tree.nodes.new("ShaderNodeBackground")
         environment_background.inputs["Strength"].default_value = 0.7
-        light_path = world_tree.nodes.new("ShaderNodeLightPath")
-        camera_mix = world_tree.nodes.new("ShaderNodeMixShader")
         world_tree.links.new(environment.outputs["Color"], environment_background.inputs["Color"])
-        world_tree.links.new(light_path.outputs["Is Camera Ray"], camera_mix.inputs[0])
-        world_tree.links.new(environment_background.outputs["Background"], camera_mix.inputs[1])
-        world_tree.links.new(sky_background.outputs["Background"], camera_mix.inputs[2])
-        world_tree.links.new(camera_mix.outputs["Shader"], output.inputs["Surface"])
+        if camera_mix:
+            world_tree.links.new(environment_background.outputs["Background"], camera_mix.inputs[1])
+            world_tree.links.new(camera_mix.outputs["Shader"], output.inputs["Surface"])
+        else:
+            # Eevee does not provide reliable Light Path values. Use the HDRI directly when one
+            # is available rather than letting a Mix Shader resolve to an undefined branch.
+            world_tree.links.new(
+                environment_background.outputs["Background"], output.inputs["Surface"]
+            )
     else:
-        world_tree.links.new(sky_background.outputs["Background"], output.inputs["Surface"])
+        if camera_mix:
+            world_tree.links.new(sky_background.outputs["Background"], camera_mix.inputs[1])
+            world_tree.links.new(camera_mix.outputs["Shader"], output.inputs["Surface"])
+        else:
+            # Nishita is black in some headless EGL/Eevee workers. The fixed daylight world is
+            # intentionally deterministic; the separate Sun still supplies form and shadows.
+            world_tree.links.new(camera_background.outputs["Background"], output.inputs["Surface"])
     try:
         scene.view_settings.view_transform = "AgX"
     except TypeError:
@@ -1857,6 +1971,9 @@ def render_masks(view_dir: Path) -> None:
         "loading_zone": (0.20, 0.62, 0.58, 1.0),
         "roof": (0.12, 0.78, 0.82, 1.0),
         "primary_facade": (0.82, 0.42, 0.16, 1.0),
+        "facade_secondary": (0.58, 0.16, 0.72, 1.0),
+        "glazing": (0.10, 0.52, 0.78, 1.0),
+        "brand_accent": (0.86, 0.18, 0.38, 1.0),
         "context_building": (0.42, 0.46, 0.50, 1.0),
         "context_landscape": (0.08, 0.32, 0.10, 1.0),
         "utility_block": (0.95, 0.65, 0.10, 1.0),

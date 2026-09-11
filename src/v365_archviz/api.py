@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -17,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from starlette.concurrency import run_in_threadpool
 
 from v365_archviz import __version__
+from v365_archviz.application.analyze_model_capabilities import AnalyzeModelDesignCapabilities
 from v365_archviz.application.build_canonical_scene import BuildCanonicalScene
 from v365_archviz.application.compile_user_intent import CompileUserRenderIntent
 from v365_archviz.application.create_generation_job import CreateGenerationJob
@@ -34,6 +36,7 @@ from v365_archviz.domain.render_intent import (
     DESIGN_OPTIONS,
     DesignOptionsCatalog,
     IntentWarning,
+    ModelDesignCapabilities,
     UserRenderIntent,
 )
 from v365_archviz.domain.scene import CanonicalScene
@@ -109,6 +112,7 @@ class CreateDesignRevisionRequest(BaseModel):
     model_revision: str = Field(pattern=SAFE_IDENTIFIER_PATTERN)
     intent: UserRenderIntent | None = None
     brief: DesignBrief | None = None
+    preview_token: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
 
     @model_validator(mode="after")
     def require_one_contract(self) -> CreateDesignRevisionRequest:
@@ -128,6 +132,23 @@ class DesignRevisionResponse(BaseModel):
     normalized_intent: UserRenderIntent | None = None
     warnings: tuple[IntentWarning, ...] = ()
     preset_catalog_version: str | None = None
+
+
+class DesignPreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    project_id: str = Field(pattern=SAFE_IDENTIFIER_PATTERN)
+    intent: UserRenderIntent
+
+
+class DesignPreviewResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    model_revision: str
+    preview_token: str = Field(pattern=r"^[a-f0-9]{64}$")
+    normalized_intent: UserRenderIntent
+    capabilities: ModelDesignCapabilities
+    warnings: tuple[IntentWarning, ...] = ()
 
 
 class CreateViewSetRequest(BaseModel):
@@ -222,6 +243,21 @@ def _prepare_uploaded_model(source: Path, settings: Settings) -> None:
     with ApsModelDerivativeClient(settings) as client:
         extraction = ExtractIfc(client).execute(source, settings.artifact_dir)
     BuildCanonicalScene().execute(source, extraction.ifc_path, settings.artifact_dir)
+
+
+def _preview_token(
+    model_revision: str,
+    project_id: str,
+    normalized_intent: UserRenderIntent,
+) -> str:
+    payload = {
+        "model_revision": model_revision,
+        "project_id": project_id,
+        "intent": normalized_intent.model_dump(mode="json"),
+        "catalog_version": DESIGN_OPTIONS.catalog_version,
+    }
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _design_directory(artifact_dir: Path, model_revision: str, design_revision: str) -> Path:
@@ -371,6 +407,53 @@ async def upload_model(
     )
 
 
+@app.get(
+    "/v1/models/{model_revision}/design-capabilities",
+    response_model=ModelDesignCapabilities,
+    tags=["models"],
+)
+def model_design_capabilities(model_revision: str) -> ModelDesignCapabilities:
+    _require_safe_identifier(model_revision, "model_revision")
+    scene_path = _settings().artifact_dir / "scenes" / model_revision / "canonical_scene.json"
+    if not scene_path.is_file():
+        raise HTTPException(status_code=404, detail="canonical scene not found")
+    scene = CanonicalScene.model_validate_json(scene_path.read_text(encoding="utf-8"))
+    return AnalyzeModelDesignCapabilities().execute(model_revision, scene)
+
+
+@app.post(
+    "/v1/models/{model_revision}/design-preview",
+    response_model=DesignPreviewResponse,
+    tags=["design"],
+)
+def preview_design(
+    model_revision: str,
+    request: DesignPreviewRequest,
+) -> DesignPreviewResponse:
+    _require_safe_identifier(model_revision, "model_revision")
+    scene_path = _settings().artifact_dir / "scenes" / model_revision / "canonical_scene.json"
+    if not scene_path.is_file():
+        raise HTTPException(status_code=404, detail="canonical scene not found")
+    scene = CanonicalScene.model_validate_json(scene_path.read_text(encoding="utf-8"))
+    capabilities = AnalyzeModelDesignCapabilities().execute(model_revision, scene)
+    compiled = CompileUserRenderIntent().execute(
+        request.project_id,
+        request.intent,
+        capabilities,
+    )
+    return DesignPreviewResponse(
+        model_revision=model_revision,
+        preview_token=_preview_token(
+            model_revision,
+            request.project_id,
+            compiled.normalized_intent,
+        ),
+        normalized_intent=compiled.normalized_intent,
+        capabilities=capabilities,
+        warnings=compiled.warnings,
+    )
+
+
 @app.get("/v1/brand/logo", response_class=FileResponse, tags=["system"])
 def brand_logo() -> FileResponse:
     logo = Path(__file__).resolve().parents[2] / "resource" / "logo" / "logo_vertical.png"
@@ -399,11 +482,23 @@ def create_design_revision(
     if not scene_path.is_file():
         raise HTTPException(status_code=404, detail="canonical scene not found")
     scene = CanonicalScene.model_validate_json(scene_path.read_text(encoding="utf-8"))
+    capabilities = AnalyzeModelDesignCapabilities().execute(request.model_revision, scene)
     compiled = (
-        CompileUserRenderIntent().execute(project_id, request.intent)
+        CompileUserRenderIntent().execute(project_id, request.intent, capabilities)
         if request.intent is not None
         else None
     )
+    if compiled is not None and request.preview_token is not None:
+        expected_preview_token = _preview_token(
+            request.model_revision,
+            project_id,
+            compiled.normalized_intent,
+        )
+        if request.preview_token != expected_preview_token:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="design inputs changed after preview; run design preview again",
+            )
     brief = compiled.brief if compiled is not None else request.brief
     if brief is None:  # Defended by request validation; keeps the type boundary explicit.
         raise HTTPException(status_code=422, detail="design input is missing")
@@ -482,6 +577,7 @@ def create_view_set(design_revision: str, request: CreateViewSetRequest) -> View
         WorkflowState.COMPLETED,
         WorkflowState.FAILED,
         WorkflowState.HUMAN_REVIEW,
+        WorkflowState.DESIGN_MASTER_REVIEW,
     }:
         _generation_dispatcher.submit(job.job_id)
     return ViewSetJobResponse(
@@ -675,6 +771,7 @@ def _transition_view_set(view_set_id: str, target: WorkflowState) -> ViewSetJobR
         WorkflowState.COMPLETED,
         WorkflowState.FAILED,
         WorkflowState.HUMAN_REVIEW,
+        WorkflowState.DESIGN_MASTER_REVIEW,
     }:
         _generation_dispatcher.submit(updated.job_id)
     return ViewSetJobResponse(
@@ -689,6 +786,7 @@ def _transition_view_set(view_set_id: str, target: WorkflowState) -> ViewSetJobR
         error_message=updated.error_message,
     )
 
+
 @app.post(
     "/v1/view-sets/{view_set_id}/approve",
     response_model=ViewSetJobResponse,
@@ -696,9 +794,34 @@ def _transition_view_set(view_set_id: str, target: WorkflowState) -> ViewSetJobR
     tags=["review"],
 )
 def approve_view_set(view_set_id: str) -> ViewSetJobResponse:
-    """Approve reviewed images and resume board/branding generation."""
+    """Approve either the Design Master checkpoint or the complete reviewed image set."""
 
     _require_safe_identifier(view_set_id, "view_set_id")
+    settings = _settings()
+    try:
+        job = _repository(settings).get_by_view_set(view_set_id)
+    except OSError as exc:
+        raise HTTPException(status_code=404, detail="view set not found") from exc
+    if job.state is WorkflowState.DESIGN_MASTER_REVIEW:
+        review_path = (
+            settings.artifact_dir
+            / "generated"
+            / job.model_revision
+            / job.design_revision
+            / "design_master_review.json"
+        )
+        try:
+            review = json.loads(review_path.read_text(encoding="utf-8"))
+            if not review.get("master_image_ref") or not Path(review["master_image_ref"]).is_file():
+                raise ValueError("Design Master image is missing")
+        except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        review.update({"approved": True, "status": "approved"})
+        atomic_write(
+            review_path,
+            json.dumps(review, ensure_ascii=False, indent=2).encode("utf-8") + b"\n",
+        )
+        return _transition_view_set(view_set_id, WorkflowState.GENERATING_VIEWSET)
     return _transition_view_set(view_set_id, WorkflowState.COMPOSING_BOARD)
 
 
@@ -719,9 +842,7 @@ def retry_view_set(view_set_id: str) -> ViewSetJobResponse:
         raise HTTPException(status_code=404, detail="view set not found") from exc
     if job.state is not WorkflowState.FAILED:
         raise HTTPException(status_code=409, detail="only failed jobs can be retried")
-    generated_root = (
-        settings.artifact_dir / "generated" / job.model_revision / job.design_revision
-    )
+    generated_root = settings.artifact_dir / "generated" / job.model_revision / job.design_revision
     target = (
         WorkflowState.VALIDATING
         if (generated_root / "viewset_generation_manifest.json").is_file()

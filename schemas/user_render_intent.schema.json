@@ -1,5 +1,14 @@
 {
   "$defs": {
+    "BoundaryKit": {
+      "enum": [
+        "preserve_model",
+        "mesh_low_plinth",
+        "vertical_bar"
+      ],
+      "title": "BoundaryKit",
+      "type": "string"
+    },
     "ContextPresentation": {
       "enum": [
         "authored_only",
@@ -27,6 +36,24 @@
       "title": "DecorLevel",
       "type": "string"
     },
+    "DeliveryQuality": {
+      "enum": [
+        "preview",
+        "tender"
+      ],
+      "title": "DeliveryQuality",
+      "type": "string"
+    },
+    "DesignPackage": {
+      "enum": [
+        "premium_practical",
+        "corporate_identity",
+        "tropical_industrial",
+        "minimal_logistics"
+      ],
+      "title": "DesignPackage",
+      "type": "string"
+    },
     "EntourageDensity": {
       "enum": [
         "none",
@@ -37,8 +64,36 @@
       "title": "EntourageDensity",
       "type": "string"
     },
+    "EnvelopeKit": {
+      "enum": [
+        "profiled_metal_vertical",
+        "sandwich_panel_flat",
+        "panel_concrete_plinth"
+      ],
+      "title": "EnvelopeKit",
+      "type": "string"
+    },
+    "FacadeRhythmKit": {
+      "enum": [
+        "horizontal_restrained",
+        "vertical_bays",
+        "mixed_restrained"
+      ],
+      "title": "FacadeRhythmKit",
+      "type": "string"
+    },
+    "GateKit": {
+      "enum": [
+        "preserve_model",
+        "industrial_sliding",
+        "hinged"
+      ],
+      "title": "GateKit",
+      "type": "string"
+    },
     "LandscapePreset": {
       "enum": [
+        "preserve_model",
         "tropical_restrained",
         "corporate_linear",
         "low_maintenance"
@@ -55,6 +110,14 @@
       "title": "LoadingDockPolicy",
       "type": "string"
     },
+    "LogisticsKit": {
+      "enum": [
+        "preserve_model",
+        "authored_dock_finish"
+      ],
+      "title": "LogisticsKit",
+      "type": "string"
+    },
     "MaterialPalette": {
       "additionalProperties": false,
       "properties": {
@@ -62,6 +125,12 @@
           "default": "#2F6B4F",
           "pattern": "^#[0-9A-Fa-f]{6}$",
           "title": "Accent Hex",
+          "type": "string"
+        },
+        "boundary_hex": {
+          "default": "#626B70",
+          "pattern": "^#[0-9A-Fa-f]{6}$",
+          "title": "Boundary Hex",
           "type": "string"
         },
         "glass_hex": {
@@ -82,6 +151,12 @@
           "title": "Primary Hex",
           "type": "string"
         },
+        "roof_hex": {
+          "default": "#E8E7E1",
+          "pattern": "^#[0-9A-Fa-f]{6}$",
+          "title": "Roof Hex",
+          "type": "string"
+        },
         "secondary_hex": {
           "default": "#252B31",
           "pattern": "^#[0-9A-Fa-f]{6}$",
@@ -91,6 +166,25 @@
       },
       "title": "MaterialPalette",
       "type": "object"
+    },
+    "OfficeEntranceKit": {
+      "enum": [
+        "preserve_model",
+        "framed_glazed_bay",
+        "canopy_entry",
+        "climate_screen"
+      ],
+      "title": "OfficeEntranceKit",
+      "type": "string"
+    },
+    "OperatingScene": {
+      "enum": [
+        "clean",
+        "active",
+        "logistics"
+      ],
+      "title": "OperatingScene",
+      "type": "string"
     },
     "RealismPreset": {
       "enum": [
@@ -115,6 +209,17 @@
   "additionalProperties": false,
   "description": "Safe public contract; it contains intent, never authoritative geometry.",
   "properties": {
+    "accent_coverage_percent": {
+      "default": 5,
+      "maximum": 8,
+      "minimum": 3,
+      "title": "Accent Coverage Percent",
+      "type": "integer"
+    },
+    "boundary_kit": {
+      "$ref": "#/$defs/BoundaryKit",
+      "default": "preserve_model"
+    },
     "context_presentation": {
       "$ref": "#/$defs/ContextPresentation",
       "default": "authored_only"
@@ -127,9 +232,25 @@
       "$ref": "#/$defs/DecorLevel",
       "default": "balanced"
     },
+    "delivery_quality": {
+      "$ref": "#/$defs/DeliveryQuality",
+      "default": "tender"
+    },
+    "design_package": {
+      "$ref": "#/$defs/DesignPackage",
+      "default": "premium_practical"
+    },
     "entourage_density": {
       "$ref": "#/$defs/EntourageDensity",
       "default": "low"
+    },
+    "envelope_kit": {
+      "$ref": "#/$defs/EnvelopeKit",
+      "default": "profiled_metal_vertical"
+    },
+    "facade_rhythm_kit": {
+      "$ref": "#/$defs/FacadeRhythmKit",
+      "default": "mixed_restrained"
     },
     "free_text": {
       "anyOf": [
@@ -143,6 +264,10 @@
       ],
       "default": null,
       "title": "Free Text"
+    },
+    "gate_kit": {
+      "$ref": "#/$defs/GateKit",
+      "default": "preserve_model"
     },
     "landscape_preset": {
       "$ref": "#/$defs/LandscapePreset",
@@ -159,8 +284,16 @@
       "$ref": "#/$defs/LoadingDockPolicy",
       "default": "suggest_if_missing"
     },
+    "logistics_kit": {
+      "$ref": "#/$defs/LogisticsKit",
+      "default": "preserve_model"
+    },
     "material_palette": {
       "$ref": "#/$defs/MaterialPalette"
+    },
+    "office_entrance_kit": {
+      "$ref": "#/$defs/OfficeEntranceKit",
+      "default": "preserve_model"
     },
     "office_facade_rhythm": {
       "default": 2,
@@ -168,6 +301,10 @@
       "minimum": 1,
       "title": "Office Facade Rhythm",
       "type": "integer"
+    },
+    "operating_scene": {
+      "$ref": "#/$defs/OperatingScene",
+      "default": "active"
     },
     "realism_preset": {
       "$ref": "#/$defs/RealismPreset",

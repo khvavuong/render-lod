@@ -50,31 +50,14 @@ class DockerConditioningRenderer:
                 "Design DNA asset library version does not match renderer asset library"
             )
         output_directory.mkdir(parents=True, exist_ok=True)
-        command = [
-            "docker",
-            "run",
-            "--rm",
-            *(["--gpus", "all"] if profile is RenderProfile.PREMIUM_CYCLES else []),
-            "--user",
-            f"{os.getuid()}:{os.getgid()}",
-            "-e",
-            "HOME=/tmp",
-            "-v",
-            f"{self._workspace}:/workspace",
-            self.image,
-            "--scene",
-            self._container_path(scene_path),
-            "--design-dna",
-            self._container_path(design_dna_path),
-            "--view-set",
-            self._container_path(view_set_path),
-            "--output",
-            self._container_path(output_directory),
-            "--profile",
-            profile.value,
-            "--asset-library",
-            self._container_path(asset_library),
-        ]
+        command = self._command(
+            scene_path,
+            design_dna_path,
+            view_set_path,
+            output_directory,
+            profile,
+            asset_library,
+        )
         self._run(command, timeout=30 * 60, label="conditioning renderer")
         try:
             view_set = ViewSet.model_validate_json(view_set_path.read_text(encoding="utf-8"))
@@ -102,6 +85,41 @@ class DockerConditioningRenderer:
             output_directory / "render_manifest.json",
             json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8") + b"\n",
         )
+
+    def _command(
+        self,
+        scene_path: Path,
+        design_dna_path: Path,
+        view_set_path: Path,
+        output_directory: Path,
+        profile: RenderProfile,
+        asset_library: Path,
+    ) -> list[str]:
+        return [
+            "docker",
+            "run",
+            "--rm",
+            *(["--gpus", "all"] if profile is RenderProfile.PREMIUM_CYCLES else []),
+            "--user",
+            f"{os.getuid()}:{os.getgid()}",
+            "-e",
+            "HOME=/tmp",
+            "-v",
+            f"{self._workspace}:/workspace",
+            self.image,
+            "--scene",
+            self._container_path(scene_path),
+            "--design-dna",
+            self._container_path(design_dna_path),
+            "--view-set",
+            self._container_path(view_set_path),
+            "--output",
+            self._container_path(output_directory),
+            "--profile",
+            profile.value,
+            "--asset-library",
+            self._container_path(asset_library),
+        ]
 
     def _ensure_image(self) -> None:
         inspect = subprocess.run(

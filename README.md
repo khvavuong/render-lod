@@ -292,6 +292,32 @@ dense pixel reprojection từ metric depth, bộ đo geometry/semantic/appearanc
 repair executor có mask. Khi các bằng chứng đó chưa tồn tại, consistency report giữ trạng thái
 `review`; technical pass không được xem là geometry pass.
 
+## Chạy local bằng Docker (Windows, macOS, Linux)
+
+Máy chỉ cần Docker Desktop, không cần Python, Blender hay WSL cài riêng. `Dockerfile.local`
+đóng control plane và Blender vào **một** image; API gọi Blender trực tiếp
+(`V365_CONDITIONING_BACKEND=local`) thay vì tự `docker run` một renderer container, nên không
+phải mount Docker socket của máy vào container.
+
+```bash
+cp .env.example .env        # điền APS_* và GEMINI_API_KEY
+docker compose up -d --build
+curl http://127.0.0.1:8010/healthz
+```
+
+- API và OpenAPI UI: `http://127.0.0.1:8010/docs`. Cổng chỉ mở trên loopback vì API chưa có
+  xác thực và mỗi lượt sinh ảnh phát sinh chi phí.
+- Artifact nằm ở `./.artifacts` trên máy host, xem được trực tiếp.
+- `.env` được đọc lúc chạy qua `env_file`, không được chép vào image (`.dockerignore`).
+- Chạy quality gates trong cùng image:
+
+```bash
+docker compose run --rm --user root -v "$PWD:/src" -w /src render sh -c 'pip install -q -e ".[dev]" && pytest && ruff check . && mypy'
+```
+
+Ngoài container, `V365_CONDITIONING_BACKEND` mặc định là `docker`, giữ nguyên luồng
+`Dockerfile.renderer` như trước.
+
 ## API
 
 ```bash

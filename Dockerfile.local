@@ -1,0 +1,50 @@
+# One container carrying both the control plane and Blender, for a workstation
+# that runs Docker Desktop. The API renders the conditioning passes by calling
+# Blender directly (V365_CONDITIONING_BACKEND=local) instead of starting a second
+# container, so it needs neither the host's Docker socket nor a host path mapping.
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# Empty keeps Ubuntu's own mirror. Blender pulls several hundred packages, and
+# archive.ubuntu.com can be unreachable from some networks while a country mirror
+# answers at full speed: `UBUNTU_MIRROR=http://vn.archive.ubuntu.com`.
+ARG UBUNTU_MIRROR=
+
+# blender + libegl1 + python3-numpy are what Dockerfile.renderer installs; ffmpeg
+# is needed by the showreel assembly and its QA.
+RUN if [ -n "$UBUNTU_MIRROR" ]; then \
+        sed -i "s|http://archive.ubuntu.com|$UBUNTU_MIRROR|g; s|http://security.ubuntu.com|$UBUNTU_MIRROR|g" \
+            /etc/apt/sources.list.d/ubuntu.sources; \
+    fi \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        blender libegl1 python3-numpy python3 python3-venv ffmpeg ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN useradd --create-home --uid 10001 v365
+WORKDIR /app
+
+COPY pyproject.toml README.md ./
+COPY src ./src
+# Editable, because the API resolves the brand logo from the source tree.
+RUN python3 -m venv /opt/venv \
+    && /opt/venv/bin/pip install --no-cache-dir -e .
+
+COPY assets ./assets
+COPY scripts ./scripts
+COPY resource/logo ./resource/logo
+
+RUN mkdir -p /app/.artifacts && chown -R v365:v365 /app/.artifacts
+
+ENV PATH=/opt/venv/bin:$PATH \
+    V365_ENV=development \
+    V365_ARTIFACT_DIR=/app/.artifacts \
+    V365_CONDITIONING_BACKEND=local
+
+USER v365
+EXPOSE 8000
+
+CMD ["uvicorn", "v365_archviz.api:app", "--host", "0.0.0.0", "--port", "8000"]

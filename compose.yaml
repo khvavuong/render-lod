@@ -1,0 +1,21 @@
+# Local run: `docker compose up -d --build`, then http://127.0.0.1:8010/docs
+#
+# Published on loopback only. The API takes model uploads and spends provider
+# credit, and it has no authentication of its own.
+services:
+  render:
+    build:
+      context: .
+      dockerfile: Dockerfile.local
+      args:
+        UBUNTU_MIRROR: ${UBUNTU_MIRROR:-}
+    image: v365-archviz-local
+    env_file: .env
+    environment:
+      V365_ARTIFACT_DIR: /app/.artifacts
+      V365_CONDITIONING_BACKEND: local
+    ports:
+      - "127.0.0.1:8010:8000"
+    volumes:
+      - ./.artifacts:/app/.artifacts
+    restart: unless-stopped

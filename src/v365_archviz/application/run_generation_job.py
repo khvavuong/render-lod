@@ -23,8 +23,8 @@ from v365_archviz.config import Settings
 from v365_archviz.domain.jobs import GenerationJob
 from v365_archviz.domain.workflow import Camera, ViewSet, WorkflowState
 from v365_archviz.errors import V365Error
-from v365_archviz.providers.docker_conditioning import DockerConditioningRenderer
 from v365_archviz.providers.image_factory import create_image_renderer
+from v365_archviz.providers.local_blender_conditioning import create_conditioning_renderer
 from v365_archviz.providers.local_jobs import LocalJobRepository
 
 logger = logging.getLogger(__name__)
@@ -61,7 +61,7 @@ class RunGenerationJob:
         view_set = ViewSet.model_validate_json(paths.view_set.read_text(encoding="utf-8"))
 
         if job.state in {WorkflowState.RENDERING_PASSES, WorkflowState.GENERATING_VIEWSET}:
-            self._ensure_conditioning(paths, view_set, job)
+            self._ensure_conditioning(paths, view_set, job, settings)
 
         if job.state is WorkflowState.RENDERING_PASSES:
             job = self._advance(
@@ -236,9 +236,10 @@ class RunGenerationJob:
         paths: _JobPaths,
         view_set: ViewSet,
         job: GenerationJob,
+        settings: Settings,
     ) -> None:
         if not self._conditioning_complete(paths.render_root, view_set):
-            DockerConditioningRenderer().execute(
+            create_conditioning_renderer(settings.conditioning_backend).execute(
                 paths.scene,
                 paths.design_dna,
                 paths.view_set,

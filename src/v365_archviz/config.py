@@ -42,6 +42,7 @@ class Settings:
     openai_image_quality: str = "high"
     openai_image_size: str = "1536x1024"
     local_worker_enabled: bool = True
+    conditioning_backend: str = "docker"
     veo_model: str = "veo-3.1-lite-generate-preview"
     veo_resolution: str = "720p"
     veo_duration_seconds: int = 4
@@ -87,6 +88,7 @@ class Settings:
             openai_image_quality=os.getenv("OPENAI_IMAGE_QUALITY", "high"),
             openai_image_size=os.getenv("OPENAI_IMAGE_SIZE", "1536x1024"),
             local_worker_enabled=_as_bool(os.getenv("V365_ENABLE_LOCAL_WORKER"), default=True),
+            conditioning_backend=os.getenv("V365_CONDITIONING_BACKEND", "docker"),
         )
 
     @property

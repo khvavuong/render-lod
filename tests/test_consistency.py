@@ -42,13 +42,13 @@ def test_technical_pass_still_requires_visual_review(tmp_path: Path) -> None:
 
     assert result.report.status is QAStatus.REVIEW
     assert {finding.gate for finding in result.report.findings} == {
-            QAGate.GEOMETRY,
-            QAGate.SEMANTIC,
-            QAGate.MATERIAL,
-            QAGate.CROSS_VIEW_APPEARANCE,
-            QAGate.CAMERA,
-            QAGate.REALISM,
-            QAGate.AESTHETIC,
+        QAGate.GEOMETRY,
+        QAGate.SEMANTIC,
+        QAGate.MATERIAL,
+        QAGate.CROSS_VIEW_APPEARANCE,
+        QAGate.CAMERA,
+        QAGate.REALISM,
+        QAGate.AESTHETIC,
     }
 
 

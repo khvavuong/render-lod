@@ -23,9 +23,7 @@ def build_refinement_prompt(
     roof_types = sorted({building.roof.roof_type for building in design.buildings})
     focus_count = sum(building.treatment.value == "focus" for building in design.buildings)
     context_count = sum(building.treatment.value == "context" for building in design.buildings)
-    auxiliary_count = sum(
-        building.treatment.value == "auxiliary" for building in design.buildings
-    )
+    auxiliary_count = sum(building.treatment.value == "auxiliary" for building in design.buildings)
     solar_policy = (
         "permitted only on buildings explicitly marked true"
         if any(building.roof.solar_panels for building in design.buildings)

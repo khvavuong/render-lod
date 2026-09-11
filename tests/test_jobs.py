@@ -73,6 +73,35 @@ def test_repository_deduplicates_generation_job(tmp_path: Path) -> None:
     assert first.job.trace_id.startswith("trace-")
 
 
+def test_image_provider_is_part_of_job_identity(tmp_path: Path) -> None:
+    repository = LocalJobRepository(tmp_path / "metadata")
+    view_set = ViewSet(view_set_id="views", design_revision="design", cameras=())
+    use_case = CreateGenerationJob()
+
+    gemini = use_case.execute(
+        repository,
+        project_id="project",
+        model_revision="model",
+        design_revision="design",
+        view_set=view_set,
+        profile=GenerationProfile.PREVIEW_FAST,
+        image_provider="gemini",
+    )
+    openai = use_case.execute(
+        repository,
+        project_id="project",
+        model_revision="model",
+        design_revision="design",
+        view_set=view_set,
+        profile=GenerationProfile.PREVIEW_FAST,
+        image_provider="openai-image",
+    )
+
+    assert gemini.created and openai.created
+    assert gemini.job.job_id != openai.job.job_id
+    assert openai.job.image_provider == "openai-image"
+
+
 def test_repair_attempts_are_bounded() -> None:
     job = GenerationJob.create(
         job_id="job-1",

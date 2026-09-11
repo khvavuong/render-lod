@@ -15,11 +15,17 @@ from v365_archviz.domain.scene import CanonicalScene, SemanticRole
 from v365_archviz.domain.workflow import ViewRole, ViewSet
 from v365_archviz.errors import InvalidModelError
 
-FOCUS_ROLES = frozenset(
-    {"main_shed", "office_block", "roof", "primary_facade", "design_detail"}
-)
+FOCUS_ROLES = frozenset({"main_shed", "office_block", "roof", "primary_facade", "design_detail"})
 CIRCULATION_ROLES = frozenset(
-    {"site_road", "sidewalk", "service_yard", "parking", "loading_zone"}
+    {
+        "site_road",
+        "sidewalk",
+        "service_yard",
+        "parking",
+        "loading_zone",
+        "main_entrance",
+        "secondary_entrance",
+    }
 )
 CONTEXT_ROLES = frozenset({"context_building", "context_landscape", "landscape_zone"})
 FOREGROUND_OCCLUDER_ROLES = frozenset({"vehicle"})
@@ -33,7 +39,10 @@ ROLE_THRESHOLDS: dict[ViewRole, tuple[float, float, float]] = {
     ViewRole.HERO: (0.15, 0.90, 0.00),
     ViewRole.DETAIL: (0.15, 0.90, 0.00),
     ViewRole.OFFICE_HERO: (0.12, 0.90, 0.00),
-    ViewRole.LOADING_DETAIL: (0.15, 0.90, 0.02),
+    # At pedestrian eye level, a legible gate/fence opening can occupy less image area
+    # than a drone-visible yard. Count authored entrances as circulation and keep the
+    # threshold high enough to reject a hidden or cropped access point.
+    ViewRole.LOADING_DETAIL: (0.15, 0.90, 0.015),
 }
 
 
@@ -122,9 +131,7 @@ class ValidateConditioningViewSet:
                         "minimum_circulation": (
                             minimum_circulation if circulation_authored else 0.0
                         ),
-                        "maximum_central_entourage_occlusion": (
-                            MAXIMUM_CENTRAL_OCCLUDER_COVERAGE
-                        ),
+                        "maximum_central_entourage_occlusion": (MAXIMUM_CENTRAL_OCCLUDER_COVERAGE),
                     },
                     "findings": failures,
                 }

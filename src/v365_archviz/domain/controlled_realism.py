@@ -210,10 +210,7 @@ class CertificationReport(DomainModel):
                 gate
                 for gate in hard_gates
                 if gate in by_gate
-                and (
-                    by_gate[gate].status is not QAStatus.PASS
-                    or not by_gate[gate].evidence_refs
-                )
+                and (by_gate[gate].status is not QAStatus.PASS or not by_gate[gate].evidence_refs)
             }
             if missing or failed:
                 raise ValueError("certified output requires passing evidence for every hard gate")
@@ -224,10 +221,7 @@ class CertificationReport(DomainModel):
                 gate
                 for gate in delivery_gates
                 if gate in by_gate
-                and (
-                    by_gate[gate].status is not QAStatus.PASS
-                    or not by_gate[gate].evidence_refs
-                )
+                and (by_gate[gate].status is not QAStatus.PASS or not by_gate[gate].evidence_refs)
             }
             if missing_delivery or failed_delivery:
                 raise ValueError(

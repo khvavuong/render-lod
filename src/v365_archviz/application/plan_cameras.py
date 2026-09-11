@@ -211,15 +211,11 @@ def _arrival_shot(
     """
 
     entrances = [
-        element
-        for element in scene.elements
-        if element.semantic_role is SemanticRole.MAIN_ENTRANCE
+        element for element in scene.elements if element.semantic_role is SemanticRole.MAIN_ENTRANCE
     ]
     if not entrances:
         return None
-    focus_center = tuple(
-        (focus_minimum[index] + focus_maximum[index]) / 2 for index in range(3)
-    )
+    focus_center = tuple((focus_minimum[index] + focus_maximum[index]) / 2 for index in range(3))
     entrance = min(
         entrances,
         key=lambda element: math.dist(
@@ -239,7 +235,10 @@ def _arrival_shot(
     if length <= 1e-6:
         return None
     outward = (outward[0] / length, outward[1] / length)
-    setback = max(28.0, site_span * 0.13)
+    # A genuine arrival photograph needs enough setback to read the complete gate,
+    # perimeter fence, external road and factory frontage together.  A close 28 m
+    # position turns large campuses into an uninformative wall elevation.
+    setback = max(55.0, site_span * 0.24)
     # Stand to one side of the portal instead of directly under its head beam.
     # This keeps the gate legible as foreground architecture without occluding the
     # arrival axis or the factory behind it.
@@ -256,10 +255,14 @@ def _arrival_shot(
     )
     # Aim beyond the gate toward the focus building, but retain enough foreground
     # for the fence opening and external approach road to remain understandable.
+    nearest_focus = (
+        min(max(gate_center[0], focus_minimum[0]), focus_maximum[0]),
+        min(max(gate_center[1], focus_minimum[1]), focus_maximum[1]),
+    )
     target = (
-        gate_center[0] + (focus_center[0] - gate_center[0]) * 0.45,
-        gate_center[1] + (focus_center[1] - gate_center[1]) * 0.45,
-        focus_minimum[2] + min(4.0, (focus_maximum[2] - focus_minimum[2]) * 0.25),
+        gate_center[0] + (nearest_focus[0] - gate_center[0]) * 0.70,
+        gate_center[1] + (nearest_focus[1] - gate_center[1]) * 0.70,
+        focus_minimum[2] + 1.00,
     )
     return position, target
 
@@ -377,9 +380,7 @@ class PlanStandardCameras:
             coordinate[cross_axis] = corridor_target_cross if target else corridor_cross
             return tuple(coordinate)  # type: ignore[return-value]
 
-        loading_shot: tuple[
-            tuple[float, float, float], tuple[float, float, float]
-        ] | None = None
+        loading_shot: tuple[tuple[float, float, float], tuple[float, float, float]] | None = None
         if design is not None:
             surfaces_by_id = {surface.surface_id: surface for surface in scene.surfaces}
             loading_facades = [
@@ -395,8 +396,7 @@ class PlanStandardCameras:
                     dock = facade.loading_docks[len(facade.loading_docks) // 2]
                     frame = surface.frame
                     door = tuple(
-                        frame.origin[index]
-                        + frame.u_axis[index] * (dock.u * surface.width_m)
+                        frame.origin[index] + frame.u_axis[index] * (dock.u * surface.width_m)
                         for index in range(3)
                     )
                     lateral_distance = min(18.0, max(10.0, surface.width_m * 0.1))
@@ -449,8 +449,7 @@ class PlanStandardCameras:
                     center,
                     long_axis,
                     -(long_span / 2 + max(20.0, long_span * 0.08)),
-                    (corridor_cross - center[cross_axis])
-                    - max(24.0, cross_span * 0.25),
+                    (corridor_cross - center[cross_axis]) - max(24.0, cross_span * 0.25),
                     minimum[2] + max(10.0, height * 0.55),
                 ),
                 target=access_facade_point(
@@ -531,7 +530,7 @@ class PlanStandardCameras:
         if design is not None:
             design_revision = design.design_revision
         view_set = ViewSet(
-            view_set_id=f"{revision_key}-{design_revision}-standard-v16",
+            view_set_id=f"{revision_key}-{design_revision}-standard-v20",
             design_revision=design_revision,
             cameras=cameras,
         )

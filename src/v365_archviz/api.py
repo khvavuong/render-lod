@@ -71,6 +71,8 @@ class CapabilityResponse(BaseModel):
     local_rvt_inspection: bool
     aps_geometry_extraction: bool
     gemini_image_generation: bool
+    openai_image_generation: bool
+    active_image_provider: str
     veo_video_generation: bool
 
 
@@ -257,6 +259,8 @@ def capabilities() -> CapabilityResponse:
         local_rvt_inspection=True,
         aps_geometry_extraction=settings.aps_configured,
         gemini_image_generation=settings.gemini_configured,
+        openai_image_generation=settings.openai_configured,
+        active_image_provider=settings.image_provider,
         veo_video_generation=settings.gemini_configured,
     )
 
@@ -392,6 +396,7 @@ def create_view_set(design_revision: str, request: CreateViewSetRequest) -> View
         view_set=view_set,
         profile=request.profile,
         render_profile=request.render_profile,
+        image_provider=settings.image_provider,
     )
     job = created.job
     if created.created:
@@ -500,10 +505,7 @@ def create_video_job(view_set_id: str) -> VideoJobResponse:
         )
 
     generated_root = (
-        settings.artifact_dir
-        / "generated"
-        / image_job.model_revision
-        / image_job.design_revision
+        settings.artifact_dir / "generated" / image_job.model_revision / image_job.design_revision
     )
     manifest = generated_root / "viewset_generation_manifest.json"
     board = generated_root / "viewset_board.jpg"

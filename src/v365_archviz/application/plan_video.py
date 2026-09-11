@@ -96,9 +96,7 @@ class PlanVideo:
             view_root = generated_root / camera.view_id
             provider_sources = sorted(view_root.glob("provider_source.*"))
             source = (
-                provider_sources[0]
-                if len(provider_sources) == 1
-                else view_root / "refined.jpg"
+                provider_sources[0] if len(provider_sources) == 1 else view_root / "refined.jpg"
             )
             if not source.is_file():
                 raise InvalidModelError(f"missing approved source image: {source}")

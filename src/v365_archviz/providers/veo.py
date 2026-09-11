@@ -139,8 +139,7 @@ class VeoVideoRenderer:
 
     def get(self, operation_name: str) -> VideoOperation:
         if (
-            "/operations/" not in operation_name
-            and not operation_name.startswith("operations/")
+            "/operations/" not in operation_name and not operation_name.startswith("operations/")
         ) or operation_name.startswith(("/", "http://", "https://")):
             raise ProviderError("invalid Veo operation name")
         try:

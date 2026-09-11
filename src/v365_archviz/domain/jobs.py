@@ -48,12 +48,8 @@ _ALLOWED_TRANSITIONS: dict[WorkflowState, frozenset[WorkflowState]] = {
     WorkflowState.HUMAN_REVIEW: frozenset(
         {WorkflowState.COMPOSING_BOARD, WorkflowState.REPAIRING, WorkflowState.FAILED}
     ),
-    WorkflowState.COMPOSING_BOARD: frozenset(
-        {WorkflowState.COMPLETED, WorkflowState.FAILED}
-    ),
-    WorkflowState.GENERATING_VIDEO: frozenset(
-        {WorkflowState.COMPLETED, WorkflowState.FAILED}
-    ),
+    WorkflowState.COMPOSING_BOARD: frozenset({WorkflowState.COMPLETED, WorkflowState.FAILED}),
+    WorkflowState.GENERATING_VIDEO: frozenset({WorkflowState.COMPLETED, WorkflowState.FAILED}),
     WorkflowState.COMPLETED: frozenset(),
     WorkflowState.FAILED: frozenset(),
 }
@@ -69,6 +65,7 @@ class GenerationJob(DomainModel):
     view_set_id: str = Field(min_length=1)
     profile: GenerationProfile
     render_profile: RenderProfile = RenderProfile.STANDARD_EEVEE
+    image_provider: str = Field(default="gemini", min_length=1)
     state: WorkflowState
     attempt: int = Field(default=0, ge=0)
     created_at: datetime
@@ -89,6 +86,7 @@ class GenerationJob(DomainModel):
         view_set_id: str,
         profile: GenerationProfile,
         render_profile: RenderProfile = RenderProfile.STANDARD_EEVEE,
+        image_provider: str = "gemini",
         initial_state: WorkflowState = WorkflowState.RESOLVING_MODEL,
     ) -> GenerationJob:
         now = utc_now()
@@ -102,6 +100,7 @@ class GenerationJob(DomainModel):
             view_set_id=view_set_id,
             profile=profile,
             render_profile=render_profile,
+            image_provider=image_provider,
             state=initial_state,
             created_at=now,
             updated_at=now,

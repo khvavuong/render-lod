@@ -64,9 +64,7 @@ class RunVideoJob:
                 settings.artifact_dir / "videos",
                 settings,
             )
-            job = self._advance(
-                repository, job, VideoJobState.GENERATING, planned.plan_path
-            )
+            job = self._advance(repository, job, VideoJobState.GENERATING, planned.plan_path)
 
         if job.state is VideoJobState.GENERATING:
             plan_path = self._plan_path(job)
@@ -79,9 +77,7 @@ class RunVideoJob:
                     poll_interval_seconds=settings.veo_poll_interval_seconds,
                     timeout_seconds=settings.veo_timeout_seconds,
                 )
-            job = self._advance(
-                repository, job, VideoJobState.ASSEMBLING, generated.manifest_path
-            )
+            job = self._advance(repository, job, VideoJobState.ASSEMBLING, generated.manifest_path)
 
         if job.state is VideoJobState.ASSEMBLING:
             plan_path = self._plan_path(job)

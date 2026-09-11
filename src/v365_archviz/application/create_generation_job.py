@@ -23,6 +23,7 @@ def generation_idempotency_key(
     view_set_id: str,
     profile: GenerationProfile,
     render_profile: RenderProfile,
+    image_provider: str = "gemini",
 ) -> str:
     payload = "\n".join(
         (
@@ -32,6 +33,7 @@ def generation_idempotency_key(
             view_set_id,
             profile.value,
             render_profile.value,
+            image_provider,
         )
     ).encode()
     return hashlib.sha256(payload).hexdigest()
@@ -48,6 +50,7 @@ class CreateGenerationJob:
         view_set: ViewSet,
         profile: GenerationProfile,
         render_profile: RenderProfile = RenderProfile.STANDARD_EEVEE,
+        image_provider: str = "gemini",
     ) -> CreatedGenerationJob:
         key = generation_idempotency_key(
             project_id,
@@ -56,6 +59,7 @@ class CreateGenerationJob:
             view_set.view_set_id,
             profile,
             render_profile,
+            image_provider,
         )
         candidate = GenerationJob.create(
             job_id=f"job-{key[:16]}",
@@ -66,6 +70,7 @@ class CreateGenerationJob:
             view_set_id=view_set.view_set_id,
             profile=profile,
             render_profile=render_profile,
+            image_provider=image_provider,
             initial_state=WorkflowState.PLANNING_CAMERAS,
         )
         job, created = repository.create_or_get(candidate)

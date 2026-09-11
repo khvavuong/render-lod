@@ -1,11 +1,16 @@
 import base64
+from dataclasses import replace
 from pathlib import Path
 
 import httpx
 from PIL import Image
 
 from v365_archviz.config import Settings
-from v365_archviz.providers.contracts import ViewConditioningInput, ViewSetGenerationInput
+from v365_archviz.providers.contracts import (
+    GeneratedImage,
+    ViewConditioningInput,
+    ViewSetGenerationInput,
+)
 from v365_archviz.providers.gemini import (
     GeminiConditioningMode,
     GeminiImageRenderer,
@@ -137,6 +142,66 @@ def test_minimal_conditioning_sends_only_base_edges_and_references(tmp_path: Pat
     assert result.provider_request_id == "interaction-minimal"
 
 
+def test_photoreal_balanced_uses_only_clean_authority_inputs(tmp_path: Path) -> None:
+    image = tmp_path / "pass.png"
+    reference = tmp_path / "reference.png"
+    Image.new("RGB", (2, 2), "white").save(image)
+    Image.new("RGB", (2, 2), "grey").save(reference)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = __import__("json").loads(request.content)
+        assert body["response_format"] == {
+            "type": "image",
+            "aspect_ratio": "16:9",
+            "image_size": "1K",
+        }
+        assert "generation_config" not in body
+        assert len(body["input"]) == 5
+        labels = [block["text"] for block in body["input"] if block["type"] == "text"]
+        prompt = labels[0]
+        assert "AUTHORITY" in prompt
+        assert "PHOTOGRAPHIC DIRECTION" in prompt
+        assert "VIEW PURPOSE — TEST" in prompt
+        assert any("BASE RGB" in label for label in labels)
+        assert any("REALISM REFERENCE" in label for label in labels)
+        assert not any("DEPTH" in label for label in labels)
+        assert not any("INSTANCE ID" in label for label in labels)
+        assert not any("SEMANTIC ID" in label for label in labels)
+        assert not any("STRUCTURAL EDGES" in label for label in labels)
+        return httpx.Response(
+            200,
+            json={
+                "id": "interaction-balanced",
+                "output": {
+                    "mime_type": "image/png",
+                    "data": base64.b64encode(b"balanced-output").decode(),
+                },
+            },
+        )
+
+    request_input = ViewConditioningInput(
+        view_id="view-01",
+        base_rgb=image,
+        depth=image,
+        instance_id=image,
+        semantic=image,
+        edges=image,
+        prompt="legacy prompt that must not leak\n\nVIEW PURPOSE — TEST",
+        reference_images=(reference, image),
+    )
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        renderer = GeminiImageRenderer(
+            _settings(),
+            client=client,
+            conditioning_mode=GeminiConditioningMode.PHOTOREAL_BALANCED,
+        )
+        result = renderer.generate(request_input)
+
+    assert renderer.name == "gemini-photoreal_balanced"
+    assert renderer.provenance["input_policy"] == ("base_rgb+design_master+one_quality_reference")
+    assert result.provider_request_id == "interaction-balanced"
+
+
 def test_semantic_block_is_neutral_grayscale(tmp_path: Path) -> None:
     semantic = tmp_path / "semantic.png"
     Image.new("RGB", (2, 1), "red").save(semantic)
@@ -202,3 +267,110 @@ def test_marketing_viewset_uses_overall_view_as_design_master(tmp_path: Path) ->
     assert calls[1]["input"][-1]["data"] == base64.b64encode(b"output-1").decode()  # type: ignore[index]
     assert calls[2]["input"][-1]["data"] == base64.b64encode(b"output-1").decode()  # type: ignore[index]
     assert "STYLE ANCHOR" in calls[1]["input"][0]["text"]  # type: ignore[index]
+
+
+def test_viewset_can_route_only_the_master_to_a_quality_model(tmp_path: Path) -> None:
+    image = tmp_path / "pass.png"
+    Image.new("RGB", (2, 2), "white").save(image)
+    models: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = __import__("json").loads(request.content)
+        models.append(body["model"])
+        return httpx.Response(
+            200,
+            json={
+                "id": f"interaction-{len(models)}",
+                "output": {
+                    "mime_type": "image/png",
+                    "data": base64.b64encode(f"output-{len(models)}".encode()).decode(),
+                },
+            },
+        )
+
+    def view(view_id: str) -> ViewConditioningInput:
+        return ViewConditioningInput(
+            view_id=view_id,
+            base_rgb=image,
+            depth=image,
+            instance_id=image,
+            semantic=image,
+            edges=image,
+            prompt="VIEW PURPOSE — TEST",
+        )
+
+    settings = replace(_settings(), gemini_master_image_model="gemini-3-pro-image")
+    generation_request = ViewSetGenerationInput(
+        request_id="generation-1",
+        project_id="project-1",
+        model_revision="model-1",
+        design_revision="design-1",
+        view_set_id="views-1",
+        profile="marketing_hero",
+        views=(view("view-01"), view("view-02")),
+    )
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        renderer = GeminiImageRenderer(
+            settings,
+            client=client,
+            conditioning_mode=GeminiConditioningMode.PHOTOREAL_BALANCED,
+        )
+        renderer.generate_view_set(generation_request)
+
+    assert models == ["gemini-3-pro-image", "gemini-3.1-flash-image"]
+
+
+def test_viewset_reuses_an_external_approved_master(tmp_path: Path) -> None:
+    image = tmp_path / "pass.png"
+    Image.new("RGB", (2, 2), "white").save(image)
+    calls: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = __import__("json").loads(request.content)
+        calls.append(body)
+        return httpx.Response(
+            200,
+            json={
+                "id": f"interaction-{len(calls)}",
+                "output": {
+                    "mime_type": "image/png",
+                    "data": base64.b64encode(f"output-{len(calls)}".encode()).decode(),
+                },
+            },
+        )
+
+    def view(view_id: str) -> ViewConditioningInput:
+        return ViewConditioningInput(
+            view_id=view_id,
+            base_rgb=image,
+            depth=image,
+            instance_id=image,
+            semantic=image,
+            edges=image,
+            prompt="VIEW PURPOSE — TEST",
+        )
+
+    approved = GeneratedImage(b"approved-master", "image/png", "master-request")
+    generation_request = ViewSetGenerationInput(
+        request_id="generation-1",
+        project_id="project-1",
+        model_revision="model-1",
+        design_revision="design-1",
+        view_set_id="views-1",
+        profile="marketing_hero",
+        views=(view("view-02"), view("view-03")),
+        master_view_id="view-01",
+        design_master=approved,
+    )
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        renderer = GeminiImageRenderer(
+            _settings(),
+            client=client,
+            conditioning_mode=GeminiConditioningMode.PHOTOREAL_BALANCED,
+        )
+        result = renderer.generate_view_set(generation_request)
+
+    assert [view.view_id for view in result.views] == ["view-02", "view-03"]
+    assert len(calls) == 2
+    expected_master = base64.b64encode(b"approved-master").decode()
+    assert all(call["input"][-1]["data"] == expected_master for call in calls)  # type: ignore[index]

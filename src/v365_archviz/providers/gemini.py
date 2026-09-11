@@ -31,6 +31,7 @@ class GeminiConditioningMode(str, Enum):
 
     FULL = "full"
     MINIMAL = "minimal"
+    PHOTOREAL_BALANCED = "photoreal_balanced"
 
 
 def _image_block(path: Path) -> dict[str, str]:
@@ -133,6 +134,22 @@ class GeminiImageRenderer:
             return "gemini"
         return f"gemini-{self._conditioning_mode.value}"
 
+    @property
+    def provenance(self) -> dict[str, object]:
+        return {
+            "model": self._settings.gemini_image_model,
+            "master_model": (
+                self._settings.gemini_master_image_model or self._settings.gemini_image_model
+            ),
+            "conditioning_mode": self._conditioning_mode.value,
+            "input_policy": (
+                "base_rgb+design_master+one_quality_reference"
+                if self._conditioning_mode is GeminiConditioningMode.PHOTOREAL_BALANCED
+                else "legacy_control_pass_conditioning"
+            ),
+            "store_interactions": self._settings.gemini_store_interactions,
+        }
+
     def close(self) -> None:
         if self._owns_client:
             self._client.close()
@@ -147,7 +164,148 @@ class GeminiImageRenderer:
         self,
         request: ViewConditioningInput,
         style_anchor: GeneratedImage | None = None,
+        identity_prompt: str = "",
+        model: str | None = None,
     ) -> GeneratedImage:
+        if self._conditioning_mode is GeminiConditioningMode.PHOTOREAL_BALANCED:
+            input_blocks = self._photoreal_balanced_input(
+                request,
+                style_anchor=style_anchor,
+                identity_prompt=identity_prompt,
+            )
+        else:
+            input_blocks = self._legacy_input(
+                request,
+                style_anchor=style_anchor,
+                identity_prompt=identity_prompt,
+            )
+        payload = {
+            "model": model or self._settings.gemini_image_model,
+            "input": input_blocks,
+            "store": self._settings.gemini_store_interactions,
+            "response_format": {
+                "type": "image",
+                "aspect_ratio": request.aspect_ratio,
+                "image_size": request.image_size,
+            },
+        }
+
+        try:
+            response = self._client.post(
+                self._endpoint,
+                json=payload,
+                headers={"x-goog-api-key": self._api_key},
+            )
+            response.raise_for_status()
+            body = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
+            suffix = f" (HTTP {status})" if status else ""
+            raise ProviderError(f"Gemini request failed{suffix}") from exc
+
+        output = _find_output_image(body)
+        if output is None:
+            raise ProviderError("Gemini response did not contain an output image")
+        content, media_type = output
+        request_id = body.get("id") if isinstance(body, dict) else None
+        return GeneratedImage(
+            content=content,
+            media_type=media_type,
+            provider_request_id=request_id if isinstance(request_id, str) else None,
+        )
+
+    @staticmethod
+    def _view_direction(prompt: str) -> str:
+        marker = "VIEW PURPOSE"
+        position = prompt.rfind(marker)
+        if position >= 0:
+            return prompt[position:].strip()
+        return prompt.strip()
+
+    def _photoreal_balanced_input(
+        self,
+        request: ViewConditioningInput,
+        *,
+        style_anchor: GeneratedImage | None,
+        identity_prompt: str,
+    ) -> list[dict[str, str]]:
+        view_direction = self._view_direction(request.prompt)
+        design_authority = identity_prompt.strip() or "Use the approved project Design DNA."
+        prompt = (
+            "AUTHORITY\n"
+            "The BASE RGB is the sole authority for camera, composition, massing, footprint, "
+            "building count, roof orientation and continuity, roads, gates, fences, authored "
+            "landscape zones and object placement. Its flat materials, simplified vegetation, "
+            "background, lighting and CGI appearance are not visual-quality references.\n\n"
+            "IMMUTABLE GEOMETRY\n"
+            "Preserve those elements exactly. Do not add, delete, duplicate, move, crop or "
+            "redesign primary or auxiliary buildings and site circulation. Preserve the exact "
+            "visible facade elevation, authored openings, accent frames and loading doors; the "
+            "Design Master never authorizes transferring its windows or entrances to this view.\n\n"
+            f"DESIGN IDENTITY\n{design_authority}\n\n"
+            "BOUNDED DESIGN FREEDOM\n"
+            "Within the existing envelopes, add construction-plausible industrial materials, "
+            "facade joints, doors, canopies, drainage, planting texture and sparse correctly "
+            "scaled entourage. Treat the setting as a developed Vietnamese industrial estate "
+            "with rational collector roads, curbs, drainage, divided plots, low grass and sparse "
+            "street-tree rows. Keep authored context buildings as quiet neutral low-detail factory "
+            "massing with reduced contrast and atmospheric fade, not transparent glass boxes. "
+            "Do not invent forest, wilderness, desert, mountains, water, dense urban towers or "
+            "rural scenery unless visible in the Base RGB.\n\n"
+            "PHOTOGRAPHIC DIRECTION\n"
+            "Create a professional real-world architectural photograph with physically plausible "
+            "daylight, contact shadows, material micro-roughness, glazing reflections, atmospheric "
+            "depth, subtle construction tolerances, non-uniform ground tone and restrained "
+            "operational wear. Use natural vegetation variation, sensor-level grain and gentle "
+            "lens falloff. The "
+            "result must look captured at a real built site, not exported from architectural "
+            "software. Avoid a clean BIM/CGI illustration, miniature/isometric appearance, "
+            "futuristic forms, semantic colors, text and invented logos.\n\n"
+            f"{view_direction}"
+        )
+        blocks: list[dict[str, str]] = [
+            {"type": "text", "text": prompt},
+            {
+                "type": "text",
+                "text": "BASE RGB — sole geometry, camera and composition authority:",
+            },
+            _image_block(request.base_rgb),
+        ]
+        if style_anchor is not None:
+            blocks.extend(
+                (
+                    {
+                        "type": "text",
+                        "text": (
+                            "APPROVED DESIGN MASTER — appearance identity only; never copy its "
+                            "camera, layout or object positions:"
+                        ),
+                    },
+                    _generated_image_block(style_anchor),
+                )
+            )
+        if request.reference_images:
+            blocks.extend(
+                (
+                    {
+                        "type": "text",
+                        "text": (
+                            "REALISM REFERENCE — photographic finish only; never copy its "
+                            "geometry, project, palette, facade motif, camera or site layout:"
+                        ),
+                    },
+                    _image_block(request.reference_images[0]),
+                )
+            )
+        return blocks
+
+    def _legacy_input(
+        self,
+        request: ViewConditioningInput,
+        *,
+        style_anchor: GeneratedImage | None,
+        identity_prompt: str,
+    ) -> list[dict[str, str]]:
         anchor_instruction = (
             " The final attached image is a generated STYLE ANCHOR from another approved "
             "camera of this exact project. Match only its facade language, material identity, "
@@ -164,6 +322,7 @@ class GeminiImageRenderer:
         )
         labeled_prompt = (
             f"{request.prompt}\n\n"
+            f"{identity_prompt}\n\n"
             f"The attached images are ordered as: {input_order}, "
             "then optional approved references. Preserve the camera and all hard geometry "
             "from the base RGB; any auxiliary passes are constraints. Approved references are "
@@ -236,51 +395,20 @@ class GeminiImageRenderer:
                 }
             )
             input_blocks.append(_generated_image_block(style_anchor))
-        payload = {
-            "model": self._settings.gemini_image_model,
-            "input": input_blocks,
-            "store": self._settings.gemini_store_interactions,
-            "generation_config": {
-                "image_config": {
-                    "aspect_ratio": request.aspect_ratio,
-                    "image_size": request.image_size,
-                }
-            },
-        }
-
-        try:
-            response = self._client.post(
-                self._endpoint,
-                json=payload,
-                headers={"x-goog-api-key": self._api_key},
-            )
-            response.raise_for_status()
-            body = response.json()
-        except (httpx.HTTPError, ValueError) as exc:
-            status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
-            suffix = f" (HTTP {status})" if status else ""
-            raise ProviderError(f"Gemini request failed{suffix}") from exc
-
-        output = _find_output_image(body)
-        if output is None:
-            raise ProviderError("Gemini response did not contain an output image")
-        content, media_type = output
-        request_id = body.get("id") if isinstance(body, dict) else None
-        return GeneratedImage(
-            content=content,
-            media_type=media_type,
-            provider_request_id=request_id if isinstance(request_id, str) else None,
-        )
+        return input_blocks
 
     def generate(self, request: ViewConditioningInput) -> GeneratedImage:
         return self._generate(request)
 
     def generate_view_set(self, request: ViewSetGenerationInput) -> GeneratedViewSet:
-        """Generate a style-locked set for quality profiles and retain deterministic ordering."""
+        """Generate every multi-view set from one project appearance authority."""
 
-        if request.profile not in {"base_pro", "marketing_hero"} or len(request.views) < 2:
+        if len(request.views) < 2:
             views = tuple(
-                GeneratedView(view_id=view.view_id, image=self.generate(view))
+                GeneratedView(
+                    view_id=view.view_id,
+                    image=self._generate(view, identity_prompt=request.identity_prompt),
+                )
                 for view in request.views
             )
             return GeneratedViewSet(request_id=request.request_id, views=views)
@@ -290,13 +418,28 @@ class GeminiImageRenderer:
         # close facade view is a poor master because the provider must invent the unseen
         # appearance of the rest of the campus.
         anchor_request = next(
-            (view for view in request.views if view.view_id == "view-01"), request.views[0]
+            (view for view in request.views if view.view_id == request.master_view_id),
+            request.views[0],
         )
-        anchor = self.generate(anchor_request)
-        generated_by_id = {anchor_request.view_id: anchor}
+        if request.design_master is None:
+            anchor = self._generate(
+                anchor_request,
+                identity_prompt=request.identity_prompt,
+                model=self._settings.gemini_master_image_model,
+            )
+            generated_by_id = {anchor_request.view_id: anchor}
+        else:
+            anchor = request.design_master
+            generated_by_id = {}
         for view in request.views:
-            if view.view_id != anchor_request.view_id:
-                generated_by_id[view.view_id] = self._generate(view, style_anchor=anchor)
+            if request.design_master is not None and view.view_id == request.master_view_id:
+                generated_by_id[view.view_id] = anchor
+            elif request.design_master is not None or view.view_id != anchor_request.view_id:
+                generated_by_id[view.view_id] = self._generate(
+                    view,
+                    style_anchor=anchor,
+                    identity_prompt=request.identity_prompt,
+                )
         views = tuple(
             GeneratedView(view_id=view.view_id, image=generated_by_id[view.view_id])
             for view in request.views

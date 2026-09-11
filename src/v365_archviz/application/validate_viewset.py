@@ -8,9 +8,10 @@ import json
 import mimetypes
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
+from numpy.typing import NDArray
 from PIL import Image, UnidentifiedImageError
 
 from v365_archviz.artifacts import atomic_write
@@ -66,6 +67,7 @@ class ValidateGeneratedViewSet:
             findings: list[dict[str, str]] = []
             gate_evidence: dict[str, dict[str, Any]] = {
                 "geometry": {"status": "review", "code": "evidence_not_available"},
+                "semantic": {"status": "review", "code": "evidence_not_available"},
                 "material": {"status": "review", "code": "evidence_not_available"},
                 "camera": camera_evidence.get(
                     camera.view_id,
@@ -73,9 +75,7 @@ class ValidateGeneratedViewSet:
                 ),
             }
             if gate_evidence["camera"]["status"] == "fail":
-                findings.append(
-                    self._finding("error", "camera_preflight_failed", camera.view_id)
-                )
+                findings.append(self._finding("error", "camera_preflight_failed", camera.view_id))
             manifest_path = generated_root / camera.view_id / "generation_manifest.json"
             manifest: dict[str, Any] = {}
             if not manifest_path.is_file():
@@ -172,6 +172,16 @@ class ValidateGeneratedViewSet:
                     if geometry["status"] == "fail":
                         findings.append(
                             self._finding("error", str(geometry["code"]), camera.view_id)
+                        )
+                    semantic = self._semantic_retention_evidence(
+                        image_path,
+                        render_root / camera.view_id / "semantic.png",
+                        render_root / camera.view_id / "semantic_id_manifest.json",
+                    )
+                    gate_evidence["semantic"] = semantic
+                    if semantic["status"] == "fail":
+                        findings.append(
+                            self._finding("error", str(semantic["code"]), camera.view_id)
                         )
                     material = self._palette_evidence(
                         image_path,
@@ -307,6 +317,29 @@ class ValidateGeneratedViewSet:
         mask_path: Path,
         output_manifest: dict[str, Any],
     ) -> dict[str, Any]:
+        if output_manifest.get("geometry_protection_mode") == "validation_only":
+            screen_passed = (
+                output_manifest.get("geometry_protection_status") == "edge_alignment_screen_passed"
+            )
+            return {
+                "status": "pass" if screen_passed else "fail",
+                "code": output_manifest.get(
+                    "geometry_protection_status", "edge_alignment_review_required"
+                ),
+                "edge_alignment_recall": output_manifest.get("edge_alignment_recall"),
+                "edge_alignment_precision": output_manifest.get("edge_alignment_precision"),
+                "edge_alignment_f1": output_manifest.get("edge_alignment_f1"),
+                "edge_bidirectional_chamfer_px": output_manifest.get(
+                    "edge_bidirectional_chamfer_px"
+                ),
+                "edge_alignment_threshold": output_manifest.get("edge_alignment_threshold"),
+                "edge_f1_threshold": output_manifest.get("edge_f1_threshold"),
+                "edge_chamfer_threshold_px": output_manifest.get("edge_chamfer_threshold_px"),
+                "note": (
+                    "Photoreal pixels were preserved. This v2 structural screen is deterministic; "
+                    "semantic topology and human design review remain separate gates."
+                ),
+            }
         if not output_manifest.get("protected_composite"):
             return {"status": "review", "code": "protected_composite_not_recorded"}
         if not base_path.is_file() or not mask_path.is_file():
@@ -321,10 +354,13 @@ class ValidateGeneratedViewSet:
                     dtype=np.uint8,
                 )
             with Image.open(mask_path) as source:
-                locked = np.asarray(
-                    source.convert("L").resize(size, Image.Resampling.NEAREST),
-                    dtype=np.uint8,
-                ) >= 128
+                locked = (
+                    np.asarray(
+                        source.convert("L").resize(size, Image.Resampling.NEAREST),
+                        dtype=np.uint8,
+                    )
+                    >= 128
+                )
         except OSError:
             return {"status": "fail", "code": "protected_geometry_input_invalid"}
         changed = int(np.count_nonzero(np.any(output != base, axis=2) & locked))
@@ -334,6 +370,84 @@ class ValidateGeneratedViewSet:
             "code": "protected_pixels_preserved" if changed == 0 else "protected_pixels_changed",
             "protected_pixels": protected,
             "changed_pixels": changed,
+        }
+
+    @staticmethod
+    def _semantic_retention_evidence(
+        output_path: Path,
+        semantic_path: Path,
+        semantic_manifest_path: Path,
+        *,
+        color_tolerance: int = 36,
+        minimum_landscape_green_ratio: float = 0.30,
+        minimum_road_surface_ratio: float = 0.50,
+    ) -> dict[str, Any]:
+        if not semantic_path.is_file() or not semantic_manifest_path.is_file():
+            return {"status": "review", "code": "semantic_retention_input_missing"}
+        try:
+            manifest = json.loads(semantic_manifest_path.read_text(encoding="utf-8"))
+            roles = manifest["roles"]
+            names = [str(item["semantic_role"]) for item in roles]
+            colors = np.asarray([item["srgb8"] for item in roles], dtype=np.int32)
+            with Image.open(output_path) as source:
+                output = source.convert("RGB")
+                hsv = np.asarray(output.convert("HSV"), dtype=np.uint8)
+            with Image.open(semantic_path) as source:
+                semantic = np.asarray(
+                    source.convert("RGB").resize(output.size, Image.Resampling.NEAREST),
+                    dtype=np.int32,
+                )
+        except (OSError, KeyError, TypeError, ValueError, UnidentifiedImageError):
+            return {"status": "fail", "code": "semantic_retention_input_invalid"}
+        if colors.ndim != 2 or colors.shape[1] != 3 or not len(colors):
+            return {"status": "fail", "code": "semantic_retention_palette_invalid"}
+
+        pixels = semantic.reshape(-1, 3)
+        distances = np.sum((pixels[:, None, :] - colors[None, :, :]) ** 2, axis=2)
+        nearest = np.argmin(distances, axis=1).reshape(semantic.shape[:2])
+        accepted = np.min(distances, axis=1).reshape(semantic.shape[:2]) <= color_tolerance**2
+
+        def role_mask(role_names: set[str]) -> NDArray[np.bool_]:
+            indexes = [index for index, name in enumerate(names) if name in role_names]
+            if not indexes:
+                return np.zeros(semantic.shape[:2], dtype=np.bool_)
+            return cast(NDArray[np.bool_], accepted & np.isin(nearest, indexes))
+
+        landscape = role_mask({"landscape_zone"})
+        roads = role_mask({"site_road", "sidewalk", "service_yard", "parking", "loading_zone"})
+        # Pillow hue is 0..255. This range includes yellow-green through blue-green while
+        # excluding neutral paving and the semantic annotation colors from the source pass.
+        green = (
+            (hsv[:, :, 0] >= 38)
+            & (hsv[:, :, 0] <= 112)
+            & (hsv[:, :, 1] >= 32)
+            & (hsv[:, :, 2] >= 32)
+        )
+        road_surface = (hsv[:, :, 1] <= 105) & (hsv[:, :, 2] >= 35)
+        landscape_ratio = (
+            float(np.count_nonzero(green & landscape)) / int(np.count_nonzero(landscape))
+            if np.any(landscape)
+            else None
+        )
+        road_ratio = (
+            float(np.count_nonzero(road_surface & roads)) / int(np.count_nonzero(roads))
+            if np.any(roads)
+            else None
+        )
+        failures: list[str] = []
+        if landscape_ratio is not None and landscape_ratio < minimum_landscape_green_ratio:
+            failures.append("authored_landscape_not_retained")
+        if road_ratio is not None and road_ratio < minimum_road_surface_ratio:
+            failures.append("authored_circulation_surface_not_retained")
+        return {
+            "status": "fail" if failures else "pass",
+            "code": failures[0] if failures else "semantic_surface_retention_passed",
+            "findings": failures,
+            "landscape_green_ratio": landscape_ratio,
+            "landscape_green_threshold": minimum_landscape_green_ratio,
+            "road_surface_ratio": road_ratio,
+            "road_surface_threshold": minimum_road_surface_ratio,
+            "threshold_status": "benchmark_hypothesis",
         }
 
     @staticmethod
@@ -351,18 +465,19 @@ class ValidateGeneratedViewSet:
                 image = source.convert("RGB")
                 hsv = np.asarray(image.convert("HSV"), dtype=np.uint8)
             with Image.open(bounded_mask_path) as source:
-                bounded = np.asarray(
-                    source.convert("L").resize(image.size, Image.Resampling.NEAREST),
-                    dtype=np.uint8,
-                ) >= 128
+                bounded = (
+                    np.asarray(
+                        source.convert("L").resize(image.size, Image.Resampling.NEAREST),
+                        dtype=np.uint8,
+                    )
+                    >= 128
+                )
         except OSError:
             return {"status": "fail", "code": "palette_evidence_input_invalid"}
         allowed_hues = []
         for value in palette:
             normalized = value.lstrip("#")
-            red, green, blue = (
-                int(normalized[index : index + 2], 16) / 255 for index in (0, 2, 4)
-            )
+            red, green, blue = (int(normalized[index : index + 2], 16) / 255 for index in (0, 2, 4))
             allowed_hue, saturation, _ = colorsys.rgb_to_hsv(red, green, blue)
             if saturation >= 0.12:
                 allowed_hues.append(allowed_hue * 255)

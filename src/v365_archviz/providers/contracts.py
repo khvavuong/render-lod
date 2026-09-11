@@ -67,6 +67,9 @@ class ViewSetGenerationInput:
     view_set_id: str
     profile: str
     views: tuple[ViewConditioningInput, ...]
+    identity_prompt: str = ""
+    master_view_id: str = "view-01"
+    design_master: GeneratedImage | None = None
 
 
 @dataclass(frozen=True)

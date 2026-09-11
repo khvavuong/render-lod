@@ -140,6 +140,55 @@ def test_protected_compositor_restores_locked_base_pixels(tmp_path: Path) -> Non
     assert geometry["changed_pixels"] == 0
 
 
+def test_validation_only_protection_keeps_photoreal_provider_pixels(tmp_path: Path) -> None:
+    render = tmp_path / "renders" / "view-01"
+    generated = tmp_path / "generated" / "view-01"
+    _save_rgb(render / "base_rgb.png", (255, 0, 0), (4, 2))
+    Image.new("L", (4, 2), 255).save(render / "locked_mask.png")
+    Image.new("L", (4, 2), 0).save(render / "edges.png")
+    (render / "control_pack_manifest.json").write_text("{}", encoding="utf-8")
+    generated.mkdir(parents=True)
+    (generated / "refined.png").write_bytes(_png_bytes((0, 0, 255), (4, 2)))
+    (generated / "generation_manifest.json").write_text(
+        json.dumps({"output": {"media_type": "image/png", "sha256": "old"}}),
+        encoding="utf-8",
+    )
+
+    result = ProtectRefinement().execute(
+        tmp_path / "renders",
+        tmp_path / "generated",
+        restore_locked_pixels=False,
+    )
+
+    with Image.open(generated / "refined.png") as image:
+        assert image.getpixel((0, 0)) == (0, 0, 255)
+    document = json.loads((generated / "generation_manifest.json").read_text())
+    assert document["output"]["protected_composite"] is False
+    assert document["output"]["geometry_protection_mode"] == "validation_only"
+    assert result.promoted_count == 1
+
+
+def test_geometry_v2_penalizes_invented_locked_edges(tmp_path: Path) -> None:
+    size = (12, 8)
+    generated = Image.new("L", size, 0)
+    for y in range(size[1]):
+        generated.putpixel((3, y), 255)
+        generated.putpixel((9, y), 255)
+    authoritative = Image.new("L", size, 0)
+    for y in range(size[1]):
+        authoritative.putpixel((3, y), 255)
+    edge_path = tmp_path / "edges.png"
+    authoritative.save(edge_path)
+    locked = Image.new("L", size, 255)
+
+    metrics = ProtectRefinement._edge_geometry_metrics(generated.convert("RGB"), edge_path, locked)
+
+    assert metrics.recall == 1.0
+    assert metrics.precision < metrics.recall
+    assert metrics.f1 < 1.0
+    assert metrics.bidirectional_chamfer_px > 0
+
+
 def test_palette_gate_rejects_large_unapproved_saturated_region(tmp_path: Path) -> None:
     output = tmp_path / "output.png"
     bounded = tmp_path / "bounded.png"
@@ -154,6 +203,23 @@ def test_palette_gate_rejects_large_unapproved_saturated_region(tmp_path: Path) 
 
     assert evidence["status"] == "fail"
     assert evidence["code"] == "palette_leakage"
+
+
+def test_semantic_gate_rejects_paving_over_authored_landscape(tmp_path: Path) -> None:
+    output = tmp_path / "output.png"
+    semantic = tmp_path / "semantic.png"
+    manifest = tmp_path / "semantic_id_manifest.json"
+    _save_rgb(output, (170, 170, 170))
+    _save_rgb(semantic, (63, 231, 97))
+    manifest.write_text(
+        json.dumps({"roles": [{"semantic_role": "landscape_zone", "srgb8": [63, 231, 97]}]}),
+        encoding="utf-8",
+    )
+
+    evidence = ValidateGeneratedViewSet._semantic_retention_evidence(output, semantic, manifest)
+
+    assert evidence["status"] == "fail"
+    assert evidence["code"] == "authored_landscape_not_retained"
 
 
 def test_board_prefers_validated_refined_output_over_provider_source(tmp_path: Path) -> None:

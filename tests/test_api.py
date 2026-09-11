@@ -55,11 +55,14 @@ def test_uploads_and_inspects_rvt_model(tmp_path, monkeypatch) -> None:  # type:
 
 def test_capabilities_never_expose_credentials(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setenv("GEMINI_API_KEY", "secret-value")
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-secret-value")
     response = client.get("/v1/system/capabilities")
 
     assert response.status_code == 200
     assert response.json()["gemini_image_generation"] is True
+    assert response.json()["openai_image_generation"] is True
     assert "secret-value" not in response.text
+    assert "openai-secret-value" not in response.text
 
 
 def test_design_revision_and_view_set_are_idempotent(
@@ -141,9 +144,7 @@ def test_design_revision_and_view_set_are_idempotent(
         "board",
         "video",
     ]
-    image_response = client.get(
-        f"/v1/view-sets/{view_set_id}/outputs/image-view-01"
-    )
+    image_response = client.get(f"/v1/view-sets/{view_set_id}/outputs/image-view-01")
     assert image_response.status_code == 200
     assert image_response.content == b"generated-image"
 
@@ -199,9 +200,7 @@ def test_video_generation_is_an_explicit_idempotent_job(tmp_path, monkeypatch) -
     view_set_path = tmp_path / "scenes" / "model" / "designs" / "design" / "view_set.json"
     view_set_path.parent.mkdir(parents=True)
     view_set_path.write_text(
-        ViewSet(
-            view_set_id="viewset", design_revision="design", cameras=cameras
-        ).model_dump_json(),
+        ViewSet(view_set_id="viewset", design_revision="design", cameras=cameras).model_dump_json(),
         encoding="utf-8",
     )
     for camera in cameras:

@@ -21,7 +21,7 @@ from v365_archviz.providers.contracts import (
     ViewConditioningInput,
 )
 
-PROMPT_VERSION = "geometry-first-vietnam-industrial-v13-site-access-and-auxiliary"
+PROMPT_VERSION = "photoreal-balanced-v1"
 DEFAULT_PROMPT = """Create a photorealistic professional architectural visualization of this
 Vietnamese industrial project. Treat the base render and auxiliary passes as immutable spatial
 geometry: preserve the exact camera, site boundary, authored road and sidewalk centerlines and
@@ -197,6 +197,22 @@ class RefineView:
                 **{
                     f"reference_{index:02d}": _sha256(path)
                     for index, path in enumerate(reference_images, start=1)
+                },
+            },
+            "input_roles": {
+                "base_rgb": "geometry_authority",
+                "depth": "qa_evidence_only",
+                "instance_id": "qa_evidence_only",
+                "semantic": "qa_evidence_only",
+                "edges": "qa_evidence_only",
+                **(
+                    {"structure_guide": "optional_provider_control"}
+                    if "structure_guide" in inputs
+                    else {}
+                ),
+                **{
+                    f"reference_{index:02d}": "quality_only"
+                    for index, _ in enumerate(reference_images, start=1)
                 },
             },
             "output": {

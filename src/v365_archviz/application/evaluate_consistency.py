@@ -107,7 +107,9 @@ class EvaluateConsistency:
             code = str(finding.get("code", "unknown_integrity_error"))
             gate = (
                 QAGate.GEOMETRY
-                if code.startswith("protected_")
+                if code.startswith(("protected_", "edge_", "review_edge_"))
+                else QAGate.SEMANTIC
+                if code.startswith(("authored_landscape_", "authored_circulation_"))
                 else QAGate.MATERIAL
                 if code.startswith("palette_")
                 else QAGate.CAMERA
@@ -122,7 +124,7 @@ class EvaluateConsistency:
                     code=code,
                     message=str(finding.get("message", code)),
                     view_ids=() if view_id == "view-set" else (view_id,),
-                    repairable=False,
+                    repairable=gate in {QAGate.GEOMETRY, QAGate.SEMANTIC, QAGate.MATERIAL},
                 )
             )
         return findings
@@ -132,10 +134,8 @@ class EvaluateConsistency:
         views = [view for view in document.get("views", []) if isinstance(view, dict)]
         view_ids = tuple(str(view.get("view_id")) for view in views if view.get("view_id"))
         findings: list[QAFinding] = []
-        for gate in (QAGate.GEOMETRY, QAGate.MATERIAL, QAGate.CAMERA):
-            evidence = [
-                view.get("gate_evidence", {}).get(gate.value, {}) for view in views
-            ]
+        for gate in (QAGate.GEOMETRY, QAGate.SEMANTIC, QAGate.MATERIAL, QAGate.CAMERA):
+            evidence = [view.get("gate_evidence", {}).get(gate.value, {}) for view in views]
             if not evidence or not all(item.get("status") == "pass" for item in evidence):
                 continue
             findings.append(

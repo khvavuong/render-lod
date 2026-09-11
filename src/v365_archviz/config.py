@@ -34,6 +34,13 @@ class Settings:
     stability_api_key: str | None = None
     stability_control_strength: float = 0.85
     stability_seed: int = 365100
+    image_provider: str = "gemini"
+    gemini_conditioning_mode: str = "photoreal_balanced"
+    gemini_master_image_model: str | None = None
+    openai_api_key: str | None = None
+    openai_image_model: str = "gpt-image-2.5-sunburst"
+    openai_image_quality: str = "high"
+    openai_image_size: str = "1536x1024"
     local_worker_enabled: bool = True
     veo_model: str = "veo-3.1-lite-generate-preview"
     veo_resolution: str = "720p"
@@ -70,13 +77,16 @@ class Settings:
             aps_region=os.getenv("APS_REGION", "US"),
             aps_bucket_key=os.getenv("APS_BUCKET_KEY"),
             stability_api_key=os.getenv("STABILITY_API_KEY"),
-            stability_control_strength=float(
-                os.getenv("STABILITY_CONTROL_STRENGTH", "0.85")
-            ),
+            stability_control_strength=float(os.getenv("STABILITY_CONTROL_STRENGTH", "0.85")),
             stability_seed=int(os.getenv("STABILITY_SEED", "365100")),
-            local_worker_enabled=_as_bool(
-                os.getenv("V365_ENABLE_LOCAL_WORKER"), default=True
-            ),
+            image_provider=os.getenv("V365_IMAGE_PROVIDER", "gemini"),
+            gemini_conditioning_mode=os.getenv("GEMINI_CONDITIONING_MODE", "photoreal_balanced"),
+            gemini_master_image_model=os.getenv("GEMINI_MASTER_IMAGE_MODEL") or None,
+            openai_api_key=os.getenv("OPENAI_API_KEY"),
+            openai_image_model=os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-2.5-sunburst"),
+            openai_image_quality=os.getenv("OPENAI_IMAGE_QUALITY", "high"),
+            openai_image_size=os.getenv("OPENAI_IMAGE_SIZE", "1536x1024"),
+            local_worker_enabled=_as_bool(os.getenv("V365_ENABLE_LOCAL_WORKER"), default=True),
         )
 
     @property
@@ -90,3 +100,7 @@ class Settings:
     @property
     def stability_configured(self) -> bool:
         return bool(self.stability_api_key)
+
+    @property
+    def openai_configured(self) -> bool:
+        return bool(self.openai_api_key)

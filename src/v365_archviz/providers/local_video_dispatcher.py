@@ -17,9 +17,7 @@ class LocalVideoDispatcher:
         self._queue: queue.Queue[str] = queue.Queue()
         self._lock = threading.Lock()
         self._scheduled: set[str] = set()
-        self._thread = threading.Thread(
-            target=self._consume, name="v365-video-worker", daemon=True
-        )
+        self._thread = threading.Thread(target=self._consume, name="v365-video-worker", daemon=True)
         self._thread.start()
 
     def submit(self, video_job_id: str) -> bool:

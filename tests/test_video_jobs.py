@@ -43,12 +43,8 @@ def test_video_job_is_independent_and_idempotent(tmp_path: Path) -> None:
     repository = LocalVideoJobRepository(tmp_path / "metadata")
     use_case = CreateVideoJob()
 
-    first = use_case.execute(
-        repository, _completed_image_job(), _settings(tmp_path), shot_count=6
-    )
-    second = use_case.execute(
-        repository, _completed_image_job(), _settings(tmp_path), shot_count=6
-    )
+    first = use_case.execute(repository, _completed_image_job(), _settings(tmp_path), shot_count=6)
+    second = use_case.execute(repository, _completed_image_job(), _settings(tmp_path), shot_count=6)
 
     assert first.created is True
     assert second.created is False
@@ -58,12 +54,16 @@ def test_video_job_is_independent_and_idempotent(tmp_path: Path) -> None:
 
 
 def test_video_job_has_its_own_transition_rules(tmp_path: Path) -> None:
-    job = CreateVideoJob().execute(
-        LocalVideoJobRepository(tmp_path / "metadata"),
-        _completed_image_job(),
-        _settings(tmp_path),
-        shot_count=6,
-    ).job
+    job = (
+        CreateVideoJob()
+        .execute(
+            LocalVideoJobRepository(tmp_path / "metadata"),
+            _completed_image_job(),
+            _settings(tmp_path),
+            shot_count=6,
+        )
+        .job
+    )
 
     with pytest.raises(ValueError, match="invalid video transition"):
         job.transition(VideoJobState.GENERATING)

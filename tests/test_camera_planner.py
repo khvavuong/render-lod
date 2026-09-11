@@ -23,11 +23,9 @@ def test_plans_six_reproducible_cameras(tmp_path: Path, valid_scene: CanonicalSc
         ViewRole.OFFICE_HERO,
         ViewRole.LOADING_DETAIL,
     }
-    assert first.view_set_id.endswith("standard-v16")
+    assert first.view_set_id.endswith("standard-v20")
     close_hero = next(camera for camera in first.cameras if camera.role is ViewRole.HERO)
-    human_view = next(
-        camera for camera in first.cameras if camera.role is ViewRole.LOADING_DETAIL
-    )
+    human_view = next(camera for camera in first.cameras if camera.role is ViewRole.LOADING_DETAIL)
     assert close_hero.position[2] < 30
     assert human_view.position[2] == 1.65
     assert human_view.focal_length_mm == 30

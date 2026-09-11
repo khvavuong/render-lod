@@ -68,8 +68,7 @@ class BrandDeliverables:
                 output_metadata["brand_watermark"] = True
                 atomic_write(
                     generation_manifest_path,
-                    json.dumps(generation_manifest, ensure_ascii=False, indent=2).encode()
-                    + b"\n",
+                    json.dumps(generation_manifest, ensure_ascii=False, indent=2).encode() + b"\n",
                 )
             branded_images.append(output)
 

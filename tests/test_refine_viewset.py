@@ -11,6 +11,7 @@ from v365_archviz.providers.contracts import (
     GeneratedImage,
     GeneratedView,
     GeneratedViewSet,
+    ImageProviderCapabilities,
     ViewConditioningInput,
     ViewSetGenerationInput,
 )
@@ -18,11 +19,16 @@ from v365_archviz.providers.contracts import (
 
 class FakeViewSetRenderer:
     name = "fake-viewset"
+    capabilities = ImageProviderCapabilities(supports_multi_reference=True)
+
+    def __init__(self) -> None:
+        self.last_request: ViewSetGenerationInput | None = None
 
     def generate(self, request: ViewConditioningInput) -> GeneratedImage:
         raise AssertionError("the view-set use case must not call single-view generation")
 
     def generate_view_set(self, request: ViewSetGenerationInput) -> GeneratedViewSet:
+        self.last_request = request
         buffer = io.BytesIO()
         Image.new("RGB", (16, 9), "green").save(buffer, format="PNG")
         return GeneratedViewSet(
@@ -86,8 +92,9 @@ def test_refines_an_ordered_view_set_as_one_unit(tmp_path: Path) -> None:
         for name in ("base_rgb", "depth", "instance_id", "semantic", "edges"):
             Image.new("RGB", (16, 9), "white").save(target / f"{name}.png")
 
+    renderer = FakeViewSetRenderer()
     result = RefineViewSet().execute(
-        FakeViewSetRenderer(),
+        renderer,
         render_root,
         tmp_path / "generated",
         view_set_path,
@@ -100,4 +107,14 @@ def test_refines_an_ordered_view_set_as_one_unit(tmp_path: Path) -> None:
     manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
     assert manifest["model_revision"] == "model-revision"
     assert manifest["grammar_version"] == "grammar-v1"
+    assert manifest["generation_strategy"] == "design-master-sequential"
+    assert manifest["generated_view_ids"] == ["view-01", "view-02"]
+    assert manifest["resumed_from_approved_master"] is False
+    assert manifest["master_sha256"]
+    identity = json.loads(result.identity_pack_path.read_text(encoding="utf-8"))
+    assert identity["master_view_id"] == "view-01"
+    assert identity["authority_order"][0] == "current_view_base_geometry"
     assert [view["view_id"] for view in manifest["views"]] == ["view-01", "view-02"]
+    assert renderer.last_request is not None
+    assert "PRIMARY VISIBLE FACADE" in renderer.last_request.views[0].prompt
+    assert "approved generated loading docks=0" in renderer.last_request.views[0].prompt

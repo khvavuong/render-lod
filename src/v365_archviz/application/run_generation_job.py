@@ -22,7 +22,7 @@ from v365_archviz.domain.jobs import GenerationJob
 from v365_archviz.domain.workflow import Camera, ViewSet, WorkflowState
 from v365_archviz.errors import V365Error
 from v365_archviz.providers.docker_conditioning import DockerConditioningRenderer
-from v365_archviz.providers.gemini import GeminiImageRenderer
+from v365_archviz.providers.image_factory import create_image_renderer
 from v365_archviz.providers.local_jobs import LocalJobRepository
 
 logger = logging.getLogger(__name__)
@@ -72,7 +72,7 @@ class RunGenerationJob:
 
         if job.state is WorkflowState.GENERATING_VIEWSET:
             _, prompt = build_refinement_prompt(paths.design_dna)
-            with GeminiImageRenderer(settings) as renderer:
+            with create_image_renderer(settings, job.image_provider) as renderer:
                 generated = RefineViewSet().execute(
                     renderer,
                     paths.render_root,
@@ -83,7 +83,11 @@ class RunGenerationJob:
                     prompt,
                     profile=job.profile,
                 )
-            protected = ProtectRefinement().execute(paths.render_root, paths.generated_root)
+            protected = ProtectRefinement().execute(
+                paths.render_root,
+                paths.generated_root,
+                restore_locked_pixels=False,
+            )
             job = self._advance(
                 repository,
                 job,

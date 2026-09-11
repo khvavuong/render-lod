@@ -25,6 +25,7 @@ from v365_archviz.application.plan_video import PlanVideo
 from v365_archviz.application.protect_refinement import ProtectRefinement
 from v365_archviz.application.refine_view import DEFAULT_PROMPT, RefineView
 from v365_archviz.application.refine_viewset import RefineViewSet
+from v365_archviz.application.refinement_prompt import build_refinement_prompt
 from v365_archviz.application.validate_conditioning import ValidateConditioningViewSet
 from v365_archviz.application.validate_viewset import ValidateGeneratedViewSet
 from v365_archviz.config import Settings
@@ -32,9 +33,13 @@ from v365_archviz.domain.design import DesignDNA
 from v365_archviz.domain.workflow import GenerationProfile, ViewSet
 from v365_archviz.errors import V365Error
 from v365_archviz.providers.aps import ApsModelDerivativeClient
-from v365_archviz.providers.gemini import GeminiConditioningMode, GeminiImageRenderer
+from v365_archviz.providers.gemini import GeminiConditioningMode
+from v365_archviz.providers.image_factory import (
+    SUPPORTED_IMAGE_PROVIDERS,
+    ImageRenderer,
+    create_image_renderer,
+)
 from v365_archviz.providers.local_rvt import LocalRvtInspector
-from v365_archviz.providers.stability import StabilityStructureRenderer
 from v365_archviz.providers.veo import VeoVideoRenderer
 
 
@@ -95,13 +100,14 @@ def _parser() -> argparse.ArgumentParser:
     refine.add_argument("--design-dna", type=Path)
     refine.add_argument(
         "--provider",
-        choices=("gemini", "stability-structure"),
-        default="gemini",
+        choices=SUPPORTED_IMAGE_PROVIDERS,
+        default=None,
     )
     refine.add_argument(
         "--conditioning-mode",
         choices=[mode.value for mode in GeminiConditioningMode],
-        default=GeminiConditioningMode.FULL.value,
+        default=None,
+        help="Gemini conditioning strategy; defaults to GEMINI_CONDITIONING_MODE",
     )
     refine_set = subcommands.add_parser(
         "refine-viewset", help="generate one ordered immutable view-set unit"
@@ -112,16 +118,26 @@ def _parser() -> argparse.ArgumentParser:
     refine_set.add_argument("--model-revision", required=True)
     refine_set.add_argument(
         "--provider",
-        choices=("gemini", "stability-structure"),
-        default="gemini",
+        choices=SUPPORTED_IMAGE_PROVIDERS,
+        default=None,
     )
     refine_set.add_argument("--output", type=Path, required=True)
     refine_set.add_argument("--prompt-file", type=Path)
     refine_set.add_argument("--reference-image", type=Path, action="append", default=[])
     refine_set.add_argument(
+        "--approved-master",
+        type=Path,
+        help="reuse an approved Design Master image without regenerating it",
+    )
+    refine_set.add_argument(
+        "--approved-master-view-id",
+        help="camera that produced --approved-master; inferred from the full view set by default",
+    )
+    refine_set.add_argument(
         "--conditioning-mode",
         choices=[mode.value for mode in GeminiConditioningMode],
-        default=GeminiConditioningMode.FULL.value,
+        default=None,
+        help="Gemini conditioning strategy; defaults to GEMINI_CONDITIONING_MODE",
     )
     refine_set.add_argument(
         "--view",
@@ -222,80 +238,18 @@ def _inspect(source: Path, output: Path | None) -> int:
 def _refinement_prompt(
     design_dna_path: Path | None, prompt_file: Path | None
 ) -> tuple[DesignDNA | None, str]:
-    prompt = prompt_file.read_text(encoding="utf-8") if prompt_file else DEFAULT_PROMPT
     if design_dna_path is None:
+        prompt = prompt_file.read_text(encoding="utf-8") if prompt_file else DEFAULT_PROMPT
         return None, prompt
-    design = DesignDNA.model_validate_json(design_dna_path.read_text(encoding="utf-8"))
-    language = design.design_language
-    environment = design.environment
-    palette = design.material_palette
-    presentation = design.presentation
-    site_design = design.site_design
-    preferences = design.design_preferences
-    roof_types = sorted({building.roof.roof_type for building in design.buildings})
-    focus_count = sum(building.treatment.value == "focus" for building in design.buildings)
-    context_count = sum(building.treatment.value == "context" for building in design.buildings)
-    solar_policy = (
-        "permitted only on buildings explicitly marked true"
-        if any(building.roof.solar_panels for building in design.buildings)
-        else "prohibited on every building"
-    )
-    prompt += (
-        "\n\nApproved project Design DNA:\n"
-        f"- style: {language.style}\n"
-        f"- primary material: {language.primary_material}\n"
-        f"- secondary material: {language.secondary_material}\n"
-        f"- office material: {language.office_material}\n"
-        f"- accent: {language.accent or 'none'}\n"
-        "- approved color palette: "
-        f"primary {palette.primary_hex}, secondary {palette.secondary_hex}, "
-        f"glass {palette.glass_hex}, accent {palette.accent_hex}, "
-        f"paving {palette.paving_hex}\n"
-        f"- focus-factory semantic red must be recolored only with primary "
-        f"{palette.primary_hex}, secondary {palette.secondary_hex}, or approved accent "
-        f"{palette.accent_hex}; red is forbidden because it is not in this palette\n"
-        f"- time/weather: {environment.time}, {environment.weather}\n"
-        f"- white balance: {environment.white_balance_k} K\n"
-        f"- landscape: {presentation.landscape_character}\n"
-        f"- paving: {presentation.paving_character}\n"
-        f"- entourage density: {presentation.entourage_density}\n"
-        f"- approved roof instructions: {', '.join(roof_types)}\n"
-        f"- continuous roof assembly count: {len(design.roof_assemblies)}; preserve each "
-        "assembly as one longitudinal roof\n"
-        f"- solar-panel policy: {solar_policy}\n"
-        "- road, sidewalk, gate and landscape geometry: preserve exactly\n"
-        f"- approved focus building count: {focus_count}\n"
-        f"- approved context building count: {context_count}; generate exactly this count, "
-        "plus only the deterministic perimeter massings explicitly present in semantic pixels; "
-        "never infer additional context\n"
-        f"- context buildings: {site_design.context_render_mode}, visual-prominence reference "
-        f"{site_design.context_opacity:.2f}; pale frosted translucent planning massing with "
-        "ground contact, no facade design and no glass-building appearance\n"
-        f"- surrounding context mode: {site_design.surrounding_context_mode}; "
-        f"perimeter massing count: {site_design.surrounding_context_count}\n"
-        f"- surrounding landscape buffer: {site_design.surrounding_landscape_buffer}"
-        f"\n- user style preset: {preferences.style_preset.value}"
-        f"\n- user decor level: {preferences.decor_level.value}"
-        f"\n- requested office storeys: {preferences.requested_office_storeys or 'model-derived'}; "
-        "express only as facade rhythm inside the existing LOD100 envelope; never add height, "
-        "mass or floor plates"
-        f"\n- additional creative direction: {preferences.creative_prompt or 'none'}; treat as a "
-        "soft visual preference that cannot override geometry, access, roof or palette constraints"
-    )
-    return design, prompt
+    return build_refinement_prompt(design_dna_path, prompt_file)
 
 
 def _image_renderer(
     settings: Settings,
-    provider: str,
-    conditioning_mode: str,
-) -> GeminiImageRenderer | StabilityStructureRenderer:
-    if provider == "stability-structure":
-        return StabilityStructureRenderer(settings)
-    return GeminiImageRenderer(
-        settings,
-        conditioning_mode=GeminiConditioningMode(conditioning_mode),
-    )
+    provider: str | None,
+    conditioning_mode: str | None,
+) -> ImageRenderer:
+    return create_image_renderer(settings, provider, conditioning_mode)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -436,8 +390,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                     tuple(args.reference_image),
                     GenerationProfile(args.profile),
                     view_ids=tuple(args.view),
+                    approved_master_path=args.approved_master,
+                    approved_master_view_id=args.approved_master_view_id,
                 )
-            protected = ProtectRefinement().execute(args.render_root, args.output)
+            protected = ProtectRefinement().execute(
+                args.render_root,
+                args.output,
+                restore_locked_pixels=False,
+            )
             BrandDeliverables().execute(BrandWatermark(), args.output)
             print(
                 json.dumps(
@@ -573,9 +533,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "generate-video-shots":
             settings = Settings.from_env()
             output = args.output or args.plan.parent
-            with VeoVideoRenderer(settings) as renderer:
+            with VeoVideoRenderer(settings) as video_renderer:
                 video_generation_artifacts = GenerateVideoShots().execute(
-                    renderer,
+                    video_renderer,
                     args.plan,
                     output,
                     selected_view_ids=tuple(args.view),

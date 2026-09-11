@@ -15,7 +15,8 @@ SHA, project hay visual reference cụ thể:
 - một Blender scene dùng chung, sáu camera thiết kế để đọc tổng thể, sân logistics,
   hai mặt bên và phía sau;
 - RGB, clay, depth PNG/EXR, normal EXR, instance ID, semantic và edge passes;
-- Gemini Flash refinement có `store=false`, validation ảnh và generation manifest;
+- provider-neutral image refinement: Gemini bằng key hiện có hoặc OpenAI Image API, kèm
+  Design Master, validation ảnh và generation manifest;
 - RVT 2026 envelope inspector, SHA-256 version pinning và preview extraction;
 - content-addressed artifact manifest;
 - view-set generation request, durable idempotent job lifecycle và trace ID;
@@ -24,7 +25,7 @@ SHA, project hay visual reference cụ thể:
 - FastAPI control plane, CLI, containers không chạy bằng root, JSON Schema,
   unit tests và CI quality gates.
 
-Ảnh Blender là geometry-authoritative. Ảnh Gemini hiện là
+Ảnh Blender là geometry-authoritative. Ảnh generative hiện là
 `MARKETING_GENERATIVE`: phải qua QA/human review vì provider vẫn có thể thay đổi hard geometry.
 
 ## Thiết lập
@@ -92,7 +93,7 @@ Renderer đặt cây và scale-cue entourage một lần trong shared scene theo
 và asset ID được ghi tại `entourage_manifest.json`. Mật độ `low` không tự đặt xe tải
 trong service yard; xe tải chỉ xuất hiện với mật độ cao hơn và phải gắn với loading dock
 đã authored.
-Sau khi render, pipeline chạy camera preflight từ semantic-ID pass và dừng trước Gemini nếu chủ
+Sau khi render, pipeline chạy camera preflight từ semantic-ID pass và dừng trước image provider nếu chủ
 thể quá nhỏ/crop nặng hoặc không nhìn thấy phần giao thông đã có trong model. Có thể chạy lại riêng:
 
 ```bash
@@ -121,14 +122,44 @@ make evaluate-consistency MODEL=/path/to/project.rvt BRIEF=/path/to/project-brie
 make compose-board MODEL=/path/to/project.rvt BRIEF=/path/to/project-brief.json
 ```
 
-`PROFILE=marketing_hero` sinh `view-01` tổng thể trước làm Design Master cho năm camera còn lại. Conditioning
-semantic được chuyển sang grayscale trung tính trước khi gửi provider để màu annotation không rò
-thành màu facade. `preview_fast` vẫn giữ chế độ từng view độc lập để thử nhanh, không dùng làm bộ
-ảnh duyệt cuối.
+Mọi profile có từ hai view trở lên đều chọn camera tổng thể phù hợp nhất bằng role và conditioning
+QA để làm Design Master; pipeline không hardcode một view ID. `design_identity_pack.json` khóa
+facade language, palette, mái, ánh sáng và thứ tự authority cho các camera còn lại.
+
+Gemini mặc định chạy `photoreal_balanced`: request beauty chỉ gửi Base RGB, Design Master và tối đa
+một quality reference. Depth, semantic, instance ID và structural edges vẫn được lưu nhưng dùng làm
+QA evidence thay vì đồng thời kéo ảnh cuối về phong cách CAD/CGI. Có thể đặt
+`GEMINI_CONDITIONING_MODE=full` hoặc `minimal` để chạy benchmark hồi quy.
+Có thể đặt `GEMINI_MASTER_IMAGE_MODEL=gemini-3-pro-image` để chỉ dùng model chất lượng cao cho
+Design Master; năm view sau vẫn dùng `GEMINI_IMAGE_MODEL`. Spike hiện tại chưa chứng minh Pro tốt
+hơn Flash cho loại guide LOD100 này, nên biến trên để trống theo mặc định.
+
+`V365_IMAGE_PROVIDER=gemini` tiếp tục dùng `GEMINI_API_KEY` hiện có. Có thể chuyển sang
+`openai-image` bằng `OPENAI_API_KEY`; worker API và CLI dùng chung một provider factory nên không
+có tình trạng giao diện chạy một model còn lệnh tay chạy model khác. OpenAI adapter gửi base render
+làm ảnh đầu tiên (geometry authority), Design Master làm ảnh thứ hai (appearance authority), rồi
+mới đến reference về độ chân thật:
+
+```bash
+# Dùng Gemini hiện có
+V365_IMAGE_PROVIDER=gemini make refine-viewset \
+  MODEL=/path/to/project.rvt BRIEF=/path/to/project-brief.json PROFILE=marketing_hero
+
+# Đổi sang OpenAI Image API khi đã có OPENAI_API_KEY
+V365_IMAGE_PROVIDER=openai-image make refine-viewset \
+  MODEL=/path/to/project.rvt BRIEF=/path/to/project-brief.json PROFILE=marketing_hero
+```
+
+Pipeline không dán pixel CG trở lại ảnh photoreal của bất kỳ provider nào. Nó giữ nguyên output và
+ghi edge-alignment screen ở chế độ `validation_only`; vì kiểm tra này chưa chứng minh đầy đủ
+semantic/instance conformance, kết quả vẫn bắt buộc human review trước bàn giao. Chế độ compositor
+legacy vẫn còn trong application layer cho kiểm nghiệm hồi quy, nhưng không nằm trên production
+job path.
 
 Controlled-realism bake-off có thể chạy trên ba góc đại diện mà không sinh video hoặc ghi đè bộ
-deliverable. Gemini hỗ trợ hai chiến lược input: `full` gửi toàn bộ pass, `minimal` chỉ gửi RGB và
-structural edges. Stability Control Structure dùng `STABILITY_API_KEY`, mặc định
+deliverable. Gemini hỗ trợ ba chiến lược input: `full` gửi toàn bộ pass, `minimal` gửi RGB và
+structural edges, còn `photoreal_balanced` chỉ gửi các ảnh có thẩm quyền sạch. Stability Control
+Structure dùng `STABILITY_API_KEY`, mặc định
 `control_strength=0.85` và seed có thể tái lập:
 
 ```bash
@@ -136,6 +167,11 @@ structural edges. Stability Control Structure dùng `STABILITY_API_KEY`, mặc �
 make refine-viewset MODEL=/path/to/project.rvt BRIEF=/path/to/project-brief.json \
   GENERATED_DIR=.artifacts/experiments/project/gemini-full \
   PROFILE=marketing_hero CONDITIONING_MODE=full
+
+# Gemini Photoreal Balanced
+make refine-viewset MODEL=/path/to/project.rvt BRIEF=/path/to/project-brief.json \
+  GENERATED_DIR=.artifacts/experiments/project/gemini-balanced \
+  PROFILE=marketing_hero CONDITIONING_MODE=photoreal_balanced
 
 # Structure-controlled challenger
 make refine-viewset MODEL=/path/to/project.rvt BRIEF=/path/to/project-brief.json \
@@ -145,6 +181,21 @@ make refine-viewset MODEL=/path/to/project.rvt BRIEF=/path/to/project-brief.json
 
 CLI `refine-viewset` còn nhận lặp `--view view-01 --view view-03 --view view-06` để giới hạn pilot
 ở ba góc tổng thể/hero/tầm mắt người trước khi trả phí cho đủ sáu ảnh.
+
+Khi một Design Master đã được duyệt, chỉ sinh hoặc sửa những góc cần thiết và không trả phí lại cho
+master. `--approved-master-view-id` là camera nguồn, không phải một ID hardcode của dự án:
+
+```bash
+.venv/bin/python -m v365_archviz refine-viewset "$RENDER_DIR" \
+  --view-set "$VIEW_SET" --design-dna "$DESIGN_DNA" --model-revision "$REVISION" \
+  --output "$GENERATED_DIR" --profile marketing_hero --provider gemini \
+  --approved-master "$GENERATED_DIR/view-01/provider_source.jpg" \
+  --approved-master-view-id view-01 --view view-06
+```
+
+Chỉ truyền `REFERENCES` khi đó là ảnh chụp nhà xưởng thật đã được curate cho chất lượng vật liệu,
+ánh sáng và ống kính. Không dùng ảnh concept/CGI làm realism reference vì nó sẽ kéo cả bộ ảnh trở
+lại phong cách render.
 
 ## Video showreel bằng Veo 3.1 Lite
 
@@ -287,7 +338,7 @@ Vite chạy tại `http://localhost:5173` và proxy `/v1` sang FastAPI tại c�
 frontend bằng:
 
 Ở chế độ development, FastAPI tự đưa mỗi view set vào image worker đơn luồng. Worker chỉ chạy
-conditioning render, Gemini, QA và board/branding; hoàn tất image pipeline không gọi Veo. Sau khi
+conditioning render, image provider đã cấu hình, QA và board/branding; hoàn tất image pipeline không gọi Veo. Sau khi
 bộ ảnh hoàn tất, người dùng có thể chủ động bấm **Tạo video trình diễn**. Video worker riêng vẫn
 tạo đủ sáu shot, ghép thành showreel không audio và chèn logo. Có thể tắt toàn bộ local worker bằng
 `V365_ENABLE_LOCAL_WORKER=0` khi chỉ cần chạy control plane.
@@ -327,7 +378,7 @@ python scripts/export_schemas.py
 src/v365_archviz/
 ├── application/       # use cases, không phụ thuộc transport
 ├── domain/            # immutable validated contracts
-├── providers/         # APS/Gemini/local adapter boundaries
+├── providers/         # APS/image/video/local adapter boundaries
 ├── api.py             # HTTP control plane
 ├── cli.py             # developer/worker entrypoint
 ├── config.py          # environment-backed settings
@@ -343,5 +394,5 @@ Tài liệu:
 ## Nguyên tắc bất biến
 
 Mọi thứ phải giống nhau giữa các góc nhìn phải tồn tại dưới dạng 3D/design entity
-deterministic bên ngoài image generator. Gemini chỉ là provider refinement, không phải
+deterministic bên ngoài image generator. Gemini/OpenAI chỉ là provider refinement, không phải
 geometry source of truth.

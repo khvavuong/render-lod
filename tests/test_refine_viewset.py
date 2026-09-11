@@ -4,7 +4,11 @@ from pathlib import Path
 
 from PIL import Image
 
-from v365_archviz.application.refine_viewset import RefineViewSet, _select_master_view_id
+from v365_archviz.application.refine_viewset import (
+    RefineViewSet,
+    _select_master_view_id,
+    select_master_view_ids,
+)
 from v365_archviz.domain.design import DesignDNA, DesignLanguage, EnvironmentDesign
 from v365_archviz.domain.workflow import Camera, ViewRole, ViewSet
 from v365_archviz.providers.contracts import (
@@ -81,6 +85,7 @@ def test_selects_a_design_readable_master_instead_of_a_distant_overall(tmp_path:
     )
 
     assert _select_master_view_id(tmp_path, cameras) == "view-02"
+    assert select_master_view_ids(tmp_path, cameras) == ("view-01", "view-02")
 
 
 def test_refines_an_ordered_view_set_as_one_unit(tmp_path: Path) -> None:

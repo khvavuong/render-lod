@@ -93,14 +93,14 @@ plan-cameras: require-model require-design
 	$(PYTHON) -m v365_archviz plan-cameras "$(SCENE)" --design-dna "$(DESIGN_DNA)"
 
 renderer-image:
-	docker build -f Dockerfile.renderer -t v365-archviz-renderer:foundation .
+	docker build -f Dockerfile.renderer -t v365-archviz-renderer:layered-v1 .
 
 render: require-model require-brief renderer-image
 	$(PYTHON) -m v365_archviz plan-design "$(SCENE)" --brief "$(BRIEF)" >/dev/null
 	$(PYTHON) -m v365_archviz plan-cameras "$(SCENE)" \
 		--design-dna "$(DESIGN_DNA)" >/dev/null
 	docker run --rm --user "$$(id -u):$$(id -g)" -e HOME=/tmp \
-		-v "$(CURDIR):/workspace" v365-archviz-renderer:foundation \
+		-v "$(CURDIR):/workspace" v365-archviz-renderer:layered-v1 \
 		--scene "/workspace/$(SCENE)" \
 		--design-dna "/workspace/$(DESIGN_DNA)" \
 		--asset-library "/workspace/assets/pbr-v1/asset_library_manifest.json" \

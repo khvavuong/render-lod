@@ -122,20 +122,24 @@ export function useStudioJob(gateway: StudioGateway) {
   }, [gateway]);
 
   const transitionReview = useCallback(
-    async (action: 'approve' | 'retry') => {
+    async (action: 'approve' | 'reject' | 'retry') => {
       if (!activeViewSet.current) return;
       setIsSubmittingReview(true);
       setError(null);
       setErrorTitle(
         action === 'approve'
           ? 'Không thể duyệt bộ ảnh'
-          : 'Không thể chạy lại pipeline',
+          : action === 'reject'
+            ? 'Không thể tạo lại Design Master'
+            : 'Không thể chạy lại pipeline',
       );
       try {
         const updated =
           action === 'approve'
             ? await gateway.approveViewSet(activeViewSet.current)
-            : await gateway.retryViewSet(activeViewSet.current);
+            : action === 'reject'
+              ? await gateway.rejectDesignMaster(activeViewSet.current)
+              : await gateway.retryViewSet(activeViewSet.current);
         setJob(updated);
       } catch (reason) {
         setError(reason instanceof Error ? reason.message : 'Không thể cập nhật phiên diễn họa');
@@ -147,6 +151,7 @@ export function useStudioJob(gateway: StudioGateway) {
   );
 
   const approve = useCallback(() => transitionReview('approve'), [transitionReview]);
+  const rejectMaster = useCallback(() => transitionReview('reject'), [transitionReview]);
   const retry = useCallback(() => transitionReview('retry'), [transitionReview]);
 
   useEffect(() => {
@@ -241,6 +246,7 @@ export function useStudioJob(gateway: StudioGateway) {
     resetPreparedModel,
     refresh,
     approve,
+    rejectMaster,
     retry,
     generateVideo,
   };

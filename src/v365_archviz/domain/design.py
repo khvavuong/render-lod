@@ -10,15 +10,24 @@ from v365_archviz.domain.common import DomainModel, PositiveMeters, UnitInterval
 from v365_archviz.domain.scene import BoundingBox
 
 
+class DesignEvidenceState(str, Enum):
+    AUTHORED = "authored"
+    INFERRED_PROPOSAL = "inferred_proposal"
+    NEEDS_REVIEW = "needs_review"
+    UNSUPPORTED = "unsupported"
+
+
 class LoadingDock(DomainModel):
     dock_id: str = Field(min_length=1)
     u: UnitInterval
     width_m: PositiveMeters
+    evidence_state: DesignEvidenceState = DesignEvidenceState.INFERRED_PROPOSAL
 
 
 class Entrance(DomainModel):
     u: UnitInterval
     width_m: PositiveMeters
+    evidence_state: DesignEvidenceState = DesignEvidenceState.INFERRED_PROPOSAL
 
 
 class MaterialPalette(DomainModel):
@@ -142,16 +151,47 @@ class SiteDesign(DomainModel):
     )
     context_opacity: float = Field(default=0.28, ge=0.08, le=0.65)
     surrounding_context_mode: str = Field(
-        default="authored_only", pattern=r"^(authored_only|procedural_perimeter)$"
+        default="authored_only",
+        pattern=r"^(authored_only|procedural_perimeter|conceptual_industrial_park|none)$",
     )
     surrounding_context_count: int = Field(default=0, ge=0, le=12)
     surrounding_landscape_buffer: bool = False
 
     @model_validator(mode="after")
     def validate_surrounding_context(self) -> SiteDesign:
-        if self.surrounding_context_mode == "authored_only" and self.surrounding_context_count:
-            raise ValueError("authored_only context cannot request procedural massings")
+        if self.surrounding_context_mode in {"authored_only", "none"} and (
+            self.surrounding_context_count
+        ):
+            raise ValueError("non-procedural context cannot request conceptual massings")
         return self
+
+
+class ContextRoad(DomainModel):
+    road_id: str = Field(min_length=1)
+    bounding_box: BoundingBox
+
+
+class ContextProxyBuilding(DomainModel):
+    proxy_id: str = Field(min_length=1)
+    bounding_box: BoundingBox
+    ridge_orientation: str = Field(default="long_axis", pattern=r"^(long_axis|short_axis)$")
+    opacity: float = Field(default=0.28, ge=0.08, le=0.40)
+    conceptual: bool = True
+
+
+class IndustrialContextPlan(DomainModel):
+    """Deterministic off-site planning geometry; never represented as authored fact."""
+
+    schema_version: str = "1.0.0"
+    mode: str = Field(
+        default="authored_only",
+        pattern=r"^(authored_only|conceptual_industrial_park|none)$",
+    )
+    seed: str = Field(min_length=1)
+    ground: BoundingBox | None = None
+    roads: tuple[ContextRoad, ...] = ()
+    proxy_buildings: tuple[ContextProxyBuilding, ...] = ()
+    provenance: str = "model-relative conceptual context"
 
 
 class DesignLanguage(DomainModel):
@@ -221,6 +261,7 @@ class DesignDNA(DomainModel):
     material_palette: MaterialPalette = Field(default_factory=MaterialPalette)
     presentation: PresentationStrategy = Field(default_factory=PresentationStrategy)
     site_design: SiteDesign = Field(default_factory=SiteDesign)
+    industrial_context: IndustrialContextPlan | None = None
     design_preferences: DesignPreferences = Field(default_factory=DesignPreferences)
     buildings: tuple[BuildingDesign, ...]
     roof_assemblies: tuple[RoofAssembly, ...] = ()

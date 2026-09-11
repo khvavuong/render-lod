@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+from v365_archviz.application.plan_industrial_context import PlanIndustrialContext
 from v365_archviz.artifacts import atomic_write
 from v365_archviz.domain.design import (
     BuildingDesign,
@@ -173,6 +174,11 @@ class PlanDesign:
         offices = [
             item for item in scene.elements if item.semantic_role is SemanticRole.OFFICE_BLOCK
         ]
+        logistics_zones = [
+            item
+            for item in scene.elements
+            if item.semantic_role in {SemanticRole.LOADING_ZONE, SemanticRole.SERVICE_YARD}
+        ]
         for element in scene.elements:
             surfaces = _element_surfaces(scene, element)
             if not surfaces and element.semantic_role is not SemanticRole.UTILITY_BLOCK:
@@ -206,7 +212,28 @@ class PlanDesign:
                 if peers
                 else None
             )
-            front_target = _element_center(nearest_peer) if nearest_peer else campus_center
+            nearest_logistics = (
+                min(
+                    logistics_zones,
+                    key=lambda zone: sum(
+                        (left - right) ** 2
+                        for left, right in zip(
+                            _element_center(element), _element_center(zone), strict=True
+                        )
+                    ),
+                )
+                if element.semantic_role is SemanticRole.MAIN_SHED
+                and brief.loading_docks_per_main_facade
+                and logistics_zones
+                else None
+            )
+            front_target = (
+                _element_center(nearest_logistics)
+                if nearest_logistics is not None
+                else _element_center(nearest_peer)
+                if nearest_peer
+                else campus_center
+            )
             front_surface = _front_surface(
                 surfaces,
                 front_target,
@@ -311,6 +338,9 @@ class PlanDesign:
             material_palette=brief.material_palette,
             presentation=brief.presentation,
             site_design=brief.site_design,
+            industrial_context=PlanIndustrialContext().execute(
+                scene, design_revision, brief.site_design
+            ),
             design_preferences=brief.design_preferences,
             buildings=tuple(buildings),
             roof_assemblies=roof_assemblies,

@@ -85,6 +85,62 @@
       "title": "BuildingTreatment",
       "type": "string"
     },
+    "ContextProxyBuilding": {
+      "additionalProperties": false,
+      "properties": {
+        "bounding_box": {
+          "$ref": "#/$defs/BoundingBox"
+        },
+        "conceptual": {
+          "default": true,
+          "title": "Conceptual",
+          "type": "boolean"
+        },
+        "opacity": {
+          "default": 0.28,
+          "maximum": 0.4,
+          "minimum": 0.08,
+          "title": "Opacity",
+          "type": "number"
+        },
+        "proxy_id": {
+          "minLength": 1,
+          "title": "Proxy Id",
+          "type": "string"
+        },
+        "ridge_orientation": {
+          "default": "long_axis",
+          "pattern": "^(long_axis|short_axis)$",
+          "title": "Ridge Orientation",
+          "type": "string"
+        }
+      },
+      "required": [
+        "proxy_id",
+        "bounding_box"
+      ],
+      "title": "ContextProxyBuilding",
+      "type": "object"
+    },
+    "ContextRoad": {
+      "additionalProperties": false,
+      "properties": {
+        "bounding_box": {
+          "$ref": "#/$defs/BoundingBox"
+        },
+        "road_id": {
+          "minLength": 1,
+          "title": "Road Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "road_id",
+        "bounding_box"
+      ],
+      "title": "ContextRoad",
+      "type": "object"
+    },
     "DecorLevel": {
       "enum": [
         "minimal",
@@ -93,6 +149,16 @@
         "expressive"
       ],
       "title": "DecorLevel",
+      "type": "string"
+    },
+    "DesignEvidenceState": {
+      "enum": [
+        "authored",
+        "inferred_proposal",
+        "needs_review",
+        "unsupported"
+      ],
+      "title": "DesignEvidenceState",
       "type": "string"
     },
     "DesignLanguage": {
@@ -235,6 +301,10 @@
     "Entrance": {
       "additionalProperties": false,
       "properties": {
+        "evidence_state": {
+          "$ref": "#/$defs/DesignEvidenceState",
+          "default": "inferred_proposal"
+        },
         "u": {
           "maximum": 1.0,
           "minimum": 0.0,
@@ -398,6 +468,65 @@
       "title": "FacadeDesign",
       "type": "object"
     },
+    "IndustrialContextPlan": {
+      "additionalProperties": false,
+      "description": "Deterministic off-site planning geometry; never represented as authored fact.",
+      "properties": {
+        "ground": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BoundingBox"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "mode": {
+          "default": "authored_only",
+          "pattern": "^(authored_only|conceptual_industrial_park|none)$",
+          "title": "Mode",
+          "type": "string"
+        },
+        "provenance": {
+          "default": "model-relative conceptual context",
+          "title": "Provenance",
+          "type": "string"
+        },
+        "proxy_buildings": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ContextProxyBuilding"
+          },
+          "title": "Proxy Buildings",
+          "type": "array"
+        },
+        "roads": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ContextRoad"
+          },
+          "title": "Roads",
+          "type": "array"
+        },
+        "schema_version": {
+          "default": "1.0.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "seed": {
+          "minLength": 1,
+          "title": "Seed",
+          "type": "string"
+        }
+      },
+      "required": [
+        "seed"
+      ],
+      "title": "IndustrialContextPlan",
+      "type": "object"
+    },
     "LoadingDock": {
       "additionalProperties": false,
       "properties": {
@@ -405,6 +534,10 @@
           "minLength": 1,
           "title": "Dock Id",
           "type": "string"
+        },
+        "evidence_state": {
+          "$ref": "#/$defs/DesignEvidenceState",
+          "default": "inferred_proposal"
         },
         "u": {
           "maximum": 1.0,
@@ -608,7 +741,7 @@
         },
         "surrounding_context_mode": {
           "default": "authored_only",
-          "pattern": "^(authored_only|procedural_perimeter)$",
+          "pattern": "^(authored_only|procedural_perimeter|conceptual_industrial_park|none)$",
           "title": "Surrounding Context Mode",
           "type": "string"
         },
@@ -665,6 +798,17 @@
       "minLength": 1,
       "title": "Grammar Version",
       "type": "string"
+    },
+    "industrial_context": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/IndustrialContextPlan"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "material_palette": {
       "$ref": "#/$defs/MaterialPalette"

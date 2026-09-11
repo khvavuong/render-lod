@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from v365_archviz.domain.common import DomainModel, utc_now
 from v365_archviz.domain.workflow import GenerationProfile, RenderProfile, WorkflowState
@@ -62,9 +62,7 @@ _ALLOWED_TRANSITIONS: dict[WorkflowState, frozenset[WorkflowState]] = {
     WorkflowState.COMPLETED: frozenset(),
     # FAILED remains terminal during automatic execution. An explicit API retry may move a
     # failed job back to the cheapest safe checkpoint after inspecting persisted artifacts.
-    WorkflowState.FAILED: frozenset(
-        {WorkflowState.RENDERING_PASSES, WorkflowState.VALIDATING}
-    ),
+    WorkflowState.FAILED: frozenset({WorkflowState.RENDERING_PASSES, WorkflowState.VALIDATING}),
 }
 
 
@@ -79,6 +77,8 @@ class GenerationJob(DomainModel):
     profile: GenerationProfile
     render_profile: RenderProfile = RenderProfile.STANDARD_EEVEE
     image_provider: str = Field(default="gemini", min_length=1)
+    reference_image_refs: tuple[str, ...] = ()
+    reference_roles: tuple[str, ...] = ()
     state: WorkflowState
     attempt: int = Field(default=0, ge=0)
     created_at: datetime
@@ -86,6 +86,12 @@ class GenerationJob(DomainModel):
     artifact_refs: tuple[str, ...] = ()
     error_code: str | None = None
     error_message: str | None = None
+
+    @model_validator(mode="after")
+    def validate_reference_roles(self) -> GenerationJob:
+        if len(self.reference_image_refs) != len(self.reference_roles):
+            raise ValueError("reference image refs and roles must have equal length")
+        return self
 
     @classmethod
     def create(
@@ -100,6 +106,8 @@ class GenerationJob(DomainModel):
         profile: GenerationProfile,
         render_profile: RenderProfile = RenderProfile.STANDARD_EEVEE,
         image_provider: str = "gemini",
+        reference_image_refs: tuple[str, ...] = (),
+        reference_roles: tuple[str, ...] = (),
         initial_state: WorkflowState = WorkflowState.RESOLVING_MODEL,
     ) -> GenerationJob:
         now = utc_now()
@@ -114,6 +122,8 @@ class GenerationJob(DomainModel):
             profile=profile,
             render_profile=render_profile,
             image_provider=image_provider,
+            reference_image_refs=reference_image_refs,
+            reference_roles=reference_roles,
             state=initial_state,
             created_at=now,
             updated_at=now,

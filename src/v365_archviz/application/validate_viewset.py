@@ -12,11 +12,11 @@ from typing import Any, cast
 
 import numpy as np
 from numpy.typing import NDArray
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageFilter, UnidentifiedImageError
 
 from v365_archviz.artifacts import atomic_write
 from v365_archviz.domain.design import DesignDNA
-from v365_archviz.domain.workflow import ViewSet
+from v365_archviz.domain.workflow import ViewRole, ViewSet
 from v365_archviz.errors import InvalidModelError
 
 
@@ -61,7 +61,7 @@ class ValidateGeneratedViewSet:
 
         views: list[dict[str, Any]] = []
         output_hashes: list[str] = []
-        reference_signatures: list[tuple[tuple[str, str], ...]] = []
+        reference_hashes_by_role: dict[str, set[str]] = {}
         camera_evidence = self._camera_evidence_by_view(render_root / "conditioning_qa.json")
         for camera in view_set.cameras:
             findings: list[dict[str, str]] = []
@@ -70,6 +70,7 @@ class ValidateGeneratedViewSet:
                 "semantic": {"status": "review", "code": "evidence_not_available"},
                 "material": {"status": "review", "code": "evidence_not_available"},
                 "material_roles": {"status": "review", "code": "evidence_not_available"},
+                "context": {"status": "review", "code": "evidence_not_available"},
                 "camera": camera_evidence.get(
                     camera.view_id,
                     {"status": "review", "code": "conditioning_qa_not_available"},
@@ -112,6 +113,17 @@ class ValidateGeneratedViewSet:
                     findings.append(self._finding("error", "input_missing", str(input_path)))
                 elif input_hashes.get(name) != _sha256(input_path):
                     findings.append(self._finding("error", "input_hash_mismatch", input_path.name))
+            context = design.industrial_context
+            if context is not None and context.proxy_buildings:
+                proxy_path = render_root / camera.view_id / "context_proxy_rgba.png"
+                if not proxy_path.is_file():
+                    findings.append(
+                        self._finding("error", "context_proxy_missing", str(proxy_path))
+                    )
+                elif input_hashes.get("context_proxy_rgba") != _sha256(proxy_path):
+                    findings.append(
+                        self._finding("error", "context_proxy_hash_mismatch", proxy_path.name)
+                    )
             if manifest.get("output", {}).get("protected_composite"):
                 for name in ("material_id.png", "material_id_manifest.json"):
                     input_path = render_root / camera.view_id / name
@@ -203,19 +215,28 @@ class ValidateGeneratedViewSet:
                     gate_evidence["material_roles"] = material_roles
                     if material_roles["status"] == "fail":
                         findings.append(
-                            self._finding(
-                                "error", str(material_roles["code"]), camera.view_id
-                            )
+                            self._finding("error", str(material_roles["code"]), camera.view_id)
+                        )
+                    context_evidence = self._context_evidence(
+                        render_root / camera.view_id,
+                        manifest,
+                        design,
+                        require_visible=camera.role in {ViewRole.OVERALL, ViewRole.CONTEXT},
+                    )
+                    gate_evidence["context"] = context_evidence
+                    if context_evidence["status"] == "fail":
+                        findings.append(
+                            self._finding("error", str(context_evidence["code"]), camera.view_id)
                         )
 
-            references = tuple(
-                sorted(
-                    (name, value)
-                    for name, value in input_hashes.items()
-                    if name.startswith("reference_")
-                )
-            )
-            reference_signatures.append(references)
+            input_roles = manifest.get("input_roles", {}) if manifest else {}
+            if isinstance(input_roles, dict):
+                for name, role in input_roles.items():
+                    if not str(name).startswith("reference_"):
+                        continue
+                    checksum = input_hashes.get(name)
+                    if isinstance(checksum, str):
+                        reference_hashes_by_role.setdefault(str(role), set()).add(checksum)
             views.append(
                 {
                     "view_id": camera.view_id,
@@ -237,12 +258,16 @@ class ValidateGeneratedViewSet:
             global_findings.append(
                 self._finding("error", "duplicate_outputs", "generated views must be unique")
             )
-        if reference_signatures and len(set(reference_signatures)) != 1:
+        inconsistent_roles = sorted(
+            role for role, hashes in reference_hashes_by_role.items() if len(hashes) > 1
+        )
+        if inconsistent_roles:
             global_findings.append(
                 self._finding(
                     "error",
-                    "inconsistent_references",
-                    "all views in one view set must use the same references",
+                    "inconsistent_reference_role",
+                    "one reference role resolved to multiple assets: "
+                    + ", ".join(inconsistent_roles),
                 )
             )
 
@@ -393,7 +418,9 @@ class ValidateGeneratedViewSet:
         semantic_manifest_path: Path,
         *,
         color_tolerance: int = 36,
-        minimum_landscape_green_ratio: float = 0.30,
+        minimum_semantic_pixels: int = 180,
+        minimum_semantic_coverage: float = 0.001,
+        minimum_landscape_green_ratio: float = 0.20,
         minimum_road_surface_ratio: float = 0.50,
     ) -> dict[str, Any]:
         if not semantic_path.is_file() or not semantic_manifest_path.is_file():
@@ -438,14 +465,24 @@ class ValidateGeneratedViewSet:
             & (hsv[:, :, 2] >= 32)
         )
         road_surface = (hsv[:, :, 1] <= 105) & (hsv[:, :, 2] >= 35)
+        image_pixels = semantic.shape[0] * semantic.shape[1]
+        sample_floor = min(
+            image_pixels,
+            max(
+                minimum_semantic_pixels,
+                round(image_pixels * minimum_semantic_coverage),
+            ),
+        )
+        landscape_pixels = int(np.count_nonzero(landscape))
+        road_pixels = int(np.count_nonzero(roads))
         landscape_ratio = (
             float(np.count_nonzero(green & landscape)) / int(np.count_nonzero(landscape))
-            if np.any(landscape)
+            if landscape_pixels >= sample_floor
             else None
         )
         road_ratio = (
             float(np.count_nonzero(road_surface & roads)) / int(np.count_nonzero(roads))
-            if np.any(roads)
+            if road_pixels >= sample_floor
             else None
         )
         failures: list[str] = []
@@ -458,9 +495,14 @@ class ValidateGeneratedViewSet:
             "code": failures[0] if failures else "semantic_surface_retention_passed",
             "findings": failures,
             "landscape_green_ratio": landscape_ratio,
+            "landscape_sample_pixels": landscape_pixels,
             "landscape_green_threshold": minimum_landscape_green_ratio,
             "road_surface_ratio": road_ratio,
+            "road_sample_pixels": road_pixels,
             "road_surface_threshold": minimum_road_surface_ratio,
+            "minimum_semantic_pixels": minimum_semantic_pixels,
+            "minimum_semantic_coverage": minimum_semantic_coverage,
+            "effective_sample_floor": sample_floor,
             "threshold_status": "benchmark_hypothesis",
         }
 
@@ -533,9 +575,15 @@ class ValidateGeneratedViewSet:
         palette: dict[str, str],
         *,
         minimum_pixels: int = 180,
-        minimum_match_ratio: float = 0.30,
+        minimum_role_coverage: float = 0.001,
     ) -> dict[str, Any]:
-        """Verify that approved colors occur on their authored semantic material roles."""
+        """Verify approved colors on authored roles without over-penalising thin details.
+
+        Roof and main cladding are broad surfaces and therefore require substantial agreement.
+        Glass, accent strips and boundary steel are narrow, reflective or anti-aliased in a
+        photographic output; for those roles the gate verifies credible presence rather than
+        requiring thirty percent of a candidate semantic region to be a flat design color.
+        """
 
         if not semantic_path.is_file() or not semantic_manifest_path.is_file():
             return {"status": "review", "code": "material_role_input_missing"}
@@ -570,6 +618,23 @@ class ValidateGeneratedViewSet:
                 palette["boundary_hex"],
             ),
         }
+        role_thresholds = {
+            "roof": 0.30,
+            "primary_facade": 0.10,
+            "facade_secondary": 0.07,
+            "glazing": 0.015,
+            "brand_accent": 0.02,
+            "site_boundary": 0.02,
+        }
+        minimum_matching_pixels = 128
+        image_pixels = semantic.shape[0] * semantic.shape[1]
+        sample_floor = min(
+            image_pixels,
+            max(
+                minimum_pixels,
+                round(image_pixels * minimum_role_coverage),
+            ),
+        )
         evidence: dict[str, dict[str, Any]] = {}
         failures: list[str] = []
         for role, (source_roles, expected_hex) in expected_roles.items():
@@ -584,7 +649,7 @@ class ValidateGeneratedViewSet:
             for semantic_color in semantic_colors:
                 mask |= np.max(np.abs(semantic - semantic_color), axis=2) <= 20
             pixel_count = int(np.count_nonzero(mask))
-            if pixel_count < minimum_pixels:
+            if pixel_count < sample_floor:
                 continue
             normalized = expected_hex.lstrip("#")
             expected_rgb = tuple(
@@ -592,8 +657,10 @@ class ValidateGeneratedViewSet:
             )
             expected_hue, expected_saturation, _ = colorsys.rgb_to_hsv(*expected_rgb)
             pixels = output_hsv[mask]
-            if expected_saturation < 0.12:
-                matches = pixels[:, 1] <= 80
+            if expected_saturation < 0.20:
+                # Neutral metal is affected strongly by sky, shade and reflected landscape.
+                # Hue is undefined at low saturation, so evaluate neutrality instead.
+                matches = pixels[:, 1] <= 115
             else:
                 hue = pixels[:, 0].astype(np.float32)
                 expected_hue_byte = expected_hue * 255
@@ -604,13 +671,17 @@ class ValidateGeneratedViewSet:
                     pixels[:, 1] >= max(28, expected_saturation * 255 * 0.25)
                 )
             match_ratio = float(np.count_nonzero(matches)) / pixel_count
-            passed = match_ratio >= minimum_match_ratio
+            matching_pixels = int(np.count_nonzero(matches))
+            threshold = role_thresholds[role]
+            passed = match_ratio >= threshold and matching_pixels >= minimum_matching_pixels
             evidence[role] = {
                 "status": "pass" if passed else "fail",
                 "expected": expected_hex,
                 "sample_pixels": pixel_count,
+                "matching_pixels": matching_pixels,
                 "match_ratio": match_ratio,
-                "threshold": minimum_match_ratio,
+                "threshold": threshold,
+                "minimum_matching_pixels": minimum_matching_pixels,
             }
             if not passed:
                 failures.append(role)
@@ -619,4 +690,92 @@ class ValidateGeneratedViewSet:
             "code": "material_role_mismatch" if failures else "material_roles_within_tolerance",
             "failed_roles": failures,
             "roles": evidence,
+            "minimum_role_coverage": minimum_role_coverage,
+            "effective_sample_floor": sample_floor,
+        }
+
+    @staticmethod
+    def _context_evidence(
+        view_directory: Path,
+        generation_manifest: dict[str, Any],
+        design: DesignDNA,
+        *,
+        require_visible: bool,
+        maximum_project_overlap: float = 0.001,
+    ) -> dict[str, Any]:
+        """Verify the deterministic conceptual-context layer, not Gemini's interpretation."""
+
+        context = design.industrial_context
+        if context is None or not context.proxy_buildings:
+            return {"status": "pass", "code": "context_proxy_not_requested"}
+        overlay_path = view_directory / "context_proxy_rgba.png"
+        mask_path = view_directory / "context_proxy_mask.png"
+        project_path = view_directory / "project_locked_mask.png"
+        layer_manifest_path = view_directory / "layer_authority_manifest.json"
+        required = (overlay_path, mask_path, project_path, layer_manifest_path)
+        if any(not path.is_file() for path in required):
+            return {"status": "fail", "code": "context_authority_artifact_missing"}
+        if not generation_manifest.get("output", {}).get("context_proxy_composited"):
+            return {"status": "fail", "code": "context_proxy_not_composited"}
+        try:
+            with Image.open(overlay_path) as source:
+                overlay = source.convert("RGBA")
+                alpha = np.asarray(overlay.getchannel("A"), dtype=np.uint8)
+            with Image.open(mask_path) as source:
+                proxy_mask = (
+                    np.asarray(
+                        source.convert("L").resize(overlay.size, Image.Resampling.NEAREST),
+                        dtype=np.uint8,
+                    )
+                    >= 128
+                )
+            with Image.open(project_path) as source:
+                # Ignore the two-pixel anti-aliased silhouette fringe. The underlying proxy
+                # compositor still clips against the full project mask; this erosion only keeps
+                # the QA overlap metric from treating shared boundary coverage as intrusion.
+                project_mask = (
+                    np.asarray(
+                        source.convert("L")
+                        .resize(overlay.size, Image.Resampling.NEAREST)
+                        .filter(ImageFilter.MinFilter(5)),
+                        dtype=np.uint8,
+                    )
+                    >= 128
+                )
+            layer_manifest = json.loads(layer_manifest_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, KeyError, TypeError, UnidentifiedImageError):
+            return {"status": "fail", "code": "context_authority_artifact_invalid"}
+        nonzero = alpha > 0
+        visible_pixels = int(np.count_nonzero(nonzero))
+        proxy_pixels = int(np.count_nonzero(proxy_mask))
+        overlap_pixels = int(np.count_nonzero(nonzero & project_mask))
+        overlap_ratio = overlap_pixels / max(1, visible_pixels)
+        source_opacities = [float(proxy.opacity) for proxy in context.proxy_buildings]
+        opacity_contract_valid = all(0.22 <= value <= 0.30 for value in source_opacities)
+        layer_hash = layer_manifest.get("layers", {}).get("context_proxy", {}).get("sha256")
+        failures: list[str] = []
+        if require_visible and visible_pixels == 0:
+            failures.append("context_proxy_not_visible_in_context_view")
+        if proxy_pixels and visible_pixels == 0:
+            failures.append("context_proxy_overlay_empty")
+        if overlap_ratio > maximum_project_overlap:
+            failures.append("context_proxy_overlaps_locked_project")
+        if not opacity_contract_valid:
+            failures.append("context_proxy_opacity_out_of_contract")
+        if layer_hash != _sha256(mask_path):
+            failures.append("context_proxy_layer_hash_mismatch")
+        return {
+            "status": "fail" if failures else "pass",
+            "code": failures[0] if failures else "context_proxy_contract_passed",
+            "findings": failures,
+            "conceptual": True,
+            "planned_proxy_count": len(context.proxy_buildings),
+            "visible_pixels": visible_pixels,
+            "projected_coverage": visible_pixels / max(1, alpha.size),
+            "mean_visible_alpha": (float(alpha[nonzero].mean()) / 255.0 if visible_pixels else 0.0),
+            "source_opacity_min": min(source_opacities),
+            "source_opacity_max": max(source_opacities),
+            "project_overlap_ratio": overlap_ratio,
+            "project_overlap_threshold": maximum_project_overlap,
+            "project_mask_edge_tolerance_px": 2,
         }

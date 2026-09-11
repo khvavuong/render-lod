@@ -7,8 +7,8 @@ from itertools import pairwise
 from pathlib import Path
 
 from v365_archviz.artifacts import atomic_write
-from v365_archviz.domain.design import BuildingTreatment, DesignDNA
-from v365_archviz.domain.scene import CanonicalScene, SceneElement, SemanticRole
+from v365_archviz.domain.design import BuildingTreatment, DesignDNA, FacadeDesign, LoadingDock
+from v365_archviz.domain.scene import CanonicalScene, SceneElement, SceneSurface, SemanticRole
 from v365_archviz.domain.workflow import Camera, ViewRole, ViewSet
 
 
@@ -235,34 +235,27 @@ def _arrival_shot(
     if length <= 1e-6:
         return None
     outward = (outward[0] / length, outward[1] / length)
-    # A genuine arrival photograph needs enough setback to read the complete gate,
-    # perimeter fence, external road and factory frontage together.  A close 28 m
-    # position turns large campuses into an uninformative wall elevation.
-    setback = max(55.0, site_span * 0.24)
-    # Stand to one side of the portal instead of directly under its head beam.
-    # This keeps the gate legible as foreground architecture without occluding the
-    # arrival axis or the factory behind it.
-    tangent = (-outward[1], outward[0])
-    gate_width = max(
-        entrance.bounding_box.maximum[0] - entrance.bounding_box.minimum[0],
-        entrance.bounding_box.maximum[1] - entrance.bounding_box.minimum[1],
-    )
-    lateral_offset = max(12.0, gate_width)
+    # A tender arrival image is centred on the authored portal. This is deliberately
+    # different from an oblique facade hero: the entrance, external approach and the
+    # factory beyond must read on one unbroken access axis.
+    setback = max(65.0, site_span * 0.30)
+    focus_height = focus_maximum[2] - focus_minimum[2]
     position = (
-        gate_center[0] + outward[0] * setback + tangent[0] * lateral_offset,
-        gate_center[1] + outward[1] * setback + tangent[1] * lateral_offset,
-        focus_minimum[2] + 1.65,
+        gate_center[0] + outward[0] * setback,
+        gate_center[1] + outward[1] * setback,
+        focus_minimum[2] + max(8.0, focus_height * 0.55),
     )
-    # Aim beyond the gate toward the focus building, but retain enough foreground
-    # for the fence opening and external approach road to remain understandable.
+    # Aim through the gate toward the nearest point of the focus building. Keeping
+    # part of that depth in the target reveals the project behind the entrance while
+    # the centred portal remains foreground evidence.
     nearest_focus = (
         min(max(gate_center[0], focus_minimum[0]), focus_maximum[0]),
         min(max(gate_center[1], focus_minimum[1]), focus_maximum[1]),
     )
     target = (
-        gate_center[0] + (nearest_focus[0] - gate_center[0]) * 0.70,
-        gate_center[1] + (nearest_focus[1] - gate_center[1]) * 0.70,
-        focus_minimum[2] + 1.00,
+        gate_center[0] + (nearest_focus[0] - gate_center[0]) * 0.75,
+        gate_center[1] + (nearest_focus[1] - gate_center[1]) * 0.75,
+        focus_minimum[2] + max(4.0, focus_height * 0.32),
     )
     return position, target
 
@@ -302,7 +295,6 @@ class PlanStandardCameras:
         long_min = minimum[long_axis]
         height = maximum[2] - minimum[2]
         ground_target_z = minimum[2] + height * 0.42
-        aerial_target_z = minimum[2] + height * 0.25
         detected_corridor = _corridor_cross_coordinate(design, long_axis)
         authored_access = _authored_access_cross_coordinate(scene, long_axis, minimum, maximum)
         has_internal_corridor = detected_corridor is not None
@@ -383,33 +375,78 @@ class PlanStandardCameras:
         loading_shot: tuple[tuple[float, float, float], tuple[float, float, float]] | None = None
         if design is not None:
             surfaces_by_id = {surface.surface_id: surface for surface in scene.surfaces}
-            loading_facades = [
-                (facade, surfaces_by_id.get(facade.surface_id))
+            loading_candidates = [
+                (facade, surfaces_by_id.get(facade.surface_id), dock, side)
                 for building in design.buildings
                 if building.treatment is BuildingTreatment.FOCUS
                 for facade in building.facades
-                if facade.loading_docks
+                for dock in facade.loading_docks
+                for side in (-1.0, 1.0)
             ]
-            if loading_facades:
-                facade, surface = loading_facades[0]
+            utility_bounds = [
+                element.bounding_box
+                for element in scene.elements
+                if element.semantic_role is SemanticRole.UTILITY_BLOCK
+            ]
+
+            def dock_clearance(
+                candidate: tuple[FacadeDesign, SceneSurface | None, LoadingDock, float],
+            ) -> float:
+                _facade, surface, dock, side = candidate
+                if surface is None:
+                    return -1.0
+                door = tuple(
+                    surface.frame.origin[index]
+                    + surface.frame.u_axis[index] * (dock.u * surface.width_m)
+                    for index in range(3)
+                )
+                if not utility_bounds:
+                    return float("inf")
+                lateral_distance = min(32.0, max(22.0, surface.width_m * 0.18))
+                outward_distance = min(18.0, max(12.0, cross_span * 0.2))
+                camera_xy = (
+                    door[0]
+                    + surface.frame.u_axis[0] * lateral_distance * side
+                    + surface.frame.normal[0] * outward_distance,
+                    door[1]
+                    + surface.frame.u_axis[1] * lateral_distance * side
+                    + surface.frame.normal[1] * outward_distance,
+                )
+                return min(
+                    math.hypot(
+                        max(
+                            bounds.minimum[0] - camera_xy[0],
+                            0.0,
+                            camera_xy[0] - bounds.maximum[0],
+                        ),
+                        max(
+                            bounds.minimum[1] - camera_xy[1],
+                            0.0,
+                            camera_xy[1] - bounds.maximum[1],
+                        ),
+                    )
+                    for bounds in utility_bounds
+                )
+
+            if loading_candidates:
+                _facade, surface, dock, side = max(loading_candidates, key=dock_clearance)
                 if surface is not None:
-                    dock = facade.loading_docks[len(facade.loading_docks) // 2]
                     frame = surface.frame
                     door = tuple(
                         frame.origin[index] + frame.u_axis[index] * (dock.u * surface.width_m)
                         for index in range(3)
                     )
-                    lateral_distance = min(18.0, max(10.0, surface.width_m * 0.1))
-                    outward_distance = min(10.0, max(6.0, cross_span * 0.1))
+                    lateral_distance = min(32.0, max(22.0, surface.width_m * 0.18))
+                    outward_distance = min(18.0, max(12.0, cross_span * 0.2))
                     loading_shot = (
                         (
                             door[0]
-                            - frame.u_axis[0] * lateral_distance
+                            + frame.u_axis[0] * lateral_distance * side
                             + frame.normal[0] * outward_distance,
                             door[1]
-                            - frame.u_axis[1] * lateral_distance
+                            + frame.u_axis[1] * lateral_distance * side
                             + frame.normal[1] * outward_distance,
-                            minimum[2] + 1.65,
+                            minimum[2] + 3.2,
                         ),
                         (door[0], door[1], minimum[2] + min(3.0, height * 0.28)),
                     )
@@ -424,18 +461,18 @@ class PlanStandardCameras:
             Camera(
                 view_id="view-01",
                 role=ViewRole.OVERALL,
-                position=overall_position,
-                target=overall_target,
-                focal_length_mm=42,
+                position=(arrival_shot[0] if arrival_shot is not None else overall_position),
+                target=(arrival_shot[1] if arrival_shot is not None else overall_target),
+                focal_length_mm=32,
                 sensor_width_mm=36,
                 aspect_ratio="16:9",
             ),
             Camera(
                 view_id="view-02",
                 role=ViewRole.CONTEXT,
-                position=point(long_span * 1.18, span * 1.02, maximum[2] + span * 0.68),
-                target=(center[0], center[1], aerial_target_z),
-                focal_length_mm=44,
+                position=overall_position,
+                target=overall_target,
+                focal_length_mm=42,
                 sensor_width_mm=36,
                 aspect_ratio="16:9",
             ),
@@ -489,13 +526,8 @@ class PlanStandardCameras:
             Camera(
                 view_id="view-06",
                 role=ViewRole.LOADING_DETAIL,
-                # When the model contains an authored loading/road strip, stand inside that
-                # circulation space so the perimeter fence does not obscure the operational
-                # facade. For a model without authored access, remain outside the envelope.
                 position=(
-                    arrival_shot[0]
-                    if arrival_shot is not None
-                    else loading_shot[0]
+                    loading_shot[0]
                     if loading_shot is not None
                     else corridor_point(
                         (
@@ -507,9 +539,7 @@ class PlanStandardCameras:
                     )
                 ),
                 target=(
-                    arrival_shot[1]
-                    if arrival_shot is not None
-                    else loading_shot[1]
+                    loading_shot[1]
                     if loading_shot is not None
                     else access_facade_point(
                         long_min + long_span * 0.52,
@@ -530,7 +560,7 @@ class PlanStandardCameras:
         if design is not None:
             design_revision = design.design_revision
         view_set = ViewSet(
-            view_set_id=f"{revision_key}-{design_revision}-standard-v20",
+            view_set_id=f"{revision_key}-{design_revision}-standard-v21",
             design_revision=design_revision,
             cameras=cameras,
         )

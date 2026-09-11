@@ -268,7 +268,9 @@ def build_materials(
     requested_context_opacity = (
         design_data.get("site_design", {}).get("context_opacity", 0.46) if design_data else 0.46
     )
-    context_opacity = max(0.42, min(0.58, requested_context_opacity))
+    # Context sheds are a planning aid, not part of the proposed architecture. Keep them
+    # unmistakably secondary; a separate deterministic overlay preserves this opacity after AI.
+    context_opacity = max(0.22, min(0.30, requested_context_opacity))
 
     def resolved(
         role: str,
@@ -633,6 +635,45 @@ def create_context_environment(
     asset_data: dict | None = None,
 ) -> int:
     site = design_data.get("site_design", {})
+    context_plan = design_data.get("industrial_context") or {}
+    if context_plan.get("mode") == "conceptual_industrial_park":
+        materials = build_materials(design_data, asset_data)
+        index = start_index
+
+        def add_box(name: str, box: dict, material_value, role: str) -> None:
+            nonlocal index
+            minimum = box["minimum"]
+            maximum = box["maximum"]
+            index += 1
+            _oriented_box(
+                name,
+                Vector(tuple((minimum[axis] + maximum[axis]) / 2 for axis in range(3))),
+                tuple(
+                    (Vector((1 if axis == 0 else 0, 1 if axis == 1 else 0, 1 if axis == 2 else 0)),
+                     maximum[axis] - minimum[axis])
+                    for axis in range(3)
+                ),
+                material_value,
+                index,
+                semantic_role=role,
+            )
+
+        if context_plan.get("ground"):
+            add_box(
+                "conceptual-context-ground",
+                context_plan["ground"],
+                materials["context_landscape"],
+                "context_landscape",
+            )
+        for road in context_plan.get("roads", []):
+            add_box(
+                road["road_id"], road["bounding_box"], materials["site_road"], "context_landscape"
+            )
+        for proxy in context_plan.get("proxy_buildings", []):
+            add_box(
+                proxy["proxy_id"], proxy["bounding_box"], materials["context"], "context_building"
+            )
+        return index
     if site.get("surrounding_context_mode") != "procedural_perimeter":
         return start_index
     elements = scene_data["elements"]
@@ -1417,8 +1458,9 @@ def create_design_details(
         traffic_axis = Vector((0, 1, 0)) if size_x >= size_y else Vector((1, 0, 0))
         opening_width = max(size_x, size_y)
         center = Vector(((x0 + x1) / 2, (y0 + y1) / 2, z1))
-        post_height = 2.2
-        post_size = min(0.28, opening_width * 0.035)
+        is_sliding_gate = gate_kit == "industrial_sliding"
+        post_height = 3.0 if is_sliding_gate else 2.2
+        post_size = min(0.42 if is_sliding_gate else 0.28, opening_width * 0.045)
         gate_material = detail_materials["boundary"]
         for side, direction in (("left", -1), ("right", 1)):
             detail_index += 1
@@ -1439,13 +1481,18 @@ def create_design_details(
                 detail_index,
                 semantic_role=entrance["semantic_role"],
             )
-        # Buildable two-leaf steel gate: low horizontal rails and regular pickets, with no
-        # overhead ceremonial portal. The gate shares the exact fence material family.
+        # A sliding leaf is shown parked clear of the authored traffic opening. This makes the
+        # entrance legible without inventing a ceremonial portal or blocking the approach road.
+        leaf_center = (
+            center + span_axis * opening_width
+            if is_sliding_gate
+            else center
+        )
         for rail_name, rail_height in (("bottom", 0.35), ("top", 1.85)):
             detail_index += 1
             _oriented_box(
                 f"{entrance['scene_element_id']}:gate-rail-{rail_name}",
-                center + Vector((0, 0, rail_height)),
+                leaf_center + Vector((0, 0, rail_height)),
                 (
                     (span_axis, opening_width - post_size * 2),
                     (traffic_axis, 0.10),
@@ -1462,7 +1509,7 @@ def create_design_details(
             offset = -opening_width / 2 + opening_width * picket_number / picket_count
             _oriented_box(
                 f"{entrance['scene_element_id']}:gate-picket-{picket_number:02d}",
-                center + span_axis * offset + Vector((0, 0, 1.1)),
+                leaf_center + span_axis * offset + Vector((0, 0, 1.1)),
                 (
                     (span_axis, 0.055),
                     (traffic_axis, 0.08),
@@ -1908,6 +1955,14 @@ def file_output(tree, source, socket_name: str, directory: Path, prefix: str, fi
 
 def render_pbr(view_dir: Path) -> None:
     scene = bpy.context.scene
+    context_objects = [
+        obj
+        for obj in scene.objects
+        if obj.type == "MESH" and obj.get("semantic_role") == "context_building"
+    ]
+    original_visibility = {obj: obj.hide_render for obj in context_objects}
+    for obj in context_objects:
+        obj.hide_render = True
     layer = scene.view_layers[0]
     layer.use_pass_z = True
     layer.use_pass_normal = True
@@ -1923,7 +1978,14 @@ def render_pbr(view_dir: Path) -> None:
     tree.links.new(render_layers.outputs["Depth"], normalized_depth.inputs["Value"])
     file_output(tree, normalized_depth, "Value", view_dir, "depth_preview_", "PNG")
     scene.render.filepath = str(view_dir / "base_rgb.png")
-    bpy.ops.render.render(write_still=True)
+    try:
+        # The generative renderer receives the project and industrial-estate ground/roads, but
+        # not proxy sheds. Those are composited back deterministically after refinement so their
+        # count, location and translucency cannot drift between views.
+        bpy.ops.render.render(write_still=True)
+    finally:
+        for obj, hidden in original_visibility.items():
+            obj.hide_render = hidden
     for prefix, extension in (
         ("depth_", "exr"),
         ("normal_", "exr"),
@@ -1933,6 +1995,55 @@ def render_pbr(view_dir: Path) -> None:
         if matches:
             name = "depth.png" if prefix == "depth_preview_" else f"{prefix.rstrip('_')}.exr"
             os.replace(matches[-1], view_dir / name)
+
+
+def render_context_proxy_overlay(view_dir: Path) -> None:
+    """Render context sheds as camera-aligned RGBA with project geometry as holdouts."""
+
+    scene = bpy.context.scene
+    mesh_objects = [obj for obj in scene.objects if obj.type == "MESH"]
+    context_objects = [
+        obj for obj in mesh_objects if obj.get("semantic_role") == "context_building"
+    ]
+    if not context_objects:
+        return
+
+    original_materials = {obj: obj.data.materials[0] for obj in mesh_objects}
+    original_visibility = {obj: obj.hide_render for obj in mesh_objects}
+    original_film_transparent = scene.render.film_transparent
+    original_color_mode = scene.render.image_settings.color_mode
+    original_format = scene.render.image_settings.file_format
+    original_scene_nodes = scene.use_nodes
+    original_filepath = scene.render.filepath
+
+    holdout = bpy.data.materials.new("context-proxy-holdout")
+    holdout.use_nodes = True
+    holdout.node_tree.nodes.clear()
+    output = holdout.node_tree.nodes.new("ShaderNodeOutputMaterial")
+    holdout_node = holdout.node_tree.nodes.new("ShaderNodeHoldout")
+    holdout.node_tree.links.new(holdout_node.outputs["Holdout"], output.inputs["Surface"])
+
+    try:
+        for obj in mesh_objects:
+            obj.hide_render = False
+            if obj not in context_objects:
+                obj.data.materials.clear()
+                obj.data.materials.append(holdout)
+        scene.use_nodes = False
+        scene.render.film_transparent = True
+        scene.render.image_settings.file_format = "PNG"
+        scene.render.image_settings.color_mode = "RGBA"
+        scene.render.filepath = str(view_dir / "context_proxy_rgba.png")
+        bpy.ops.render.render(write_still=True)
+    finally:
+        _replace_materials(original_materials)
+        for obj, hidden in original_visibility.items():
+            obj.hide_render = hidden
+        scene.render.film_transparent = original_film_transparent
+        scene.render.image_settings.color_mode = original_color_mode
+        scene.render.image_settings.file_format = original_format
+        scene.use_nodes = original_scene_nodes
+        scene.render.filepath = original_filepath
 
 
 def _replace_materials(materials_by_object: dict) -> None:
@@ -2240,6 +2351,7 @@ def main() -> None:
         )
         camera = configure_camera(camera_spec)
         render_pbr(view_dir)
+        render_context_proxy_overlay(view_dir)
         if not args.pbr_only:
             render_masks(view_dir)
             render_material_ids(view_dir)

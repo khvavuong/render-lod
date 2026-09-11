@@ -31,6 +31,7 @@ interface DesignPreviewResponse {
   preview_token: string;
   normalized_intent: DesignPreview['normalizedIntent'];
   capabilities: ModelDesignCapabilities;
+  industrial_context: DesignPreview['industrialContext'];
   warnings: IntentWarning[];
 }
 
@@ -55,6 +56,10 @@ interface VideoJobResponse {
   estimated_cost_usd: number;
   output_url?: string | null;
   error_message?: string | null;
+}
+
+interface ReferenceUploadResponse {
+  reference_id: string;
 }
 
 interface ApiValidationIssue {
@@ -184,6 +189,7 @@ export class HttpStudioGateway implements StudioGateway {
       previewToken: preview.preview_token,
       normalizedIntent: preview.normalized_intent,
       capabilities: preview.capabilities,
+      industrialContext: preview.industrial_context,
       warnings: preview.warnings,
     };
   }
@@ -206,14 +212,23 @@ export class HttpStudioGateway implements StudioGateway {
         }),
       },
     );
+    const referenceIds = await Promise.all([
+      values.factoryDesignReference
+        ? this.uploadReference(values.factoryDesignReference, 'factory_design_reference')
+        : undefined,
+      values.contextRealismReference
+        ? this.uploadReference(values.contextRealismReference, 'context_realism_reference')
+        : undefined,
+    ]);
     const job = await request<ViewSetResponse>(
       `/v1/design-revisions/${encodeURIComponent(revision.design_revision)}/view-sets`,
       {
         method: 'POST',
         body: JSON.stringify({
           model_revision: model.modelRevision,
-          profile: values.deliveryQuality === 'preview' ? 'preview_fast' : 'marketing_hero',
+          profile: values.deliveryQuality === 'preview' ? 'preview_fast' : 'tender_final',
           render_profile: 'standard_eevee',
+          reference_ids: referenceIds.filter((value): value is string => Boolean(value)),
         }),
       },
     );
@@ -221,6 +236,19 @@ export class HttpStudioGateway implements StudioGateway {
       `/v1/view-sets/${encodeURIComponent(job.view_set_id)}/outputs`,
     ).catch(() => ({ outputs: [] }));
     return toJob(job, outputResponse.outputs, revision.warnings);
+  }
+
+  private async uploadReference(file: File, role: string): Promise<string> {
+    const uploaded = await request<ReferenceUploadResponse>('/v1/references', {
+      method: 'POST',
+      headers: {
+        'Content-Type': file.type || 'application/octet-stream',
+        'X-Filename': encodeURIComponent(file.name),
+        'X-Reference-Role': role,
+      },
+      body: file,
+    });
+    return uploaded.reference_id;
   }
 
   private async uploadWithoutAnalysis(file: File): Promise<PreparedModel> {
@@ -271,6 +299,14 @@ export class HttpStudioGateway implements StudioGateway {
 
   async approveViewSet(viewSetId: string): Promise<StudioJob> {
     return this.transitionViewSet(viewSetId, 'approve');
+  }
+
+  async rejectDesignMaster(viewSetId: string): Promise<StudioJob> {
+    const job = await request<ViewSetResponse>(
+      `/v1/view-sets/${encodeURIComponent(viewSetId)}/masters/reject`,
+      { method: 'POST' },
+    );
+    return toJob(job);
   }
 
   async retryViewSet(viewSetId: string): Promise<StudioJob> {

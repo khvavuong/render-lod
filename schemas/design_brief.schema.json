@@ -355,7 +355,7 @@
         },
         "surrounding_context_mode": {
           "default": "authored_only",
-          "pattern": "^(authored_only|procedural_perimeter)$",
+          "pattern": "^(authored_only|procedural_perimeter|conceptual_industrial_park|none)$",
           "title": "Surrounding Context Mode",
           "type": "string"
         },

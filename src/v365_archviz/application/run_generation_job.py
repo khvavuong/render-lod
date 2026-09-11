@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import io
 import json
 import logging
 from pathlib import Path
+
+from PIL import Image
 
 from v365_archviz.application.brand_deliverables import BrandDeliverables
 from v365_archviz.application.brand_watermark import BrandWatermark
@@ -14,14 +17,14 @@ from v365_archviz.application.compose_viewset_board import ComposeViewSetBoard
 from v365_archviz.application.create_certification_report import CreateCertificationReport
 from v365_archviz.application.evaluate_consistency import EvaluateConsistency
 from v365_archviz.application.protect_refinement import ProtectRefinement
-from v365_archviz.application.refine_viewset import RefineViewSet, _select_master_view_id
+from v365_archviz.application.refine_viewset import RefineViewSet, select_master_view_ids
 from v365_archviz.application.refinement_prompt import build_refinement_prompt
 from v365_archviz.application.validate_conditioning import ValidateConditioningViewSet
 from v365_archviz.application.validate_viewset import ValidateGeneratedViewSet
 from v365_archviz.artifacts import atomic_write
 from v365_archviz.config import Settings
 from v365_archviz.domain.jobs import GenerationJob
-from v365_archviz.domain.workflow import Camera, ViewSet, WorkflowState
+from v365_archviz.domain.workflow import Camera, ViewRole, ViewSet, WorkflowState
 from v365_archviz.errors import V365Error
 from v365_archviz.providers.docker_conditioning import DockerConditioningRenderer
 from v365_archviz.providers.image_factory import create_image_renderer
@@ -74,28 +77,56 @@ class RunGenerationJob:
 
         if job.state is WorkflowState.GENERATING_VIEWSET:
             _, prompt = build_refinement_prompt(paths.design_dna)
+            references = tuple(Path(value) for value in job.reference_image_refs)
+            reference_pairs = tuple(zip(references, job.reference_roles, strict=True))
             review_path = paths.generated_root / "design_master_review.json"
             review = self._read_master_review(review_path)
             if not review.get("approved", False):
-                master_view_id = _select_master_view_id(paths.render_root, view_set.cameras)
+                site_master_id, facade_master_id = select_master_view_ids(
+                    paths.render_root, view_set.cameras
+                )
                 with create_image_renderer(settings, job.image_provider) as renderer:
-                    generated = RefineViewSet().execute(
-                        renderer,
-                        paths.render_root,
-                        paths.generated_root,
-                        paths.view_set,
-                        paths.design_dna,
-                        job.model_revision,
-                        prompt,
-                        profile=job.profile,
-                        view_ids=(master_view_id,),
-                    )
+                    master_roles = {
+                        site_master_id: "context_realism_reference",
+                        facade_master_id: "factory_design_reference",
+                    }
+                    for master_view_id in dict.fromkeys((site_master_id, facade_master_id)):
+                        matching_references = tuple(
+                            path
+                            for path, role in reference_pairs
+                            if role == master_roles[master_view_id]
+                        )
+                        generated = RefineViewSet().execute(
+                            renderer,
+                            paths.render_root,
+                            paths.generated_root,
+                            paths.view_set,
+                            paths.design_dna,
+                            job.model_revision,
+                            prompt,
+                            profile=job.profile,
+                            view_ids=(master_view_id,),
+                            reference_images=matching_references or references,
+                        )
                 protected = ProtectRefinement().execute(
                     paths.render_root,
                     paths.generated_root,
                     restore_locked_pixels=False,
                 )
-                master_path = self._refined_image(paths.generated_root / master_view_id)
+                master_paths = {
+                    "site": self._refined_image(paths.generated_root / site_master_id),
+                    "facade": self._refined_image(paths.generated_root / facade_master_id),
+                }
+                facade_quality_standard = (
+                    paths.generated_root
+                    / f"approved_facade_quality_master{master_paths['facade'].suffix}"
+                )
+                atomic_write(
+                    facade_quality_standard,
+                    master_paths["facade"].read_bytes(),
+                )
+                master_path = paths.generated_root / "approved_master_identity.jpg"
+                self._compose_master_identity(master_paths, master_path)
                 atomic_write(
                     review_path,
                     json.dumps(
@@ -103,8 +134,27 @@ class RunGenerationJob:
                             "schema_version": "1.0.0",
                             "status": "pending",
                             "approved": False,
-                            "master_view_id": master_view_id,
+                            "master_view_id": site_master_id,
                             "master_image_ref": str(master_path),
+                            "master_view_ids": {
+                                "site": site_master_id,
+                                "facade": facade_master_id,
+                            },
+                            "master_image_refs": {
+                                role: str(path) for role, path in master_paths.items()
+                            },
+                            "quality_standard": {
+                                "role": "facade_quality_master",
+                                "view_id": facade_master_id,
+                                "image_ref": str(facade_quality_standard),
+                                "criteria": [
+                                    "photographic_material_response",
+                                    "restrained_buildable_facade_detail",
+                                    "clean_natural_daylight",
+                                    "credible_industrial_decor",
+                                    "consistent_palette_and_finish",
+                                ],
+                            },
                             "geometry_screen_passed": protected.rejected_count == 0,
                             "next_stage": "generate_remaining_views_after_explicit_approval",
                         },
@@ -121,29 +171,112 @@ class RunGenerationJob:
                     protected.manifest_path,
                     review_path,
                     master_path,
+                    facade_quality_standard,
                 )
             else:
                 master_view_id = str(review["master_view_id"])
                 master_path = Path(str(review["master_image_ref"]))
+                stored_master_ids = review.get("master_view_ids")
+                master_id_values = (
+                    stored_master_ids.values()
+                    if isinstance(stored_master_ids, dict)
+                    else (master_view_id,)
+                )
+                master_view_ids = {str(item) for item in master_id_values}
                 remaining_view_ids = tuple(
                     camera.view_id
                     for camera in view_set.cameras
-                    if camera.view_id != master_view_id
+                    if camera.view_id not in master_view_ids
+                )
+                stored_master_refs = review.get("master_image_refs")
+                master_refs = (
+                    {str(role): Path(str(path)) for role, path in stored_master_refs.items()}
+                    if isinstance(stored_master_refs, dict)
+                    else {"site": master_path, "facade": master_path}
+                )
+                stored_quality_standard = review.get("quality_standard")
+                facade_quality_standard = (
+                    Path(str(stored_quality_standard["image_ref"]))
+                    if isinstance(stored_quality_standard, dict)
+                    and stored_quality_standard.get("image_ref")
+                    else master_refs.get("facade", master_path)
+                )
+                reference_images_by_view = {
+                    camera.view_id: tuple(
+                        dict.fromkeys(
+                            (
+                                *(
+                                    path
+                                    for path, role in reference_pairs
+                                    if role
+                                    == (
+                                        "context_realism_reference"
+                                        if camera.role in {ViewRole.OVERALL, ViewRole.CONTEXT}
+                                        else "factory_design_reference"
+                                    )
+                                ),
+                                *(
+                                    (facade_quality_standard,)
+                                    if camera.role in {ViewRole.OVERALL, ViewRole.CONTEXT}
+                                    else ()
+                                ),
+                            )
+                        )
+                    )
+                    for camera in view_set.cameras
+                    if camera.view_id in remaining_view_ids
+                }
+                stored_master_ids = review.get("master_view_ids")
+                typed_master_ids = (
+                    {str(role): str(view_id) for role, view_id in stored_master_ids.items()}
+                    if isinstance(stored_master_ids, dict)
+                    else {"site": master_view_id, "facade": master_view_id}
+                )
+                remaining_groups = (
+                    (
+                        "site",
+                        tuple(
+                            camera.view_id
+                            for camera in view_set.cameras
+                            if camera.view_id in remaining_view_ids
+                            and camera.role in {ViewRole.OVERALL, ViewRole.CONTEXT}
+                        ),
+                    ),
+                    (
+                        "facade",
+                        tuple(
+                            camera.view_id
+                            for camera in view_set.cameras
+                            if camera.view_id in remaining_view_ids
+                            and camera.role not in {ViewRole.OVERALL, ViewRole.CONTEXT}
+                        ),
+                    ),
                 )
                 with create_image_renderer(settings, job.image_provider) as renderer:
-                    generated = RefineViewSet().execute(
-                        renderer,
-                        paths.render_root,
-                        paths.generated_root,
-                        paths.view_set,
-                        paths.design_dna,
-                        job.model_revision,
-                        prompt,
-                        profile=job.profile,
-                        view_ids=remaining_view_ids,
-                        approved_master_path=master_path,
-                        approved_master_view_id=master_view_id,
-                    )
+                    generated = None
+                    for master_type, group_view_ids in remaining_groups:
+                        if not group_view_ids:
+                            continue
+                        generated = RefineViewSet().execute(
+                            renderer,
+                            paths.render_root,
+                            paths.generated_root,
+                            paths.view_set,
+                            paths.design_dna,
+                            job.model_revision,
+                            prompt,
+                            profile=job.profile,
+                            view_ids=group_view_ids,
+                            reference_images=references,
+                            reference_images_by_view=reference_images_by_view,
+                            approved_master_path=master_refs.get(master_type, master_path),
+                            approved_master_view_id=typed_master_ids.get(
+                                master_type, master_view_id
+                            ),
+                            quality_standard_path=facade_quality_standard,
+                        )
+                if generated is None:
+                    raise V365Error("approved Design Masters left no views to generate")
                 protected = ProtectRefinement().execute(
                     paths.render_root,
                     paths.generated_root,
@@ -177,9 +310,7 @@ class RunGenerationJob:
                 certification_path,
             )
             target_state = (
-                WorkflowState.COMPOSING_BOARD
-                if validation.passed
-                else WorkflowState.HUMAN_REVIEW
+                WorkflowState.COMPOSING_BOARD if validation.passed else WorkflowState.HUMAN_REVIEW
             )
             job = self._advance(
                 repository,
@@ -230,6 +361,29 @@ class RunGenerationJob:
         if len(images) != 1:
             raise V365Error(f"{view_directory.name} has no unique Design Master image")
         return images[0]
+
+    @staticmethod
+    def _compose_master_identity(master_paths: dict[str, Path], target: Path) -> None:
+        images = []
+        for role in ("site", "facade"):
+            with Image.open(master_paths[role]) as source:
+                images.append(source.convert("RGB"))
+        height = min(image.height for image in images)
+        resized = [
+            image.resize(
+                (round(image.width * height / image.height), height),
+                Image.Resampling.LANCZOS,
+            )
+            for image in images
+        ]
+        board = Image.new("RGB", (sum(image.width for image in resized), height), "white")
+        offset = 0
+        for image in resized:
+            board.paste(image, (offset, 0))
+            offset += image.width
+        buffer = io.BytesIO()
+        board.save(buffer, format="JPEG", quality=95, optimize=True)
+        atomic_write(target, buffer.getvalue())
 
     def _ensure_conditioning(
         self,
@@ -292,6 +446,11 @@ class RunGenerationJob:
             "bounded_mask.png",
             "free_mask.png",
             "control_pack_manifest.json",
+            "project_locked_mask.png",
+            "project_designable_mask.png",
+            "context_ground_mask.png",
+            "context_proxy_mask.png",
+            "layer_authority_manifest.json",
         )
         passes_exist = all(
             (render_root / camera.view_id / name).is_file()

@@ -41,6 +41,7 @@ interface GenerationWorkspaceProps {
   onGenerateVideo: () => void;
   onRefresh: () => void;
   onApprove: () => void;
+  onRejectMaster: () => void;
   onRetry: () => void;
 }
 
@@ -57,7 +58,7 @@ const STATE_META: Record<WorkflowState, { label: string; percent: number }> = {
   planning_cameras: { label: "Đang lập góc nhìn", percent: 27 },
   rendering_passes: { label: "Đang dựng geometry passes", percent: 28 },
   generating_viewset: { label: "Đang tạo ảnh", percent: 58 },
-  design_master_review: { label: "Chờ duyệt Design Master", percent: 48 },
+  design_master_review: { label: "Chờ duyệt Site & Facade Master", percent: 48 },
   validating: { label: "Đang kiểm tra chất lượng", percent: 76 },
   human_review: { label: "Chờ duyệt thiết kế", percent: 84 },
   repairing: { label: "Đang hiệu chỉnh", percent: 67 },
@@ -173,6 +174,7 @@ export function GenerationWorkspace({
   onGenerateVideo,
   onRefresh,
   onApprove,
+  onRejectMaster,
   onRetry,
 }: GenerationWorkspaceProps) {
   const [filter, setFilter] = useState<"all" | "image" | "video">("all");
@@ -261,12 +263,7 @@ export function GenerationWorkspace({
           type="warning"
           showIcon
           message="Bộ 6 ảnh đã được tạo và đang chờ duyệt"
-          description="Một hoặc nhiều kiểm tra tự động cần con người xác nhận. Bạn vẫn có thể xem đủ ảnh bên dưới; chỉ duyệt khi hình học và thiết kế đã đạt yêu cầu."
-          action={
-            <Button type="primary" loading={submittingReview} onClick={onApprove}>
-              Duyệt và hoàn thiện board
-            </Button>
-          }
+          description="Hard QA đang không đạt. Bộ ảnh chỉ được xem để đánh giá; cần sửa hoặc tạo lại view lỗi trước khi có thể hoàn tất bàn giao."
         />
       )}
 
@@ -275,12 +272,17 @@ export function GenerationWorkspace({
           className="review-action-panel"
           type="info"
           showIcon
-          message="Duyệt Design Master trước khi sinh toàn bộ view set"
-          description="Hệ thống mới chỉ tạo một ảnh đại diện. Hãy kiểm tra ngôn ngữ facade, mái, màu vật liệu, cổng và hàng rào; chỉ khi duyệt mới phát sinh chi phí cho 5 ảnh còn lại."
+          message="Duyệt Site Master và Facade Master trước khi sinh toàn bộ view set"
+          description="Hệ thống mới chỉ tạo hai ảnh kiểm soát: Site Master cho tổng thể, cổng, hàng rào và bối cảnh; Facade Master cho vật liệu và thiết kế mặt đứng. Chỉ khi duyệt cả hai mới phát sinh chi phí cho 4 ảnh còn lại."
           action={
-            <Button type="primary" loading={submittingReview} onClick={onApprove}>
-              Duyệt và tạo 5 góc còn lại
-            </Button>
+            <Space>
+              <Button loading={submittingReview} onClick={onRejectMaster}>
+                Tạo lại master
+              </Button>
+              <Button type="primary" loading={submittingReview} onClick={onApprove}>
+                Duyệt và tạo 4 góc còn lại
+              </Button>
+            </Space>
           }
         />
       )}
@@ -372,7 +374,7 @@ export function GenerationWorkspace({
               },
               {
                 color: meta.percent >= 58 ? "green" : "gray",
-                children: "Duyệt Design Master và tạo bộ 6 ảnh đồng nhất",
+                children: "Duyệt hai master và tạo bộ 6 ảnh đồng nhất",
               },
               {
                 color: meta.percent >= 76 ? "green" : "gray",

@@ -37,6 +37,7 @@ class Settings:
     image_provider: str = "gemini"
     gemini_conditioning_mode: str = "photoreal_balanced"
     gemini_master_image_model: str | None = None
+    gemini_thinking_level: str = "high"
     openai_api_key: str | None = None
     openai_image_model: str = "gpt-image-2.5-sunburst"
     openai_image_quality: str = "high"
@@ -81,7 +82,9 @@ class Settings:
             stability_seed=int(os.getenv("STABILITY_SEED", "365100")),
             image_provider=os.getenv("V365_IMAGE_PROVIDER", "gemini"),
             gemini_conditioning_mode=os.getenv("GEMINI_CONDITIONING_MODE", "photoreal_balanced"),
-            gemini_master_image_model=os.getenv("GEMINI_MASTER_IMAGE_MODEL") or None,
+            gemini_master_image_model=os.getenv("GEMINI_MASTER_IMAGE_MODEL", "gemini-3-pro-image")
+            or None,
+            gemini_thinking_level=os.getenv("GEMINI_THINKING_LEVEL", "high"),
             openai_api_key=os.getenv("OPENAI_API_KEY"),
             openai_image_model=os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-2.5-sunburst"),
             openai_image_quality=os.getenv("OPENAI_IMAGE_QUALITY", "high"),

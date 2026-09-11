@@ -21,7 +21,7 @@ from v365_archviz.providers.contracts import (
     ViewConditioningInput,
 )
 
-PROMPT_VERSION = "photoreal-balanced-v3"
+PROMPT_VERSION = "layered-authority-v4"
 DEFAULT_PROMPT = """Create a photorealistic professional architectural visualization of this
 Vietnamese industrial project. Treat the base render and auxiliary passes as immutable spatial
 geometry: preserve the exact camera, site boundary, authored road and sidewalk centerlines and
@@ -131,6 +131,34 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _reference_role(path: Path) -> str:
+    metadata_path = path.parent / "metadata.json"
+    try:
+        document = json.loads(metadata_path.read_text(encoding="utf-8"))
+        role = document.get("role")
+    except (OSError, json.JSONDecodeError):
+        role = None
+    return str(role) if role else "quality_only"
+
+
+def _composite_context_proxy(content: bytes, media_type: str, overlay_path: Path) -> bytes:
+    """Restore the deterministic planning-context layer after generative refinement."""
+
+    with Image.open(io.BytesIO(content)) as generated_source:
+        generated = generated_source.convert("RGBA")
+    with Image.open(overlay_path) as overlay_source:
+        overlay = overlay_source.convert("RGBA")
+    if overlay.size != generated.size:
+        overlay = overlay.resize(generated.size, Image.Resampling.LANCZOS)
+    result = Image.alpha_composite(generated, overlay)
+    buffer = io.BytesIO()
+    if media_type == "image/jpeg":
+        result.convert("RGB").save(buffer, format="JPEG", quality=95, optimize=True)
+    else:
+        result.save(buffer, format="PNG", optimize=True)
+    return buffer.getvalue()
+
+
 class RefineView:
     def execute(
         self,
@@ -144,6 +172,7 @@ class RefineView:
         design_revision: str | None = None,
         generated_image: GeneratedImage | None = None,
         watermark: BrandWatermark | None = None,
+        effective_provider_model: str | None = None,
     ) -> RefinedViewArtifacts:
         view_directory = render_root / view_id
         inputs = {
@@ -185,11 +214,19 @@ class RefineView:
         target = output_directory / view_id
         image_path = target / f"refined{extension}"
         provider_source_path = target / f"provider_source{extension}"
+        provider_raw_path = target / f"provider_raw{extension}"
         manifest_path = target / "generation_manifest.json"
+        context_proxy_path = view_directory / "context_proxy_rgba.png"
+        final_content = generated.content
+        if context_proxy_path.is_file():
+            atomic_write(provider_raw_path, generated.content)
+            final_content = _composite_context_proxy(
+                generated.content, generated.media_type, context_proxy_path
+            )
         if watermark is None:
-            atomic_write(image_path, generated.content)
+            atomic_write(image_path, final_content)
         else:
-            atomic_write(provider_source_path, generated.content)
+            atomic_write(provider_source_path, final_content)
             watermark.apply_image(provider_source_path, image_path)
         manifest = {
             "schema_version": "1.0.0",
@@ -201,6 +238,7 @@ class RefineView:
                 getattr(renderer, "capabilities", ImageProviderCapabilities())
             ),
             "provider_configuration": getattr(renderer, "provenance", {}),
+            "effective_provider_model": effective_provider_model,
             "provider_request_id": generated.provider_request_id,
             "prompt_version": PROMPT_VERSION,
             "inputs": {
@@ -209,6 +247,11 @@ class RefineView:
                     f"reference_{index:02d}": _sha256(path)
                     for index, path in enumerate(reference_images, start=1)
                 },
+                **(
+                    {"context_proxy_rgba": _sha256(context_proxy_path)}
+                    if context_proxy_path.is_file()
+                    else {}
+                ),
             },
             "input_roles": {
                 "base_rgb": "geometry_authority",
@@ -222,15 +265,22 @@ class RefineView:
                     else {}
                 ),
                 **{
-                    f"reference_{index:02d}": "quality_only"
-                    for index, _ in enumerate(reference_images, start=1)
+                    f"reference_{index:02d}": _reference_role(path)
+                    for index, path in enumerate(reference_images, start=1)
                 },
+                **(
+                    {"context_proxy_rgba": "deterministic_final_overlay"}
+                    if context_proxy_path.is_file()
+                    else {}
+                ),
             },
             "output": {
                 "media_type": generated.media_type,
-                "provider_source_sha256": hashlib.sha256(generated.content).hexdigest(),
+                "provider_raw_sha256": hashlib.sha256(generated.content).hexdigest(),
+                "provider_source_sha256": hashlib.sha256(final_content).hexdigest(),
                 "sha256": _sha256(image_path),
                 "brand_watermark": watermark is not None,
+                "context_proxy_composited": context_proxy_path.is_file(),
             },
         }
         atomic_write(

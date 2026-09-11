@@ -10,6 +10,7 @@ const gateway: StudioGateway = {
   createDesign: async () => { throw new Error('not called'); },
   getJob: async () => { throw new Error('not called'); },
   approveViewSet: async () => { throw new Error('not called'); },
+  rejectDesignMaster: async () => { throw new Error('not called'); },
   retryViewSet: async () => { throw new Error('not called'); },
   createVideo: async () => { throw new Error('not called'); },
   getVideoJob: async () => { throw new Error('not called'); },

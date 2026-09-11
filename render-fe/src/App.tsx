@@ -42,6 +42,7 @@ function StudioShell({ gateway }: Required<AppProps>) {
     resetPreparedModel,
     refresh,
     approve,
+    rejectMaster,
     retry,
     generateVideo,
   } = useStudioJob(gateway);
@@ -117,6 +118,7 @@ function StudioShell({ gateway }: Required<AppProps>) {
             onGenerateVideo={() => void generateVideo()}
             onRefresh={() => void refresh()}
             onApprove={() => void approve()}
+            onRejectMaster={() => void rejectMaster()}
             onRetry={() => void retry()}
           />
         </div>

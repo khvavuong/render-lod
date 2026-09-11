@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 
 import numpy as np
@@ -42,6 +43,114 @@ def _neutral_structure_guide(base: Image.Image, edges: Image.Image) -> bytes:
     buffer = BytesIO()
     guide.save(buffer, format="PNG", optimize=True)
     return buffer.getvalue()
+
+
+def _semantic_role_masks(
+    view_directory: Path, size: tuple[int, int]
+) -> dict[str, NDArray[np.bool_]]:
+    semantic_path = view_directory / "semantic.png"
+    manifest_path = view_directory / "semantic_id_manifest.json"
+    if not semantic_path.is_file() or not manifest_path.is_file():
+        return {}
+    with Image.open(semantic_path) as source:
+        semantic = np.asarray(
+            source.convert("RGB").resize(size, Image.Resampling.NEAREST), dtype=np.int16
+        )
+    document = json.loads(manifest_path.read_text(encoding="utf-8"))
+    masks: dict[str, NDArray[np.bool_]] = {}
+    for item in document.get("roles", []):
+        role = str(item["semantic_role"])
+        color = np.asarray(item["srgb8"], dtype=np.int16)
+        masks[role] = np.max(np.abs(semantic - color), axis=2) <= 4
+    return masks
+
+
+def _write_layer_authority_artifacts(
+    view_directory: Path,
+    *,
+    size: tuple[int, int],
+    edge_band: NDArray[np.bool_],
+) -> None:
+    roles = _semantic_role_masks(view_directory, size)
+    shape = (size[1], size[0])
+
+    def combined(names: set[str]) -> NDArray[np.bool_]:
+        selected = [mask for role, mask in roles.items() if role in names]
+        return np.logical_or.reduce(selected) if selected else np.zeros(shape, dtype=bool)
+
+    context_ground = combined({"context_landscape"})
+    context_proxy_path = view_directory / "context_proxy_rgba.png"
+    if context_proxy_path.is_file():
+        with Image.open(context_proxy_path) as source:
+            alpha = np.asarray(
+                source.convert("RGBA").resize(size, Image.Resampling.LANCZOS).getchannel("A")
+            )
+        context_proxy = alpha >= 4
+    else:
+        context_proxy = combined({"context_building"})
+    project_designable = combined(
+        {
+            "main_shed",
+            "office_block",
+            "roof",
+            "primary_facade",
+            "facade_secondary",
+            "glazing",
+            "brand_accent",
+            "design_detail",
+        }
+    )
+    project_locked = (
+        combined(
+            {
+                "service_yard",
+                "site_road",
+                "sidewalk",
+                "parking",
+                "landscape_zone",
+                "main_entrance",
+                "secondary_entrance",
+                "site_boundary",
+                "loading_zone",
+                "utility_block",
+            }
+        )
+        | edge_band
+    )
+    masks = {
+        "project_locked": project_locked,
+        "project_designable": project_designable & ~project_locked,
+        "context_ground": context_ground & ~project_locked,
+        "context_proxy": context_proxy & ~project_locked,
+    }
+    artifacts = {}
+    total = shape[0] * shape[1]
+    for name, mask in masks.items():
+        content = _png(mask)
+        target = view_directory / f"{name}_mask.png"
+        atomic_write(target, content)
+        artifacts[name] = {
+            "path": str(target),
+            "sha256": _sha256(content),
+            "coverage": float(mask.sum()) / total,
+        }
+    authority = {
+        "schema_version": "1.0.0",
+        "view_id": view_directory.name,
+        "layers": artifacts,
+        "authority_order": [
+            "project_locked",
+            "project_designable",
+            "context_ground",
+            "context_proxy",
+        ],
+        "ai_editable_layers": ["project_designable", "context_ground"],
+        "composite_order": ["gemini_photoreal", "context_proxy", "brand_watermark"],
+    }
+    atomic_write(
+        view_directory / "layer_authority_manifest.json",
+        json.dumps(authority, ensure_ascii=False, indent=2).encode("utf-8") + b"\n",
+    )
 
 
 class BuildControlPack:
@@ -127,5 +236,10 @@ class BuildControlPack:
         atomic_write(
             view_directory / "control_pack_manifest.json",
             manifest.model_dump_json(indent=2).encode("utf-8") + b"\n",
+        )
+        _write_layer_authority_artifacts(
+            view_directory,
+            size=(policy.shape[1], policy.shape[0]),
+            edge_band=edge_band,
         )
         return manifest

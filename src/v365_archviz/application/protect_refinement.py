@@ -263,8 +263,12 @@ class ProtectRefinement:
         # photoreal detail and must not be counted as invented geometry.
         generated_edges &= ProtectRefinement._dilate(authoritative, 8)
         generated_count = int(np.count_nonzero(generated_edges))
-        generated_nearby = ProtectRefinement._dilate(generated_edges, 3)
-        authoritative_nearby = ProtectRefinement._dilate(authoritative, 3)
+        # Express alignment tolerance in image space, not a fixed preview-era pixel count.
+        # At 2K a four-pixel band is ~0.26% of frame height and absorbs antialiasing plus
+        # profiled-metal micro-edges without forgiving a moved door, wall or roof silhouette.
+        alignment_tolerance = max(3, round(min(generated.size) * 0.0025))
+        generated_nearby = ProtectRefinement._dilate(generated_edges, alignment_tolerance)
+        authoritative_nearby = ProtectRefinement._dilate(authoritative, alignment_tolerance)
         recall = float(np.count_nonzero(authoritative & generated_nearby)) / authoritative_count
         precision = (
             float(np.count_nonzero(generated_edges & authoritative_nearby)) / generated_count

@@ -212,14 +212,20 @@ class CompileUserRenderIntent:
             if capabilities is not None
             else DECOR_ARTICULATION[normalized.decor_level.value]
         )
-        dock_count = (
-            0
+        logistics_supported = (
+            any(item.key == "logistics" and item.supported for item in capabilities.components)
             if capabilities is not None
-            else (
-                0
-                if normalized.loading_dock_policy is LoadingDockPolicy.PRESERVE_EXISTING
+            else True
+        )
+        dock_count = (
+            (
+                min(normalized.loading_dock_count, 4)
+                if normalized.loading_dock_policy is LoadingDockPolicy.SUGGEST_IF_MISSING
                 else normalized.loading_dock_count
             )
+            if logistics_supported
+            and normalized.loading_dock_policy is not LoadingDockPolicy.PRESERVE_EXISTING
+            else 0
         )
         if normalized.loading_dock_policy is LoadingDockPolicy.SUGGEST_IF_MISSING and dock_count:
             warnings += (
@@ -289,9 +295,11 @@ class CompileUserRenderIntent:
                 preserve_landscape_boundaries=True,
                 context_render_mode="translucent_massing",
                 context_opacity=context_opacity,
-                surrounding_context_mode="authored_only",
-                surrounding_context_count=0,
-                surrounding_landscape_buffer=False,
+                surrounding_context_mode=(
+                    "conceptual_industrial_park" if capabilities is not None else "authored_only"
+                ),
+                surrounding_context_count=(6 if capabilities is not None else 0),
+                surrounding_landscape_buffer=capabilities is not None,
             ),
             design_preferences=DesignPreferences(
                 style_preset=normalized.style_preset,

@@ -8,6 +8,10 @@
 
 **Phạm vi:** Revit LOD100 → 6 ảnh diễn họa nhà xưởng công nghiệp đồng nhất, chân thật và có kiểm soát
 
+**Kế hoạch kế tiếp đã chốt:** `V365_LAYERED_AUTHORITY_INDUSTRIAL_CONTEXT_IMPLEMENTATION_PLAN.md`
+định nghĩa Layered Authority, bối cảnh khu công nghiệp, context proxy trong suốt, facade proposal,
+dual-master workflow và quality gate cần triển khai để nâng output từ demo lên mức bàn giao.
+
 ## 1. Quyết định kiến trúc
 
 Pipeline chọn hướng **Photoreal Balanced** với nguyên tắc:

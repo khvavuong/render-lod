@@ -24,11 +24,11 @@ from v365_archviz.providers.contracts import (
 
 VIEW_DIRECTIVES = {
     ViewRole.OVERALL: (
-        "VIEW PURPOSE — CAMPUS MASTERPLAN: show the complete authored project parcel in one frame. "
-        "Do not crop any side of the project boundary. Keep every perimeter road, external "
-        "approach, entrance/security gatehouse, parking area, landscape strip and all focus "
-        "buildings legible. Make it read as a real high-resolution drone photograph with natural "
-        "atmospheric depth, not an isometric masterplan rendering."
+        "VIEW PURPOSE — PRIMARY ARRIVAL: preserve this centred, frontal approach from outside the "
+        "authored main gate looking into the project. Keep the complete gate opening, connected "
+        "fence runs, external road and the focus factory beyond clearly readable. Do not turn this "
+        "into an aerial or oblique corner view, and do not let the gate obscure the factory. Make "
+        "it read as a premium real-estate arrival photograph with natural human-scale perspective."
     ),
     ViewRole.CONTEXT: (
         "VIEW PURPOSE — CONTEXT: explain the opposite approach, adjoining roads and the "
@@ -253,6 +253,49 @@ def _select_master_view_id(render_root: Path, cameras: tuple[Camera, ...]) -> st
     return max(cameras, key=score).view_id
 
 
+def select_master_view_ids(render_root: Path, cameras: tuple[Camera, ...]) -> tuple[str, str]:
+    """Select complementary site and facade masters from semantic camera evidence."""
+
+    if not cameras:
+        raise InvalidModelError("cannot select masters from an empty view set")
+    evidence: dict[str, dict[str, object]] = {}
+    report_path = render_root / "conditioning_qa.json"
+    if report_path.is_file():
+        try:
+            document = json.loads(report_path.read_text(encoding="utf-8"))
+            evidence = {
+                str(item["view_id"]): item
+                for item in document.get("views", [])
+                if isinstance(item, dict) and item.get("view_id")
+            }
+        except (OSError, json.JSONDecodeError, KeyError, TypeError):
+            evidence = {}
+
+    def metric(camera: Camera, name: str) -> float:
+        value = evidence.get(camera.view_id, {}).get(name, 0.0)
+        return float(value) if isinstance(value, (int, float)) else 0.0
+
+    # The context view now owns complete-site composition; VIEW-01 is a frontal arrival.
+    site_priority = {ViewRole.CONTEXT: 20.0, ViewRole.OVERALL: 16.0}
+    site = max(
+        cameras,
+        key=lambda camera: (
+            site_priority.get(camera.role, 0.0)
+            + metric(camera, "circulation_coverage") * 120
+            + metric(camera, "context_coverage") * 90
+            + metric(camera, "focus_coverage") * 20,
+            camera.view_id,
+        ),
+    )
+    facade_candidates = tuple(camera for camera in cameras if camera.view_id != site.view_id)
+    facade = (
+        _select_master_view_id(render_root, facade_candidates)
+        if facade_candidates
+        else site.view_id
+    )
+    return site.view_id, facade
+
+
 def _visible_facade_directive(design: DesignDNA, camera: Camera) -> str:
     """Project the camera direction into a general facade-side design constraint."""
 
@@ -322,6 +365,8 @@ class RefineViewSet:
         view_ids: tuple[str, ...] = (),
         approved_master_path: Path | None = None,
         approved_master_view_id: str | None = None,
+        reference_images_by_view: dict[str, tuple[Path, ...]] | None = None,
+        quality_standard_path: Path | None = None,
     ) -> RefinedViewSetArtifacts:
         view_set = ViewSet.model_validate_json(view_set_path.read_text(encoding="utf-8"))
         design = DesignDNA.model_validate_json(design_dna_path.read_text(encoding="utf-8"))
@@ -337,6 +382,11 @@ class RefineViewSet:
         unknown_view_ids = set(view_ids) - known_view_ids
         if unknown_view_ids:
             raise InvalidModelError(f"unknown benchmark view IDs: {sorted(unknown_view_ids)}")
+        unknown_reference_view_ids = set(reference_images_by_view or {}) - known_view_ids
+        if unknown_reference_view_ids:
+            raise InvalidModelError(
+                f"unknown per-view reference IDs: {sorted(unknown_reference_view_ids)}"
+            )
         selected_cameras = tuple(
             camera for camera in view_set.cameras if not view_ids or camera.view_id in view_ids
         )
@@ -356,6 +406,10 @@ class RefineViewSet:
                 media_type=media_type,
                 provider_request_id=None,
             )
+        if quality_standard_path is not None and not quality_standard_path.is_file():
+            raise InvalidModelError(
+                f"approved facade quality standard does not exist: {quality_standard_path}"
+            )
         requests = tuple(
             ViewConditioningInput(
                 view_id=camera.view_id,
@@ -369,7 +423,9 @@ class RefineViewSet:
                     f"{_visible_facade_directive(design, camera)}"
                 ),
                 structure_guide=render_root / camera.view_id / "structure_guide.png",
-                reference_images=reference_images,
+                reference_images=(reference_images_by_view or {}).get(
+                    camera.view_id, reference_images
+                ),
                 aspect_ratio=camera.aspect_ratio,
                 image_size=("1K" if profile is GenerationProfile.PREVIEW_FAST else "2K"),
             )
@@ -389,7 +445,19 @@ class RefineViewSet:
             ),
             tuple(camera.view_id for camera in selected_cameras),
             (
-                *(hashlib.sha256(path.read_bytes()).hexdigest() for path in reference_images),
+                *(
+                    hashlib.sha256(path.read_bytes()).hexdigest()
+                    for path in dict.fromkeys(
+                        (
+                            *reference_images,
+                            *(
+                                path
+                                for paths in (reference_images_by_view or {}).values()
+                                for path in paths
+                            ),
+                        )
+                    )
+                ),
                 *(
                     (hashlib.sha256(approved_master_path.read_bytes()).hexdigest(),)
                     if approved_master_path is not None
@@ -427,6 +495,7 @@ class RefineViewSet:
                 "provider returned a view set with a mismatched request or view order"
             )
 
+        references_by_view_id = {request.view_id: request.reference_images for request in requests}
         artifacts = tuple(
             RefineView().execute(
                 renderer,
@@ -434,11 +503,16 @@ class RefineViewSet:
                 result.view_id,
                 output_directory,
                 prompt,
-                reference_images,
+                references_by_view_id[result.view_id],
                 project_id=design.project_id,
                 design_revision=design.design_revision,
                 generated_image=result.image,
                 watermark=watermark,
+                effective_provider_model=(
+                    str(getattr(renderer, "provenance", {}).get("master_model"))
+                    if profile is GenerationProfile.TENDER_FINAL
+                    else str(getattr(renderer, "provenance", {}).get("model"))
+                ),
             )
             for result in generated.views
         )
@@ -451,11 +525,24 @@ class RefineViewSet:
             **identity_contract,
             "provider": renderer.name,
             "provider_configuration": getattr(renderer, "provenance", {}),
+            "effective_view_model": (
+                getattr(renderer, "provenance", {}).get("master_model")
+                if profile is GenerationProfile.TENDER_FINAL
+                else getattr(renderer, "provenance", {}).get("model")
+            ),
             "master_view_id": master_view_id,
             "master_sha256": hashlib.sha256(master_image.content).hexdigest(),
             "master_provider_request_id": master_image.provider_request_id,
             "approved_master_ref": (
                 str(approved_master_path) if approved_master_path is not None else None
+            ),
+            "facade_quality_standard_ref": (
+                str(quality_standard_path) if quality_standard_path is not None else None
+            ),
+            "facade_quality_standard_sha256": (
+                hashlib.sha256(quality_standard_path.read_bytes()).hexdigest()
+                if quality_standard_path is not None
+                else None
             ),
             "render_intent_ref": str(render_intent_path) if render_intent_path.is_file() else None,
             "render_intent_sha256": render_intent_sha256,
@@ -470,6 +557,28 @@ class RefineViewSet:
             json.dumps(identity_pack, ensure_ascii=False, indent=2).encode() + b"\n",
         )
         manifest_path = output_directory / "viewset_generation_manifest.json"
+        generated_view_manifests: list[dict[str, object]] = []
+        for camera in view_set.cameras:
+            generated_manifest_path = output_directory / camera.view_id / "generation_manifest.json"
+            if not generated_manifest_path.is_file():
+                continue
+            try:
+                document = json.loads(generated_manifest_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if isinstance(document, dict):
+                generated_view_manifests.append(document)
+        reference_roles: list[str] = []
+        for document in generated_view_manifests:
+            input_roles = document.get("input_roles", {})
+            if not isinstance(input_roles, dict):
+                continue
+            reference_roles.extend(
+                str(role)
+                for name, role in input_roles.items()
+                if str(name).startswith("reference_")
+            )
+        reference_roles = sorted(set(reference_roles))
         manifest = {
             "schema_version": "1.0.0",
             "request_id": request_id,
@@ -480,6 +589,11 @@ class RefineViewSet:
             "profile": profile.value,
             "provider": renderer.name,
             "provider_configuration": getattr(renderer, "provenance", {}),
+            "effective_view_model": (
+                getattr(renderer, "provenance", {}).get("master_model")
+                if profile is GenerationProfile.TENDER_FINAL
+                else getattr(renderer, "provenance", {}).get("model")
+            ),
             "prompt_version": PROMPT_VERSION,
             "generation_strategy": (
                 "design-master-sequential"
@@ -494,7 +608,9 @@ class RefineViewSet:
             "conditioning_policy": getattr(renderer, "provenance", {}).get(
                 "input_policy", "provider_defined"
             ),
-            "reference_roles": ["quality_only" for _ in reference_images],
+            # Aggregate persisted per-view evidence. Dual masters intentionally use different
+            # references, so the final call must not erase the Site Master's context role.
+            "reference_roles": reference_roles,
             "design_identity_pack": str(identity_pack_path),
             "master_view_id": master_view_id,
             "generated_view_ids": [
@@ -505,6 +621,14 @@ class RefineViewSet:
             "resumed_from_approved_master": approved_master_path is not None,
             "approved_master_ref": (
                 str(approved_master_path) if approved_master_path is not None else None
+            ),
+            "facade_quality_standard_ref": (
+                str(quality_standard_path) if quality_standard_path is not None else None
+            ),
+            "facade_quality_standard_sha256": (
+                hashlib.sha256(quality_standard_path.read_bytes()).hexdigest()
+                if quality_standard_path is not None
+                else None
             ),
             "master_sha256": hashlib.sha256(master_image.content).hexdigest(),
             "render_intent_ref": str(render_intent_path) if render_intent_path.is_file() else None,

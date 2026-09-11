@@ -33,7 +33,7 @@ def test_server_catalog_has_unique_versioned_options() -> None:
         assert len(values) == len(set(values))
 
 
-def test_compiler_resolves_style_and_removes_procedural_context() -> None:
+def test_legacy_compiler_resolves_style_without_inventing_context() -> None:
     compiled = CompileUserRenderIntent().execute(
         "factory-01",
         UserRenderIntent(
@@ -146,7 +146,7 @@ def test_compiler_warns_about_an_unrestrained_industrial_palette() -> None:
     }
 
 
-def test_semantic_compiler_preserves_unsupported_components_and_never_invents_docks() -> None:
+def test_semantic_compiler_preserves_unsupported_and_proposes_docks_from_yard() -> None:
     capabilities = ModelDesignCapabilities(
         model_revision="model-01",
         components=(
@@ -196,7 +196,7 @@ def test_semantic_compiler_preserves_unsupported_components_and_never_invents_do
 
     assert compiled.normalized_intent.gate_kit.value == "preserve_model"
     assert compiled.normalized_intent.landscape_preset.value == "preserve_model"
-    assert compiled.brief.loading_docks_per_main_facade == 0
+    assert compiled.brief.loading_docks_per_main_facade == 4
     assert compiled.brief.add_office_entrances is True
     assert compiled.brief.design_preferences.requested_office_storeys is None
     assert compiled.brief.design_preferences.design_package == "corporate_identity"

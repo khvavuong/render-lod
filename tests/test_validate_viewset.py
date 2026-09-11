@@ -5,7 +5,14 @@ from pathlib import Path
 from PIL import Image
 
 from v365_archviz.application.validate_viewset import ValidateGeneratedViewSet
-from v365_archviz.domain.design import DesignDNA, DesignLanguage, EnvironmentDesign
+from v365_archviz.domain.design import (
+    ContextProxyBuilding,
+    DesignDNA,
+    DesignLanguage,
+    EnvironmentDesign,
+    IndustrialContextPlan,
+)
+from v365_archviz.domain.scene import BoundingBox
 from v365_archviz.domain.workflow import Camera, ViewRole, ViewSet
 
 
@@ -209,3 +216,67 @@ def test_material_role_evidence_accepts_approved_facade_color(tmp_path: Path) ->
     assert evidence["status"] == "pass"
     assert evidence["failed_roles"] == []
     assert evidence["roles"]["primary_facade"]["match_ratio"] == 1.0
+
+
+def test_context_evidence_accepts_deterministic_translucent_proxy(tmp_path: Path) -> None:
+    view = tmp_path / "view-01"
+    view.mkdir()
+    overlay = Image.new("RGBA", (20, 10), (0, 0, 0, 0))
+    for x in range(12, 18):
+        for y in range(2, 8):
+            overlay.putpixel((x, y), (190, 194, 194, 72))
+    overlay.save(view / "context_proxy_rgba.png")
+    proxy_mask = Image.new("L", overlay.size, 0)
+    for x in range(12, 18):
+        for y in range(2, 8):
+            proxy_mask.putpixel((x, y), 255)
+    proxy_mask.save(view / "context_proxy_mask.png")
+    Image.new("L", overlay.size, 0).save(view / "project_locked_mask.png")
+    (view / "layer_authority_manifest.json").write_text(
+        json.dumps(
+            {"layers": {"context_proxy": {"sha256": _hash(view / "context_proxy_mask.png")}}}
+        ),
+        encoding="utf-8",
+    )
+    design = DesignDNA(
+        project_id="project",
+        design_revision="R01-test",
+        design_language=DesignLanguage(
+            style="style",
+            primary_material="primary",
+            secondary_material="secondary",
+            office_material="office",
+        ),
+        environment=EnvironmentDesign(
+            time="09:00",
+            weather="clear",
+            sun_azimuth_deg=120,
+            sun_elevation_deg=45,
+            white_balance_k=5600,
+        ),
+        buildings=(),
+        industrial_context=IndustrialContextPlan(
+            mode="conceptual_industrial_park",
+            seed="stable",
+            proxy_buildings=(
+                ContextProxyBuilding(
+                    proxy_id="context-01",
+                    bounding_box=BoundingBox(minimum=(100, 100, 0), maximum=(140, 130, 12)),
+                    opacity=0.28,
+                ),
+            ),
+        ),
+        grammar_version="test",
+        asset_library_version="test",
+    )
+
+    evidence = ValidateGeneratedViewSet._context_evidence(
+        view,
+        {"output": {"context_proxy_composited": True}},
+        design,
+        require_visible=True,
+    )
+
+    assert evidence["status"] == "pass"
+    assert evidence["planned_proxy_count"] == 1
+    assert evidence["project_overlap_ratio"] == 0.0

@@ -1,21 +1,22 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildDesignBrief, DEFAULT_FORM_VALUES } from './design-brief';
+import { buildUserRenderIntent, DEFAULT_FORM_VALUES } from './design-brief';
 
-describe('buildDesignBrief', () => {
-  it('maps user controls into the backend contract without weakening geometry rules', () => {
-    const brief = buildDesignBrief({
+describe('buildUserRenderIntent', () => {
+  it('sends only versioned intent values and no authoritative geometry', () => {
+    const intent = buildUserRenderIntent({
       ...DEFAULT_FORM_VALUES,
       projectId: 'factory-01',
       officeStoreys: 3,
       creativePrompt: 'Mặt tiền gọn và có chiều sâu.',
     });
 
-    expect(brief.project_id).toBe('factory-01');
-    expect(brief.design_preferences.requested_office_storeys).toBe(3);
-    expect(brief.design_preferences.creative_prompt).toBe('Mặt tiền gọn và có chiều sâu.');
-    expect(brief.site_design.preserve_transport_geometry).toBe(true);
-    expect(brief.roof_ridge_orientation).toBe('long_axis');
-    expect(brief.material_palette.accent_hex).toBe('#176B4D');
+    expect(intent.office_facade_rhythm).toBe(3);
+    expect(intent.free_text).toBe('Mặt tiền gọn và có chiều sâu.');
+    expect(intent.style_preset).toBe('contemporary_industrial');
+    expect(intent.context_presentation).toBe('authored_only');
+    expect(intent.material_palette.accent_hex).toBe('#176B4D');
+    expect(intent).not.toHaveProperty('roof_ridge_orientation');
+    expect(intent).not.toHaveProperty('site_design.preserve_transport_geometry');
   });
 });

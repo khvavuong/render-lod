@@ -7,6 +7,19 @@ export type StylePreset =
 
 export type DecorLevel = 'minimal' | 'subtle' | 'balanced' | 'expressive';
 export type EntourageDensity = 'none' | 'low' | 'medium' | 'high';
+export type CreativeBudget = 'strict' | 'balanced' | 'exploratory';
+export type LoadingDockPolicy =
+  | 'preserve_existing'
+  | 'suggest_if_missing'
+  | 'exact_on_eligible_facade';
+export type LandscapePreset =
+  | 'tropical_restrained'
+  | 'corporate_linear'
+  | 'low_maintenance';
+export type ContextPresentation = 'authored_only' | 'neutral_industrial_massing';
+export type RealismPreset =
+  | 'documentary_architectural_photo'
+  | 'premium_bid_photo';
 
 export interface MaterialPalette {
   primary: string;
@@ -24,29 +37,20 @@ export interface DesignFormValues {
   decorLevel: DecorLevel;
   officeStoreys: number;
   loadingDocks: number;
-  landscapeCharacter: string;
+  loadingDockPolicy: LoadingDockPolicy;
+  landscapePreset: LandscapePreset;
   entourageDensity: EntourageDensity;
+  creativeBudget: CreativeBudget;
+  contextPresentation: ContextPresentation;
+  realismPreset: RealismPreset;
   time: string;
   creativePrompt?: string;
 }
 
-export interface DesignBrief {
+export interface UserRenderIntent {
   schema_version: '1.0.0';
-  project_id: string;
-  design_language: {
-    style: string;
-    primary_material: string;
-    secondary_material: string;
-    office_material: string;
-    accent: string;
-  };
-  environment: {
-    time: string;
-    weather: string;
-    sun_azimuth_deg: number;
-    sun_elevation_deg: number;
-    white_balance_k: number;
-  };
+  style_preset: StylePreset;
+  creative_budget: CreativeBudget;
   material_palette: {
     primary_hex: string;
     secondary_hex: string;
@@ -54,49 +58,41 @@ export interface DesignBrief {
     accent_hex: string;
     paving_hex: string;
   };
-  facade_articulation: {
-    plinth_height_m: number;
-    parapet_band_height_m: number;
-    office_glazing_ratio: number;
-    feature_frame_depth_m: number;
-    entrance_canopy_projection_m: number;
-    vertical_fin_count: number;
-    accent_bay_interval: number;
-  };
-  presentation: {
-    landscape_character: string;
-    paving_character: string;
-    entourage_density: EntourageDensity;
-  };
-  site_design: {
-    preserve_transport_geometry: true;
-    preserve_landscape_boundaries: true;
-    context_render_mode: 'translucent_massing';
-    context_opacity: number;
-    surrounding_context_mode: 'procedural_perimeter';
-    surrounding_context_count: number;
-    surrounding_landscape_buffer: true;
-  };
-  design_preferences: {
-    style_preset: StylePreset;
-    decor_level: DecorLevel;
-    requested_office_storeys: number;
-    creative_prompt: string | null;
-  };
-  focus_building_ids: string[];
-  context_building_ids: string[];
-  panel_module_m: number;
-  loading_docks_per_main_facade: number;
-  add_office_entrances: boolean;
-  roof_type: string;
-  roof_slope_deg: number;
-  roof_eave_overhang_m: number;
-  roof_ridge_orientation: 'long_axis';
-  roof_grouping_mode: 'continuous_rows';
-  roof_group_gap_tolerance_m: number;
-  solar_panels: false;
-  grammar_version: string;
-  asset_library_version: string;
+  decor_level: DecorLevel;
+  office_facade_rhythm: number;
+  loading_dock_policy: LoadingDockPolicy;
+  loading_dock_count: number;
+  landscape_preset: LandscapePreset;
+  entourage_density: EntourageDensity;
+  time: string;
+  context_presentation: ContextPresentation;
+  realism_preset: RealismPreset;
+  free_text: string | null;
+}
+
+export interface DesignOption {
+  value: string;
+  label: string;
+  description: string;
+}
+
+export interface DesignOptions {
+  schema_version: '1.0.0';
+  catalog_version: string;
+  styles: DesignOption[];
+  decor_levels: DesignOption[];
+  landscapes: DesignOption[];
+  creative_budgets: DesignOption[];
+  loading_dock_policies: DesignOption[];
+  context_presentations: DesignOption[];
+  realism_presets: DesignOption[];
+}
+
+export interface IntentWarning {
+  code: string;
+  field: string;
+  message: string;
+  ignored_text?: string | null;
 }
 
 export type WorkflowState =
@@ -162,12 +158,16 @@ export interface StudioJob {
   state: WorkflowState;
   certificationState: CertificationState;
   outputs: OutputArtifact[];
+  intentWarnings?: IntentWarning[];
   errorMessage?: string;
 }
 
 export interface StudioGateway {
+  getDesignOptions?(): Promise<DesignOptions>;
   createDesign(values: DesignFormValues): Promise<StudioJob>;
   getJob(viewSetId: string): Promise<StudioJob>;
+  approveViewSet(viewSetId: string): Promise<StudioJob>;
+  retryViewSet(viewSetId: string): Promise<StudioJob>;
   createVideo(viewSetId: string): Promise<StudioVideoJob>;
   getVideoJob(videoJobId: string): Promise<StudioVideoJob>;
 }

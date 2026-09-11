@@ -15,6 +15,7 @@ from v365_archviz.domain.controlled_realism import (
 )
 from v365_archviz.domain.design import DesignBrief, DesignDNA
 from v365_archviz.domain.qa import ConsistencyReport, RepairRequest
+from v365_archviz.domain.render_intent import UserRenderIntent
 from v365_archviz.domain.scene import CanonicalScene
 from v365_archviz.domain.video import VideoPlan
 from v365_archviz.domain.workflow import ViewSet, ViewSetGenerationRequest
@@ -32,6 +33,7 @@ def main() -> None:
         "canonical_scene.schema.json": CanonicalScene,
         "design_dna.schema.json": DesignDNA,
         "design_brief.schema.json": DesignBrief,
+        "user_render_intent.schema.json": UserRenderIntent,
         "view_set.schema.json": ViewSet,
         "view_set_generation_request.schema.json": ViewSetGenerationRequest,
         "consistency_report.schema.json": ConsistencyReport,

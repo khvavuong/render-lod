@@ -103,10 +103,6 @@ class RunGenerationJob:
                 paths.view_set,
                 paths.design_dna,
             )
-            if not validation.passed:
-                raise V365Error(
-                    f"generated view set failed {validation.error_count} technical QA checks"
-                )
             consistency = EvaluateConsistency().execute(
                 validation.report_path,
                 job.model_revision,
@@ -119,10 +115,15 @@ class RunGenerationJob:
                 paths.generated_root / "protected_composite_manifest.json",
                 certification_path,
             )
+            target_state = (
+                WorkflowState.COMPOSING_BOARD
+                if validation.passed
+                else WorkflowState.HUMAN_REVIEW
+            )
             job = self._advance(
                 repository,
                 job,
-                WorkflowState.COMPOSING_BOARD,
+                target_state,
                 validation.report_path,
                 consistency.report_path,
                 certification_path,

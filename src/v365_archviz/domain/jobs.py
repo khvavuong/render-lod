@@ -51,7 +51,11 @@ _ALLOWED_TRANSITIONS: dict[WorkflowState, frozenset[WorkflowState]] = {
     WorkflowState.COMPOSING_BOARD: frozenset({WorkflowState.COMPLETED, WorkflowState.FAILED}),
     WorkflowState.GENERATING_VIDEO: frozenset({WorkflowState.COMPLETED, WorkflowState.FAILED}),
     WorkflowState.COMPLETED: frozenset(),
-    WorkflowState.FAILED: frozenset(),
+    # FAILED remains terminal during automatic execution. An explicit API retry may move a
+    # failed job back to the cheapest safe checkpoint after inspecting persisted artifacts.
+    WorkflowState.FAILED: frozenset(
+        {WorkflowState.RENDERING_PASSES, WorkflowState.VALIDATING}
+    ),
 }
 
 

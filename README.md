@@ -301,6 +301,7 @@ uvicorn v365_archviz.api:app --reload
 Các endpoint control plane hiện có:
 
 - `GET /healthz`
+- `GET /v1/design-options` (preset catalog có version do backend sở hữu)
 - `GET /v1/system/capabilities`
 - `GET /v1/models/latest`
 - `POST /v1/models` (upload và kiểm tra file RVT)
@@ -313,6 +314,8 @@ Các endpoint control plane hiện có:
 - `POST /v1/view-sets/{view_set_id}/video-jobs` (chỉ chạy khi người dùng yêu cầu)
 - `GET /v1/video-jobs/{video_job_id}`
 - `GET /v1/video-jobs/{video_job_id}/output`
+- `POST /v1/view-sets/{view_set_id}/approve`
+- `POST /v1/view-sets/{view_set_id}/retry`
 - `POST /v1/views/{view_id}/approve`
 - `POST /v1/views/{view_id}/repair`
 - OpenAPI UI: `/docs`
@@ -320,11 +323,18 @@ Các endpoint control plane hiện có:
 ## Render Studio frontend
 
 Frontend React + Ant Design nằm trong `render-fe/`. Giao diện hai panel nhận file RVT và
-compile phong cách, palette, mức decor, tầng văn phòng, mái, loading dock, cảnh quan và prompt tự do thành
-`DesignBrief` có version. File được kiểm tra, lưu content-addressed theo SHA và tự khớp với
-Canonical Scene đã xử lý. Số tầng và prompt là ưu tiên thiết kế mềm; các khóa bảo toàn hình học,
-đường giao thông và ranh cây xanh luôn được bật trong payload. Panel đầu ra poll trạng thái job,
-hiển thị sáu view, board và showreel trực tiếp từ artifact API.
+gửi phong cách, palette, mức decor, nhịp tầng văn phòng, loading dock, cảnh quan, realism và prompt
+tự do dưới contract `UserRenderIntentV1`. Frontend chỉ gửi enum/value; backend lấy định nghĩa từ
+preset catalog, lọc yêu cầu xung đột geometry rồi compile thành `DesignBrief` và `DesignDNA` có
+revision. File được kiểm tra và lưu content-addressed theo SHA. Revision mới được tự động dịch
+RVT sang IFC bằng APS rồi canonicalize trong luồng upload; revision đã xử lý sẽ dùng lại Canonical
+Scene. Mái, đường, cổng, hàng rào, massing và ranh cây xanh không nằm trong quyền override của form.
+Panel đầu ra poll trạng thái job, hiển thị sáu view, board và showreel trực tiếp từ artifact API.
+Nếu prompt tự do cố thay đổi vùng khóa, phần đó bị bỏ qua và UI nhận notification giải thích.
+View set và ảnh hiện tại được lưu trong trình duyệt để tiếp tục theo dõi sau khi reload. Nếu QA
+tự động không đạt nhưng sáu ảnh hợp lệ đã tồn tại, job chuyển sang `human_review`: ảnh vẫn hiển
+thị đầy đủ và board/video chỉ được mở khóa sau khi người dùng duyệt. Lỗi kỹ thuật chuyển sang
+`failed` và có thể tiếp tục từ checkpoint gần nhất bằng nút retry, tránh gọi lại AI không cần thiết.
 
 Chạy backend và frontend ở hai terminal:
 
@@ -354,8 +364,8 @@ make fe-build
 Gemini/Veo và không phát sinh chi phí. Khi dùng giao diện thật, nhập mã dự án, chọn phong cách,
 mức chi tiết, màu sắc và bối cảnh, thêm yêu cầu tự do nếu cần rồi bấm **Tạo phương án diễn họa**.
 Frontend upload và khóa đúng revision của file được chọn, sau đó theo dõi job và cập nhật
-ảnh ở panel phải; video chỉ xuất hiện sau yêu cầu riêng có xác nhận chi phí. Nếu revision chưa có Canonical Scene, giao diện dừng an toàn và yêu cầu
-chạy APS extraction/canonicalization trước khi phát sinh tác vụ sinh ảnh.
+ảnh ở panel phải; video chỉ xuất hiện sau yêu cầu riêng có xác nhận chi phí. Nếu máy chủ thiếu cấu
+hình APS, giao diện dừng an toàn trước khi phát sinh tác vụ sinh ảnh.
 
 ## Quality gates
 
@@ -371,6 +381,10 @@ JSON Schemas được sinh từ Pydantic contracts:
 ```bash
 python scripts/export_schemas.py
 ```
+
+Contract public của form được xuất tại `schemas/user_render_intent.schema.json`; mọi generated
+view từ revision mới ghi checksum của `render_intent.json` vào identity pack và generation
+manifest để truy vết chính xác style người dùng đã chọn.
 
 ## Cấu trúc
 

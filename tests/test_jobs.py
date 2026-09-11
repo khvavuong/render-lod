@@ -40,6 +40,23 @@ def test_image_job_completes_after_board_without_entering_video_flow() -> None:
         job.transition(WorkflowState.GENERATING_VIDEO)
 
 
+def test_failed_job_can_only_resume_from_explicit_safe_checkpoints() -> None:
+    job = GenerationJob.create(
+        job_id="job-retry",
+        idempotency_key="key-retry",
+        project_id="project",
+        model_revision="model",
+        design_revision="design",
+        view_set_id="views",
+        profile=GenerationProfile.MARKETING_HERO,
+        initial_state=WorkflowState.VALIDATING,
+    ).transition(WorkflowState.FAILED)
+
+    assert job.transition(WorkflowState.VALIDATING).state is WorkflowState.VALIDATING
+    with pytest.raises(ValueError, match="invalid workflow transition"):
+        job.transition(WorkflowState.COMPOSING_BOARD)
+
+
 def test_repository_deduplicates_generation_job(tmp_path: Path) -> None:
     repository = LocalJobRepository(tmp_path / "metadata")
     view_set = ViewSet(

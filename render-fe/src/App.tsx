@@ -1,9 +1,10 @@
 import { App as AntdApp, ConfigProvider, notification } from "antd";
 import viVN from "antd/locale/vi_VN";
-import { useEffect, type CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 
 import { DesignPanel } from "./components/DesignPanel";
 import { GenerationWorkspace } from "./components/GenerationWorkspace";
+import { FALLBACK_DESIGN_OPTIONS } from "./domain/design-brief";
 import { useStudioJob } from "./hooks/use-studio-job";
 import { studioApi } from "./services/studio-api";
 import { appTheme } from "./theme/theme";
@@ -21,18 +22,36 @@ const layoutStyle = {
 } as CSSProperties;
 
 function StudioShell({ gateway }: Required<AppProps>) {
+  const [designOptions, setDesignOptions] = useState(FALLBACK_DESIGN_OPTIONS);
   const {
     job,
     videoJob,
     isSubmitting,
     isSubmittingVideo,
+    isSubmittingReview,
     error,
     errorTitle,
     submit,
     refresh,
+    approve,
+    retry,
     generateVideo,
   } = useStudioJob(gateway);
   const [notificationApi, notificationContext] = notification.useNotification();
+
+  useEffect(() => {
+    let active = true;
+    if (!gateway.getDesignOptions) return undefined;
+    void gateway
+      .getDesignOptions()
+      .then((options) => {
+        if (active) setDesignOptions(options);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [gateway]);
 
   useEffect(() => {
     if (!error) {
@@ -48,6 +67,17 @@ function StudioShell({ gateway }: Required<AppProps>) {
     });
   }, [error, errorTitle, notificationApi]);
 
+  useEffect(() => {
+    if (!job?.intentWarnings?.length) return;
+    notificationApi.warning({
+      key: `intent-warning-${job.designRevision}`,
+      message: "Lưu ý từ bộ kiểm soát thiết kế",
+      description: job.intentWarnings.map((warning) => warning.message).join(" "),
+      placement: "topRight",
+      duration: 10,
+    });
+  }, [job, notificationApi]);
+
   return (
     <>
       {notificationContext}
@@ -60,14 +90,18 @@ function StudioShell({ gateway }: Required<AppProps>) {
         <div className="studio-layout">
           <DesignPanel
             submitting={isSubmitting}
+            designOptions={designOptions}
             onSubmit={(values) => void submit(values)}
           />
           <GenerationWorkspace
             job={job}
             videoJob={videoJob}
             submittingVideo={isSubmittingVideo}
+            submittingReview={isSubmittingReview}
             onGenerateVideo={() => void generateVideo()}
             onRefresh={() => void refresh()}
+            onApprove={() => void approve()}
+            onRetry={() => void retry()}
           />
         </div>
       </div>

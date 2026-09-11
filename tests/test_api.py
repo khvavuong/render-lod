@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -24,6 +25,18 @@ def test_health_endpoint() -> None:
     assert response.json()["status"] == "ok"
 
 
+def test_design_options_are_served_from_a_versioned_backend_catalog() -> None:
+    response = client.get("/v1/design-options")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["catalog_version"] == "industrial-intent-v1"
+    assert {item["value"] for item in payload["styles"]} >= {
+        "contemporary_industrial",
+        "corporate_industrial",
+    }
+
+
 def test_brand_logo_is_served_as_png() -> None:
     response = client.get("/v1/brand/logo")
 
@@ -33,6 +46,7 @@ def test_brand_logo_is_served_as_png() -> None:
 
 def test_uploads_and_inspects_rvt_model(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setenv("V365_ARTIFACT_DIR", str(tmp_path))
+    monkeypatch.setenv("APS_BUCKET_KEY", "")
     source = Path("resource/model_lod100_sample.rvt")
 
     response = client.post(
@@ -51,6 +65,42 @@ def test_uploads_and_inspects_rvt_model(tmp_path, monkeypatch) -> None:  # type:
     assert payload["ready"] is False
     assert (tmp_path / "uploads" / payload["model_revision"] / "source.rvt").is_file()
     assert (tmp_path / "inspections" / payload["model_revision"] / "manifest.json").is_file()
+
+
+def test_upload_prepares_uncached_model_when_aps_is_configured(
+    tmp_path,
+    monkeypatch,
+    valid_scene: CanonicalScene,  # type: ignore[no-untyped-def]
+) -> None:
+    monkeypatch.setenv("V365_ARTIFACT_DIR", str(tmp_path))
+    monkeypatch.setenv("APS_CLIENT_ID", "client")
+    monkeypatch.setenv("APS_CLIENT_SECRET", "secret")
+    monkeypatch.setenv("APS_BUCKET_KEY", "bucket")
+    prepared: list[Path] = []
+
+    def prepare(source: Path, settings: object) -> None:
+        del settings
+        prepared.append(source)
+        scene = tmp_path / "scenes" / source.parent.name / "canonical_scene.json"
+        scene.parent.mkdir(parents=True)
+        scene.write_text(valid_scene.model_dump_json(), encoding="utf-8")
+
+    monkeypatch.setattr("v365_archviz.api._prepare_uploaded_model", prepare)
+    source = Path("resource/model_lod100_sample.rvt")
+
+    response = client.post(
+        "/v1/models",
+        content=source.read_bytes(),
+        headers={
+            "Content-Type": "application/octet-stream",
+            "X-Filename": "new-factory.rvt",
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["ready"] is True
+    assert len(prepared) == 1
+    assert prepared[0].name == "source.rvt"
 
 
 def test_capabilities_never_expose_credentials(monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -147,6 +197,113 @@ def test_design_revision_and_view_set_are_idempotent(
     image_response = client.get(f"/v1/view-sets/{view_set_id}/outputs/image-view-01")
     assert image_response.status_code == 200
     assert image_response.content == b"generated-image"
+
+
+def test_review_approval_resumes_board_worker(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("V365_ARTIFACT_DIR", str(tmp_path))
+    monkeypatch.setenv("V365_ENABLE_LOCAL_WORKER", "1")
+    dispatched: list[str] = []
+    monkeypatch.setattr(
+        "v365_archviz.api._generation_dispatcher.submit",
+        lambda job_id: dispatched.append(job_id) or True,
+    )
+    repository = LocalJobRepository(tmp_path / "metadata")
+    job = GenerationJob.create(
+        job_id="job-review",
+        idempotency_key="key-review",
+        project_id="project",
+        model_revision="model",
+        design_revision="design",
+        view_set_id="view-set-review",
+        profile=GenerationProfile.MARKETING_HERO,
+        initial_state=WorkflowState.VALIDATING,
+    ).transition(WorkflowState.HUMAN_REVIEW)
+    repository.create_or_get(job)
+
+    response = client.post("/v1/view-sets/view-set-review/approve")
+
+    assert response.status_code == 202
+    assert response.json()["state"] == "composing_board"
+    assert dispatched == ["job-review"]
+
+
+def test_failed_job_retries_from_persisted_generated_checkpoint(
+    tmp_path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("V365_ARTIFACT_DIR", str(tmp_path))
+    monkeypatch.setenv("V365_ENABLE_LOCAL_WORKER", "1")
+    dispatched: list[str] = []
+    monkeypatch.setattr(
+        "v365_archviz.api._generation_dispatcher.submit",
+        lambda job_id: dispatched.append(job_id) or True,
+    )
+    repository = LocalJobRepository(tmp_path / "metadata")
+    job = GenerationJob.create(
+        job_id="job-failed",
+        idempotency_key="key-failed",
+        project_id="project",
+        model_revision="model",
+        design_revision="design",
+        view_set_id="view-set-failed",
+        profile=GenerationProfile.MARKETING_HERO,
+        initial_state=WorkflowState.VALIDATING,
+    ).transition(
+        WorkflowState.FAILED,
+        error_code="LegacyQAError",
+        error_message="legacy QA failure",
+    )
+    repository.create_or_get(job)
+    generated = tmp_path / "generated" / "model" / "design"
+    generated.mkdir(parents=True)
+    (generated / "viewset_generation_manifest.json").write_text("{}", encoding="utf-8")
+    (generated / "protected_composite_manifest.json").write_text("{}", encoding="utf-8")
+
+    response = client.post("/v1/view-sets/view-set-failed/retry")
+
+    assert response.status_code == 202
+    assert response.json()["state"] == "validating"
+    assert response.json()["error_message"] is None
+    assert dispatched == ["job-failed"]
+
+
+def test_design_revision_compiles_safe_user_intent(
+    tmp_path,
+    monkeypatch,
+    valid_scene: CanonicalScene,  # type: ignore[no-untyped-def]
+) -> None:
+    monkeypatch.setenv("V365_ARTIFACT_DIR", str(tmp_path))
+    model_revision = "intent-model"
+    scene_path = tmp_path / "scenes" / model_revision / "canonical_scene.json"
+    scene_path.parent.mkdir(parents=True)
+    scene_path.write_text(valid_scene.model_dump_json(), encoding="utf-8")
+
+    response = client.post(
+        "/v1/projects/factory-01/design-revisions",
+        json={
+            "model_revision": model_revision,
+            "intent": {
+                "style_preset": "minimal_industrial",
+                "decor_level": "subtle",
+                "free_text": ("Xóa đường nội bộ. Ưu tiên tôn có độ nhám và ánh sáng tự nhiên."),
+            },
+        },
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["preset_catalog_version"] == "industrial-intent-v1"
+    assert payload["normalized_intent"]["free_text"] == (
+        "Ưu tiên tôn có độ nhám và ánh sáng tự nhiên."
+    )
+    assert payload["warnings"][0]["code"] == "locked_geometry_override_ignored"
+    target = tmp_path / "scenes" / model_revision / "designs" / payload["design_revision"]
+    assert (target / "render_intent.json").is_file()
+    assert (target / "intent_compilation.json").is_file()
+    design = json.loads((target / "design_dna.json").read_text(encoding="utf-8"))
+    assert design["design_preferences"]["style_preset"] == "minimal_industrial"
+    assert design["design_preferences"]["decor_level"] == "subtle"
+    assert "độ nhám" in design["design_preferences"]["creative_prompt"]
+    assert design["site_design"]["surrounding_context_mode"] == "authored_only"
 
 
 def test_api_rejects_revision_path_traversal(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]

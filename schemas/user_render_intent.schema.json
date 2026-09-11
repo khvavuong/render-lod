@@ -1,0 +1,195 @@
+{
+  "$defs": {
+    "ContextPresentation": {
+      "enum": [
+        "authored_only",
+        "neutral_industrial_massing"
+      ],
+      "title": "ContextPresentation",
+      "type": "string"
+    },
+    "CreativeBudget": {
+      "enum": [
+        "strict",
+        "balanced",
+        "exploratory"
+      ],
+      "title": "CreativeBudget",
+      "type": "string"
+    },
+    "DecorLevel": {
+      "enum": [
+        "minimal",
+        "subtle",
+        "balanced",
+        "expressive"
+      ],
+      "title": "DecorLevel",
+      "type": "string"
+    },
+    "EntourageDensity": {
+      "enum": [
+        "none",
+        "low",
+        "medium",
+        "high"
+      ],
+      "title": "EntourageDensity",
+      "type": "string"
+    },
+    "LandscapePreset": {
+      "enum": [
+        "tropical_restrained",
+        "corporate_linear",
+        "low_maintenance"
+      ],
+      "title": "LandscapePreset",
+      "type": "string"
+    },
+    "LoadingDockPolicy": {
+      "enum": [
+        "preserve_existing",
+        "suggest_if_missing",
+        "exact_on_eligible_facade"
+      ],
+      "title": "LoadingDockPolicy",
+      "type": "string"
+    },
+    "MaterialPalette": {
+      "additionalProperties": false,
+      "properties": {
+        "accent_hex": {
+          "default": "#2F6B4F",
+          "pattern": "^#[0-9A-Fa-f]{6}$",
+          "title": "Accent Hex",
+          "type": "string"
+        },
+        "glass_hex": {
+          "default": "#315263",
+          "pattern": "^#[0-9A-Fa-f]{6}$",
+          "title": "Glass Hex",
+          "type": "string"
+        },
+        "paving_hex": {
+          "default": "#777B7A",
+          "pattern": "^#[0-9A-Fa-f]{6}$",
+          "title": "Paving Hex",
+          "type": "string"
+        },
+        "primary_hex": {
+          "default": "#E7E5DF",
+          "pattern": "^#[0-9A-Fa-f]{6}$",
+          "title": "Primary Hex",
+          "type": "string"
+        },
+        "secondary_hex": {
+          "default": "#252B31",
+          "pattern": "^#[0-9A-Fa-f]{6}$",
+          "title": "Secondary Hex",
+          "type": "string"
+        }
+      },
+      "title": "MaterialPalette",
+      "type": "object"
+    },
+    "RealismPreset": {
+      "enum": [
+        "documentary_architectural_photo",
+        "premium_bid_photo"
+      ],
+      "title": "RealismPreset",
+      "type": "string"
+    },
+    "StylePreset": {
+      "enum": [
+        "contemporary_industrial",
+        "minimal_industrial",
+        "corporate_industrial",
+        "sustainable_industrial",
+        "refined_high_tech"
+      ],
+      "title": "StylePreset",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Safe public contract; it contains intent, never authoritative geometry.",
+  "properties": {
+    "context_presentation": {
+      "$ref": "#/$defs/ContextPresentation",
+      "default": "authored_only"
+    },
+    "creative_budget": {
+      "$ref": "#/$defs/CreativeBudget",
+      "default": "balanced"
+    },
+    "decor_level": {
+      "$ref": "#/$defs/DecorLevel",
+      "default": "balanced"
+    },
+    "entourage_density": {
+      "$ref": "#/$defs/EntourageDensity",
+      "default": "low"
+    },
+    "free_text": {
+      "anyOf": [
+        {
+          "maxLength": 1000,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Free Text"
+    },
+    "landscape_preset": {
+      "$ref": "#/$defs/LandscapePreset",
+      "default": "tropical_restrained"
+    },
+    "loading_dock_count": {
+      "default": 3,
+      "maximum": 12,
+      "minimum": 0,
+      "title": "Loading Dock Count",
+      "type": "integer"
+    },
+    "loading_dock_policy": {
+      "$ref": "#/$defs/LoadingDockPolicy",
+      "default": "suggest_if_missing"
+    },
+    "material_palette": {
+      "$ref": "#/$defs/MaterialPalette"
+    },
+    "office_facade_rhythm": {
+      "default": 2,
+      "maximum": 8,
+      "minimum": 1,
+      "title": "Office Facade Rhythm",
+      "type": "integer"
+    },
+    "realism_preset": {
+      "$ref": "#/$defs/RealismPreset",
+      "default": "documentary_architectural_photo"
+    },
+    "schema_version": {
+      "default": "1.0.0",
+      "pattern": "^1\\.0\\.0$",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "style_preset": {
+      "$ref": "#/$defs/StylePreset",
+      "default": "contemporary_industrial"
+    },
+    "time": {
+      "default": "09:30",
+      "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$",
+      "title": "Time",
+      "type": "string"
+    }
+  },
+  "title": "UserRenderIntent",
+  "type": "object"
+}

@@ -7,11 +7,14 @@ import type {
   StudioVideoJob,
 } from '../types/studio';
 
+const ACTIVE_VIEW_SET_KEY = 'v365.activeViewSetId';
+
 export function useStudioJob(gateway: StudioGateway) {
   const [job, setJob] = useState<StudioJob | null>(null);
   const [videoJob, setVideoJob] = useState<StudioVideoJob | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmittingVideo, setIsSubmittingVideo] = useState(false);
+  const [isSubmittingReview, setIsSubmittingReview] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errorTitle, setErrorTitle] = useState('Không thể tạo phương án diễn họa');
   const activeViewSet = useRef<string | null>(null);
@@ -29,7 +32,13 @@ export function useStudioJob(gateway: StudioGateway) {
       try {
         const created = await gateway.createDesign(values);
         activeViewSet.current = created.viewSetId;
+        window.localStorage.setItem(ACTIVE_VIEW_SET_KEY, created.viewSetId);
         setJob(created);
+        setError(
+          created.state === 'failed'
+            ? created.errorMessage || 'Pipeline diễn họa đã dừng do lỗi không xác định'
+            : null,
+        );
       } catch (reason) {
         setError(reason instanceof Error ? reason.message : 'Không thể tạo phiên diễn họa');
       } finally {
@@ -53,6 +62,54 @@ export function useStudioJob(gateway: StudioGateway) {
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Không thể cập nhật tiến trình');
     }
+  }, [gateway]);
+
+  const transitionReview = useCallback(
+    async (action: 'approve' | 'retry') => {
+      if (!activeViewSet.current) return;
+      setIsSubmittingReview(true);
+      setError(null);
+      setErrorTitle(
+        action === 'approve'
+          ? 'Không thể duyệt bộ ảnh'
+          : 'Không thể chạy lại pipeline',
+      );
+      try {
+        const updated =
+          action === 'approve'
+            ? await gateway.approveViewSet(activeViewSet.current)
+            : await gateway.retryViewSet(activeViewSet.current);
+        setJob(updated);
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : 'Không thể cập nhật phiên diễn họa');
+      } finally {
+        setIsSubmittingReview(false);
+      }
+    },
+    [gateway],
+  );
+
+  const approve = useCallback(() => transitionReview('approve'), [transitionReview]);
+  const retry = useCallback(() => transitionReview('retry'), [transitionReview]);
+
+  useEffect(() => {
+    const persisted = window.localStorage.getItem(ACTIVE_VIEW_SET_KEY);
+    if (!persisted || activeViewSet.current) return;
+    activeViewSet.current = persisted;
+    void gateway
+      .getJob(persisted)
+      .then((restored) => {
+        setJob(restored);
+        setError(
+          restored.state === 'failed'
+            ? restored.errorMessage || 'Pipeline diễn họa đã dừng do lỗi không xác định'
+            : null,
+        );
+      })
+      .catch(() => {
+        window.localStorage.removeItem(ACTIVE_VIEW_SET_KEY);
+        activeViewSet.current = null;
+      });
   }, [gateway]);
 
   const generateVideo = useCallback(async () => {
@@ -91,7 +148,7 @@ export function useStudioJob(gateway: StudioGateway) {
   }, [gateway, refresh]);
 
   useEffect(() => {
-    if (!job || job.state === 'failed') return undefined;
+    if (!job || ['failed', 'human_review'].includes(job.state)) return undefined;
     if (job.state === 'completed') {
       if (job.outputs.length || terminalOutputRetries.current >= 5) return undefined;
       terminalOutputRetries.current += 1;
@@ -113,10 +170,13 @@ export function useStudioJob(gateway: StudioGateway) {
     videoJob,
     isSubmitting,
     isSubmittingVideo,
+    isSubmittingReview,
     error,
     errorTitle,
     submit,
     refresh,
+    approve,
+    retry,
     generateVideo,
   };
 }

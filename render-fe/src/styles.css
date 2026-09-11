@@ -105,6 +105,7 @@ button, input, textarea { font: inherit; }
   border-radius: var(--ant-border-radius);
   box-shadow: var(--ant-box-shadow-secondary);
 }
+.review-action-panel { margin-bottom: 16px; }
 .progress-copy { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
 .progress-copy > :first-child { color: var(--ant-color-primary); }
 .progress-copy span { display: block; }

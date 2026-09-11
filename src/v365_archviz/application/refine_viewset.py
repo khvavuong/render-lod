@@ -255,6 +255,12 @@ class RefineViewSet:
     ) -> RefinedViewSetArtifacts:
         view_set = ViewSet.model_validate_json(view_set_path.read_text(encoding="utf-8"))
         design = DesignDNA.model_validate_json(design_dna_path.read_text(encoding="utf-8"))
+        render_intent_path = design_dna_path.parent / "render_intent.json"
+        render_intent_sha256 = (
+            hashlib.sha256(render_intent_path.read_bytes()).hexdigest()
+            if render_intent_path.is_file()
+            else None
+        )
         if view_set.design_revision != design.design_revision:
             raise InvalidModelError("view set and Design DNA revisions do not match")
         known_view_ids = {camera.view_id for camera in view_set.cameras}
@@ -381,6 +387,8 @@ class RefineViewSet:
             "approved_master_ref": (
                 str(approved_master_path) if approved_master_path is not None else None
             ),
+            "render_intent_ref": str(render_intent_path) if render_intent_path.is_file() else None,
+            "render_intent_sha256": render_intent_sha256,
             "authority_order": [
                 "current_view_base_geometry",
                 "design_master_appearance",
@@ -425,6 +433,8 @@ class RefineViewSet:
                 str(approved_master_path) if approved_master_path is not None else None
             ),
             "master_sha256": hashlib.sha256(master_image.content).hexdigest(),
+            "render_intent_ref": str(render_intent_path) if render_intent_path.is_file() else None,
+            "render_intent_sha256": render_intent_sha256,
             "grammar_version": design.grammar_version,
             "asset_library_version": design.asset_library_version,
             "views": [

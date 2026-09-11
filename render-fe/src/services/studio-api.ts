@@ -1,7 +1,9 @@
-import { buildDesignBrief } from '../domain/design-brief';
+import { buildUserRenderIntent } from '../domain/design-brief';
 import type {
   DesignFormValues,
+  DesignOptions,
   CertificationState,
+  IntentWarning,
   OutputArtifact,
   StudioGateway,
   StudioJob,
@@ -12,6 +14,7 @@ import type {
 
 interface DesignRevisionResponse {
   design_revision: string;
+  warnings?: IntentWarning[];
 }
 
 interface LatestModelResponse {
@@ -95,7 +98,11 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
-function toJob(job: ViewSetResponse, outputs: OutputArtifact[] = []): StudioJob {
+function toJob(
+  job: ViewSetResponse,
+  outputs: OutputArtifact[] = [],
+  intentWarnings: IntentWarning[] = [],
+): StudioJob {
   return {
     jobId: job.job_id,
     traceId: job.trace_id,
@@ -104,6 +111,7 @@ function toJob(job: ViewSetResponse, outputs: OutputArtifact[] = []): StudioJob 
     state: job.state,
     certificationState: job.certification_state ?? 'base_pbr',
     outputs,
+    intentWarnings,
     errorMessage: job.error_message ?? undefined,
   };
 }
@@ -120,6 +128,10 @@ function toVideoJob(job: VideoJobResponse): StudioVideoJob {
 }
 
 export class HttpStudioGateway implements StudioGateway {
+  async getDesignOptions(): Promise<DesignOptions> {
+    return request<DesignOptions>('/v1/design-options');
+  }
+
   async createDesign(values: DesignFormValues): Promise<StudioJob> {
     if (!values.modelFile) {
       throw new Error('Chưa chọn file RVT');
@@ -134,7 +146,7 @@ export class HttpStudioGateway implements StudioGateway {
     });
     if (!model.ready) {
       throw new Error(
-        `Model đã tải lên nhưng chưa được xử lý. Chạy APS extraction cho revision ${model.model_revision} trước khi tạo ảnh.`,
+        `Model ${model.model_revision} đã tải lên nhưng máy chủ chưa cấu hình đầy đủ APS để trích xuất hình học.`,
       );
     }
     const revision = await request<DesignRevisionResponse>(
@@ -143,7 +155,7 @@ export class HttpStudioGateway implements StudioGateway {
         method: 'POST',
         body: JSON.stringify({
           model_revision: model.model_revision,
-          brief: buildDesignBrief(values),
+          intent: buildUserRenderIntent(values),
         }),
       },
     );
@@ -158,13 +170,10 @@ export class HttpStudioGateway implements StudioGateway {
         }),
       },
     );
-    if (job.state !== 'completed') {
-      return toJob(job);
-    }
     const outputResponse = await request<OutputsResponse>(
       `/v1/view-sets/${encodeURIComponent(job.view_set_id)}/outputs`,
-    );
-    return toJob(job, outputResponse.outputs);
+    ).catch(() => ({ outputs: [] }));
+    return toJob(job, outputResponse.outputs, revision.warnings);
   }
 
   async getJob(viewSetId: string): Promise<StudioJob> {
@@ -179,6 +188,25 @@ export class HttpStudioGateway implements StudioGateway {
         ? await outputRequest
         : await outputRequest.catch(() => ({ outputs: [] }));
     return toJob(job, outputResponse.outputs);
+  }
+
+  private async transitionViewSet(viewSetId: string, action: 'approve' | 'retry') {
+    const job = await request<ViewSetResponse>(
+      `/v1/view-sets/${encodeURIComponent(viewSetId)}/${action}`,
+      { method: 'POST' },
+    );
+    const outputResponse = await request<OutputsResponse>(
+      `/v1/view-sets/${encodeURIComponent(viewSetId)}/outputs`,
+    ).catch(() => ({ outputs: [] }));
+    return toJob(job, outputResponse.outputs);
+  }
+
+  async approveViewSet(viewSetId: string): Promise<StudioJob> {
+    return this.transitionViewSet(viewSetId, 'approve');
+  }
+
+  async retryViewSet(viewSetId: string): Promise<StudioJob> {
+    return this.transitionViewSet(viewSetId, 'retry');
   }
 
   async createVideo(viewSetId: string): Promise<StudioVideoJob> {

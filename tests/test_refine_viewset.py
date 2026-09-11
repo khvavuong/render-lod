@@ -84,6 +84,10 @@ def test_refines_an_ordered_view_set_as_one_unit(tmp_path: Path) -> None:
     design_path = tmp_path / "design.json"
     view_set_path = tmp_path / "views.json"
     design_path.write_text(design.model_dump_json(), encoding="utf-8")
+    (tmp_path / "render_intent.json").write_text(
+        '{"schema_version":"1.0.0","style_preset":"minimal_industrial"}',
+        encoding="utf-8",
+    )
     view_set_path.write_text(view_set.model_dump_json(), encoding="utf-8")
     render_root = tmp_path / "renders"
     for camera in cameras:
@@ -111,9 +115,11 @@ def test_refines_an_ordered_view_set_as_one_unit(tmp_path: Path) -> None:
     assert manifest["generated_view_ids"] == ["view-01", "view-02"]
     assert manifest["resumed_from_approved_master"] is False
     assert manifest["master_sha256"]
+    assert manifest["render_intent_sha256"]
     identity = json.loads(result.identity_pack_path.read_text(encoding="utf-8"))
     assert identity["master_view_id"] == "view-01"
     assert identity["authority_order"][0] == "current_view_base_geometry"
+    assert identity["render_intent_sha256"] == manifest["render_intent_sha256"]
     assert [view["view_id"] for view in manifest["views"]] == ["view-01", "view-02"]
     assert renderer.last_request is not None
     assert "PRIMARY VISIBLE FACADE" in renderer.last_request.views[0].prompt

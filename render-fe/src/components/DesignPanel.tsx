@@ -24,23 +24,17 @@ import type { UploadFile } from "antd";
 import type { ReactNode } from "react";
 import { useState } from "react";
 
-import { DEFAULT_FORM_VALUES, STYLE_OPTIONS } from "../domain/design-brief";
-import type { DesignFormValues } from "../types/studio";
+import { DEFAULT_FORM_VALUES } from "../domain/design-brief";
+import type { DesignFormValues, DesignOptions } from "../types/studio";
 import { PaletteEditor } from "./PaletteEditor";
 
 interface DesignPanelProps {
   submitting: boolean;
+  designOptions: DesignOptions;
   onSubmit: (values: DesignFormValues) => void;
 }
 
 const MAX_RVT_FILE_BYTES = 2 * 1024 * 1024 * 1024;
-
-const DECOR_OPTIONS = [
-  { value: "minimal", label: "Tối giản" },
-  { value: "subtle", label: "Nhẹ" },
-  { value: "balanced", label: "Cân bằng" },
-  { value: "expressive", label: "Nổi bật" },
-];
 
 const ENTOURAGE_OPTIONS = [
   { value: "none", label: "Không có" },
@@ -58,7 +52,7 @@ function SectionTitle({ icon, title }: { icon: ReactNode; title: string }) {
   );
 }
 
-export function DesignPanel({ submitting, onSubmit }: DesignPanelProps) {
+export function DesignPanel({ submitting, designOptions, onSubmit }: DesignPanelProps) {
   const [form] = Form.useForm<DesignFormValues>();
   const [modelFiles, setModelFiles] = useState<UploadFile[]>([]);
   const [modelError, setModelError] = useState<string>();
@@ -155,10 +149,10 @@ export function DesignPanel({ submitting, onSubmit }: DesignPanelProps) {
             }
           >
             <Form.Item label="Phong cách" name="stylePreset">
-              <Select options={STYLE_OPTIONS} />
+              <Select options={designOptions.styles} />
             </Form.Item>
             <Form.Item label="Mức độ chi tiết mặt đứng" name="decorLevel">
-              <Segmented block options={DECOR_OPTIONS} />
+              <Segmented block options={designOptions.decor_levels} />
             </Form.Item>
             <Flex gap={16}>
               <Form.Item
@@ -206,8 +200,8 @@ export function DesignPanel({ submitting, onSubmit }: DesignPanelProps) {
                 ),
                 children: (
                   <>
-                    <Form.Item label="Cảnh quan" name="landscapeCharacter">
-                      <Input />
+                    <Form.Item label="Cảnh quan" name="landscapePreset">
+                      <Select options={designOptions.landscapes} />
                     </Form.Item>
                     <Form.Item
                       label="Mật độ người và xe"
@@ -218,9 +212,24 @@ export function DesignPanel({ submitting, onSubmit }: DesignPanelProps) {
                     <Form.Item
                       label="Thời điểm"
                       name="time"
-                      className="last-form-item"
                     >
                       <Input type="time" />
+                    </Form.Item>
+                    <Form.Item label="Mức sáng tạo" name="creativeBudget">
+                      <Select options={designOptions.creative_budgets} />
+                    </Form.Item>
+                    <Form.Item label="Độ chân thật" name="realismPreset">
+                      <Select options={designOptions.realism_presets} />
+                    </Form.Item>
+                    <Form.Item label="Chính sách cửa xuất hàng" name="loadingDockPolicy">
+                      <Select options={designOptions.loading_dock_policies} />
+                    </Form.Item>
+                    <Form.Item
+                      label="Công trình xung quanh"
+                      name="contextPresentation"
+                      className="last-form-item"
+                    >
+                      <Select options={designOptions.context_presentations} />
                     </Form.Item>
                   </>
                 ),

@@ -9,6 +9,7 @@ import {
   VideoCameraOutlined,
 } from "@ant-design/icons";
 import {
+  Alert,
   Button,
   Empty,
   Image,
@@ -36,8 +37,11 @@ interface GenerationWorkspaceProps {
   job: StudioJob | null;
   videoJob: StudioVideoJob | null;
   submittingVideo: boolean;
+  submittingReview: boolean;
   onGenerateVideo: () => void;
   onRefresh: () => void;
+  onApprove: () => void;
+  onRetry: () => void;
 }
 
 const STATE_META: Record<WorkflowState, { label: string; percent: number }> = {
@@ -164,8 +168,11 @@ export function GenerationWorkspace({
   job,
   videoJob,
   submittingVideo,
+  submittingReview,
   onGenerateVideo,
   onRefresh,
+  onApprove,
+  onRetry,
 }: GenerationWorkspaceProps) {
   const [filter, setFilter] = useState<"all" | "image" | "video">("all");
   const state = job?.state ?? "idle";
@@ -243,6 +250,36 @@ export function GenerationWorkspace({
             status={state === "failed" ? "exception" : "active"}
           />
         </section>
+      )}
+
+      {job?.state === "human_review" && (
+        <Alert
+          className="review-action-panel"
+          type="warning"
+          showIcon
+          message="Bộ 6 ảnh đã được tạo và đang chờ duyệt"
+          description="Một hoặc nhiều kiểm tra tự động cần con người xác nhận. Bạn vẫn có thể xem đủ ảnh bên dưới; chỉ duyệt khi hình học và thiết kế đã đạt yêu cầu."
+          action={
+            <Button type="primary" loading={submittingReview} onClick={onApprove}>
+              Duyệt và hoàn thiện board
+            </Button>
+          }
+        />
+      )}
+
+      {job?.state === "failed" && (
+        <Alert
+          className="review-action-panel"
+          type="error"
+          showIcon
+          message="Pipeline gặp lỗi kỹ thuật"
+          description="Các ảnh đã tạo vẫn được giữ lại. Chạy lại sẽ tiếp tục từ checkpoint gần nhất thay vì mặc định gọi lại toàn bộ dịch vụ AI."
+          action={
+            <Button loading={submittingReview} onClick={onRetry}>
+              Tiếp tục từ checkpoint
+            </Button>
+          }
+        />
       )}
 
       <div className="output-heading">

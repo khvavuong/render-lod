@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import uuid
@@ -12,11 +13,15 @@ from urllib.parse import unquote
 from fastapi import FastAPI, Header, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+from starlette.concurrency import run_in_threadpool
 
 from v365_archviz import __version__
+from v365_archviz.application.build_canonical_scene import BuildCanonicalScene
+from v365_archviz.application.compile_user_intent import CompileUserRenderIntent
 from v365_archviz.application.create_generation_job import CreateGenerationJob
 from v365_archviz.application.create_video_job import CreateVideoJob
+from v365_archviz.application.extract_ifc import ExtractIfc
 from v365_archviz.application.inspect_model import InspectModel
 from v365_archviz.application.plan_cameras import PlanStandardCameras
 from v365_archviz.application.plan_design import PlanDesign
@@ -25,10 +30,17 @@ from v365_archviz.config import Settings
 from v365_archviz.domain.controlled_realism import CertificationReport, CertificationState
 from v365_archviz.domain.design import DesignBrief, DesignDNA
 from v365_archviz.domain.jobs import GenerationJob
+from v365_archviz.domain.render_intent import (
+    DESIGN_OPTIONS,
+    DesignOptionsCatalog,
+    IntentWarning,
+    UserRenderIntent,
+)
 from v365_archviz.domain.scene import CanonicalScene
 from v365_archviz.domain.video_jobs import VideoJob, VideoJobState
 from v365_archviz.domain.workflow import GenerationProfile, RenderProfile, ViewSet, WorkflowState
-from v365_archviz.errors import InvalidModelError
+from v365_archviz.errors import InvalidModelError, V365Error
+from v365_archviz.providers.aps.model_derivative import ApsModelDerivativeClient
 from v365_archviz.providers.local_dispatcher import LocalGenerationDispatcher
 from v365_archviz.providers.local_jobs import LocalJobRepository
 from v365_archviz.providers.local_rvt import LocalRvtInspector
@@ -95,7 +107,14 @@ class CreateDesignRevisionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     model_revision: str = Field(pattern=SAFE_IDENTIFIER_PATTERN)
-    brief: DesignBrief
+    intent: UserRenderIntent | None = None
+    brief: DesignBrief | None = None
+
+    @model_validator(mode="after")
+    def require_one_contract(self) -> CreateDesignRevisionRequest:
+        if (self.intent is None) == (self.brief is None):
+            raise ValueError("provide exactly one of intent or brief")
+        return self
 
 
 class DesignRevisionResponse(BaseModel):
@@ -106,6 +125,9 @@ class DesignRevisionResponse(BaseModel):
     design_revision: str
     design_dna_ref: str
     brief_ref: str
+    normalized_intent: UserRenderIntent | None = None
+    warnings: tuple[IntentWarning, ...] = ()
+    preset_catalog_version: str | None = None
 
 
 class CreateViewSetRequest(BaseModel):
@@ -194,6 +216,14 @@ def _video_job_response(job: VideoJob, *, created: bool) -> VideoJobResponse:
     )
 
 
+def _prepare_uploaded_model(source: Path, settings: Settings) -> None:
+    """Translate and canonicalize one uncached RVT outside the ASGI event loop."""
+
+    with ApsModelDerivativeClient(settings) as client:
+        extraction = ExtractIfc(client).execute(source, settings.artifact_dir)
+    BuildCanonicalScene().execute(source, extraction.ifc_path, settings.artifact_dir)
+
+
 def _design_directory(artifact_dir: Path, model_revision: str, design_revision: str) -> Path:
     return artifact_dir / "scenes" / model_revision / "designs" / design_revision
 
@@ -250,6 +280,13 @@ def _output_files(view_set_id: str) -> dict[str, tuple[Path, OutputKind, str, st
 @app.get("/healthz", response_model=HealthResponse, tags=["system"])
 def health() -> HealthResponse:
     return HealthResponse(version=__version__)
+
+
+@app.get("/v1/design-options", response_model=DesignOptionsCatalog, tags=["design"])
+def design_options() -> DesignOptionsCatalog:
+    """Expose the versioned server-owned catalog used to build render intent."""
+
+    return DESIGN_OPTIONS
 
 
 @app.get("/v1/system/capabilities", response_model=CapabilityResponse, tags=["system"])
@@ -312,8 +349,16 @@ async def upload_model(
         target.parent.mkdir(parents=True, exist_ok=True)
         os.replace(temporary, target)
         InspectModel().execute(target, settings.artifact_dir)
+        scene_path = settings.artifact_dir / "scenes" / model_revision / "canonical_scene.json"
+        if not scene_path.is_file() and settings.aps_configured:
+            await run_in_threadpool(_prepare_uploaded_model, target, settings)
     except InvalidModelError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except V365Error as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"APS model preparation failed: {exc}",
+        ) from exc
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -344,7 +389,7 @@ def create_design_revision(
     project_id: str, request: CreateDesignRevisionRequest
 ) -> DesignRevisionResponse:
     _require_safe_identifier(project_id, "project_id")
-    if request.brief.project_id != project_id:
+    if request.brief is not None and request.brief.project_id != project_id:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="brief project_id must match the route project_id",
@@ -354,10 +399,35 @@ def create_design_revision(
     if not scene_path.is_file():
         raise HTTPException(status_code=404, detail="canonical scene not found")
     scene = CanonicalScene.model_validate_json(scene_path.read_text(encoding="utf-8"))
-    revision = PlanDesign.revision(scene, request.brief)
+    compiled = (
+        CompileUserRenderIntent().execute(project_id, request.intent)
+        if request.intent is not None
+        else None
+    )
+    brief = compiled.brief if compiled is not None else request.brief
+    if brief is None:  # Defended by request validation; keeps the type boundary explicit.
+        raise HTTPException(status_code=422, detail="design input is missing")
+    revision = PlanDesign.revision(scene, brief)
     target = _design_directory(settings.artifact_dir, request.model_revision, revision)
     brief_path = target / "design_brief.json"
-    atomic_write(brief_path, request.brief.model_dump_json(indent=2).encode() + b"\n")
+    atomic_write(brief_path, brief.model_dump_json(indent=2).encode() + b"\n")
+    if compiled is not None:
+        atomic_write(
+            target / "render_intent.json",
+            compiled.normalized_intent.model_dump_json(indent=2).encode() + b"\n",
+        )
+        atomic_write(
+            target / "intent_compilation.json",
+            json.dumps(
+                {
+                    "catalog_version": compiled.catalog_version,
+                    "warnings": [item.model_dump() for item in compiled.warnings],
+                },
+                ensure_ascii=False,
+                indent=2,
+            ).encode("utf-8")
+            + b"\n",
+        )
     design = PlanDesign().execute(scene_path, brief_path)
     return DesignRevisionResponse(
         project_id=project_id,
@@ -365,6 +435,9 @@ def create_design_revision(
         design_revision=design.design_revision,
         design_dna_ref=str(target / "design_dna.json"),
         brief_ref=str(brief_path),
+        normalized_intent=(compiled.normalized_intent if compiled is not None else None),
+        warnings=compiled.warnings if compiled is not None else (),
+        preset_catalog_version=compiled.catalog_version if compiled is not None else None,
     )
 
 
@@ -408,6 +481,7 @@ def create_view_set(design_revision: str, request: CreateViewSetRequest) -> View
     if settings.local_worker_enabled and job.state not in {
         WorkflowState.COMPLETED,
         WorkflowState.FAILED,
+        WorkflowState.HUMAN_REVIEW,
     }:
         _generation_dispatcher.submit(job.job_id)
     return ViewSetJobResponse(
@@ -597,6 +671,12 @@ def _transition_view_set(view_set_id: str, target: WorkflowState) -> ViewSetJobR
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     repository.save(updated)
+    if settings.local_worker_enabled and updated.state not in {
+        WorkflowState.COMPLETED,
+        WorkflowState.FAILED,
+        WorkflowState.HUMAN_REVIEW,
+    }:
+        _generation_dispatcher.submit(updated.job_id)
     return ViewSetJobResponse(
         job_id=updated.job_id,
         trace_id=updated.trace_id,
@@ -608,6 +688,47 @@ def _transition_view_set(view_set_id: str, target: WorkflowState) -> ViewSetJobR
         error_code=updated.error_code,
         error_message=updated.error_message,
     )
+
+@app.post(
+    "/v1/view-sets/{view_set_id}/approve",
+    response_model=ViewSetJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    tags=["review"],
+)
+def approve_view_set(view_set_id: str) -> ViewSetJobResponse:
+    """Approve reviewed images and resume board/branding generation."""
+
+    _require_safe_identifier(view_set_id, "view_set_id")
+    return _transition_view_set(view_set_id, WorkflowState.COMPOSING_BOARD)
+
+
+@app.post(
+    "/v1/view-sets/{view_set_id}/retry",
+    response_model=ViewSetJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    tags=["review"],
+)
+def retry_view_set(view_set_id: str) -> ViewSetJobResponse:
+    """Explicitly resume a failed job from its cheapest valid checkpoint."""
+
+    _require_safe_identifier(view_set_id, "view_set_id")
+    settings = _settings()
+    try:
+        job = _repository(settings).get_by_view_set(view_set_id)
+    except OSError as exc:
+        raise HTTPException(status_code=404, detail="view set not found") from exc
+    if job.state is not WorkflowState.FAILED:
+        raise HTTPException(status_code=409, detail="only failed jobs can be retried")
+    generated_root = (
+        settings.artifact_dir / "generated" / job.model_revision / job.design_revision
+    )
+    target = (
+        WorkflowState.VALIDATING
+        if (generated_root / "viewset_generation_manifest.json").is_file()
+        and (generated_root / "protected_composite_manifest.json").is_file()
+        else WorkflowState.RENDERING_PASSES
+    )
+    return _transition_view_set(view_set_id, target)
 
 
 @app.post(

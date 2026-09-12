@@ -303,7 +303,15 @@ export class HttpStudioGateway implements StudioGateway {
 
   async rejectDesignMaster(viewSetId: string): Promise<StudioJob> {
     const job = await request<ViewSetResponse>(
-      `/v1/view-sets/${encodeURIComponent(viewSetId)}/masters/reject`,
+      `/v1/view-sets/${encodeURIComponent(viewSetId)}/masters/reject?scope=facade`,
+      { method: 'POST' },
+    );
+    return toJob(job);
+  }
+
+  async rejectViewSet(viewSetId: string): Promise<StudioJob> {
+    const job = await request<ViewSetResponse>(
+      `/v1/view-sets/${encodeURIComponent(viewSetId)}/masters/reject?scope=all`,
       { method: 'POST' },
     );
     return toJob(job);

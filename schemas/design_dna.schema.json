@@ -377,6 +377,41 @@
           "title": "Accent Bay Interval",
           "type": "integer"
         },
+        "biophilic_bay_interval": {
+          "default": 0,
+          "maximum": 30,
+          "minimum": 0,
+          "title": "Biophilic Bay Interval",
+          "type": "integer"
+        },
+        "biophilic_bay_width_m": {
+          "default": 1.4,
+          "maximum": 3.0,
+          "minimum": 0.6,
+          "title": "Biophilic Bay Width M",
+          "type": "number"
+        },
+        "biophilic_screen_depth_m": {
+          "default": 0.4,
+          "maximum": 1.2,
+          "minimum": 0.1,
+          "title": "Biophilic Screen Depth M",
+          "type": "number"
+        },
+        "clerestory_band_height_m": {
+          "default": 1.25,
+          "maximum": 3.0,
+          "minimum": 0.0,
+          "title": "Clerestory Band Height M",
+          "type": "number"
+        },
+        "clerestory_sill_ratio": {
+          "default": 0.62,
+          "maximum": 0.82,
+          "minimum": 0.4,
+          "title": "Clerestory Sill Ratio",
+          "type": "number"
+        },
         "entrance_canopy_projection_m": {
           "default": 1.8,
           "maximum": 6.0,
@@ -530,14 +565,46 @@
     "LoadingDock": {
       "additionalProperties": false,
       "properties": {
+        "canopy_projection_m": {
+          "default": 1.2,
+          "maximum": 4.0,
+          "minimum": 0.0,
+          "title": "Canopy Projection M",
+          "type": "number"
+        },
+        "clear_height_m": {
+          "default": 4.5,
+          "exclusiveMinimum": 0.0,
+          "maximum": 6.5,
+          "minimum": 3.2,
+          "title": "Clear Height M",
+          "type": "number"
+        },
         "dock_id": {
           "minLength": 1,
           "title": "Dock Id",
           "type": "string"
         },
+        "door_type": {
+          "default": "sectional_overhead",
+          "pattern": "^(sectional_overhead|roller_shutter)$",
+          "title": "Door Type",
+          "type": "string"
+        },
         "evidence_state": {
           "$ref": "#/$defs/DesignEvidenceState",
           "default": "inferred_proposal"
+        },
+        "include_safety_bollards": {
+          "default": true,
+          "title": "Include Safety Bollards",
+          "type": "boolean"
+        },
+        "threshold_type": {
+          "default": "grade_level",
+          "pattern": "^(grade_level|dock_high)$",
+          "title": "Threshold Type",
+          "type": "string"
         },
         "u": {
           "maximum": 1.0,

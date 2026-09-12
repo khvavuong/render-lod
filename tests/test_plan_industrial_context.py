@@ -14,7 +14,9 @@ def test_context_plan_is_stable_and_outside_project(valid_scene) -> None:  # typ
 
     assert first.model_dump_json() == second.model_dump_json()
     assert first.mode == "conceptual_industrial_park"
-    assert len(first.roads) == 4
+    # With no authored entrance evidence, use two opposite estate corridors instead of four
+    # disconnected perimeter bars that make the project look like an isolated island.
+    assert len(first.roads) == 2
     assert len(first.proxy_buildings) == 6
     for proxy in first.proxy_buildings:
         box = proxy.bounding_box

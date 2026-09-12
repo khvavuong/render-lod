@@ -121,7 +121,7 @@ def test_compiler_preserves_the_exact_custom_material_palette() -> None:
 
     assert compiled.brief.material_palette == palette
     assert compiled.normalized_intent.material_palette == palette
-    assert compiled.brief.grammar_version.startswith("industrial-grammar-v6-intent-")
+    assert compiled.brief.grammar_version.startswith("industrial-grammar-v7-intent-")
 
 
 def test_compiler_warns_about_an_unrestrained_industrial_palette() -> None:

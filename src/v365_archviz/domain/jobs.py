@@ -55,7 +55,12 @@ _ALLOWED_TRANSITIONS: dict[WorkflowState, frozenset[WorkflowState]] = {
         {WorkflowState.VALIDATING, WorkflowState.HUMAN_REVIEW, WorkflowState.FAILED}
     ),
     WorkflowState.HUMAN_REVIEW: frozenset(
-        {WorkflowState.COMPOSING_BOARD, WorkflowState.REPAIRING, WorkflowState.FAILED}
+        {
+            WorkflowState.GENERATING_VIEWSET,
+            WorkflowState.COMPOSING_BOARD,
+            WorkflowState.REPAIRING,
+            WorkflowState.FAILED,
+        }
     ),
     WorkflowState.COMPOSING_BOARD: frozenset({WorkflowState.COMPLETED, WorkflowState.FAILED}),
     WorkflowState.GENERATING_VIDEO: frozenset({WorkflowState.COMPLETED, WorkflowState.FAILED}),

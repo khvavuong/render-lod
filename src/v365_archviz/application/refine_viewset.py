@@ -9,7 +9,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from v365_archviz.application.brand_watermark import BrandWatermark
-from v365_archviz.application.refine_view import PROMPT_VERSION, RefineView
+from v365_archviz.application.refine_view import (
+    PROMPT_VERSION,
+    RefineView,
+    build_context_composition_guide,
+)
 from v365_archviz.artifacts import atomic_write
 from v365_archviz.domain.design import DesignDNA
 from v365_archviz.domain.workflow import Camera, GenerationProfile, ViewRole, ViewSet
@@ -24,11 +28,11 @@ from v365_archviz.providers.contracts import (
 
 VIEW_DIRECTIVES = {
     ViewRole.OVERALL: (
-        "VIEW PURPOSE — PRIMARY ARRIVAL: preserve this centred, frontal approach from outside the "
-        "authored main gate looking into the project. Keep the complete gate opening, connected "
-        "fence runs, external road and the focus factory beyond clearly readable. Do not turn this "
-        "into an aerial or oblique corner view, and do not let the gate obscure the factory. Make "
-        "it read as a premium real-estate arrival photograph with natural human-scale perspective."
+        "VIEW PURPOSE — PRIMARY ARRIVAL: preserve this near-frontal approach from outside the "
+        "authored main gate looking into the project. The slight three-quarter offset must reveal "
+        "the full vehicular opening, two-way driveway depth, connected fence and focus factory. "
+        "Do not turn it into an aerial, flatten it into an elevation or let gate furniture, "
+        "planting or vehicles obstruct the access. Make it read as a premium arrival photograph."
     ),
     ViewRole.CONTEXT: (
         "VIEW PURPOSE — CONTEXT: explain the opposite approach, adjoining roads and the "
@@ -36,27 +40,28 @@ VIEW_DIRECTIVES = {
         "drone optics and distance haze from a real industrial estate."
     ),
     ViewRole.HERO: (
-        "VIEW PURPOSE — CLOSE HERO: retain this low, close corridor composition and emphasize a "
-        "buildable facade, entrances and human scale; do not turn it into an aerial view. Use the "
-        "natural perspective and exposure of a full-frame architectural photograph."
+        "VIEW PURPOSE — FACADE HERO: retain this lower oblique composition and explain the long "
+        "factory elevation, operational forecourt, facade hierarchy and human scale. Keep all "
+        "approved clerestory, accent and logistics modules aligned to the shared design grammar."
     ),
     ViewRole.DETAIL: (
-        "VIEW PURPOSE — LONG FACADE: retain this oblique side view so the long elevation, loading "
-        "access, roof edge, drainage and facade rhythm can be assessed. Show real cladding, seals, "
-        "joints and surface response rather than pristine procedural panels."
+        "VIEW PURPOSE — LOGISTICS FACADE: show a readable factory loading frontage at a modest "
+        "elevated three-quarter angle. Industrial openings must remain sectional overhead or "
+        "roller shutter doors with robust jambs/head, shallow weather canopies, safety bollards "
+        "and a separate personnel egress door—never domestic doors, shopfronts or repeated "
+        "office bays."
     ),
     ViewRole.OFFICE_HERO: (
-        "VIEW PURPOSE — OPPOSITE CORNER: retain this distinct reverse three-quarter composition "
-        "and show its access frontage; do not copy the close-hero camera. Use plausible ground "
-        "texture, contact and full-frame architectural-photo optics."
+        "VIEW PURPOSE — REVERSE OVERALL: preserve this opposite bird's-eye three-quarter view to "
+        "document the roof, rear/secondary frontage, perimeter circulation and boundary. It must "
+        "complement rather than duplicate the primary overall/context camera."
     ),
     ViewRole.LOADING_DETAIL: (
-        "VIEW PURPOSE — EXTERIOR HUMAN EYE LEVEL: keep the camera at pedestrian eye height in "
-        "the open-air authored circulation space, outside every building envelope. The sky and "
-        "exterior facade must remain visible. Never reinterpret this as an interior, covered hall, "
-        "warehouse interior or courtyard. Show realistic scale and access without converting it "
-        "to a drone view. Use a 28-35 mm documentary architectural-photo character at 1.65 m eye "
-        "height, with natural surface variation and no miniature look."
+        "VIEW PURPOSE — LOW FACADE EXPERIENCE: preserve this low elevated, oblique camera along "
+        "the unobstructed reverse facade. Explain the full facade rhythm, planted trellis bays, "
+        "boundary landscape and industrial scale in one credible composition. Keep facade depth "
+        "and sky visible; never turn it into an interior, dead-end alley, square-on blank wall or "
+        "drone overview. Use a documentary architectural-photo character."
     ),
 }
 
@@ -100,6 +105,19 @@ def _identity_contract(design: DesignDNA) -> tuple[dict[str, object], str]:
     ]
     entrance_facades = [facade for facade in focus_facades if facade.office_entrance is not None]
     loading_dock_count = sum(len(facade.loading_docks) for facade in focus_facades)
+    loading_door_families = sorted(
+        {
+            (
+                dock.door_type,
+                dock.threshold_type,
+                round(dock.width_m, 2),
+                round(dock.clear_height_m, 2),
+                round(dock.canopy_projection_m, 2),
+            )
+            for facade in focus_facades
+            for dock in facade.loading_docks
+        }
+    )
     panel_modules = sorted({facade.panel_module_m for facade in focus_facades})
     articulation = focus_facades[0].articulation if focus_facades else None
     articulation_grammar = (
@@ -108,13 +126,19 @@ def _identity_contract(design: DesignDNA) -> tuple[dict[str, object], str]:
         f"{articulation.feature_frame_depth_m:g}m; entrance canopy="
         f"{articulation.entrance_canopy_projection_m:g}m; vertical fins="
         f"{articulation.vertical_fin_count}; accent interval="
-        f"{articulation.accent_bay_interval}. "
+        f"{articulation.accent_bay_interval}; clerestory="
+        f"{articulation.clerestory_band_height_m:g}m at sill ratio "
+        f"{articulation.clerestory_sill_ratio:g}; biophilic trellis interval="
+        f"{articulation.biophilic_bay_interval} bays, width="
+        f"{articulation.biophilic_bay_width_m:g}m, depth="
+        f"{articulation.biophilic_screen_depth_m:g}m. "
         if articulation is not None
         else ""
     )
     facade_grammar = (
         f"cladding module={','.join(f'{value:g}m' for value in panel_modules) or 'model-derived'}; "
         f"office entrance bays={len(entrance_facades)}; loading docks={loading_dock_count}. "
+        f"loading door families={loading_door_families}. "
         f"{articulation_grammar}"
         "Confine office glazing and feature fins to authored entrance/design-detail bays; do not "
         "spread an office glazing ratio across plain factory elevations or shed end walls."
@@ -129,20 +153,42 @@ def _identity_contract(design: DesignDNA) -> tuple[dict[str, object], str]:
             f"{design.design_preferences.accent_coverage_percent}_percent"
         ): palette["accent_hex"],
         "continuous_fence_and_gate": palette["boundary_hex"],
-        "authored_roads_and_yards": palette["paving_hex"],
+        "external_and_perimeter_site_roads": "dark charcoal asphalt, never pale concrete",
+        "internal_service_yards_and_loading_aprons": palette["paving_hex"],
     }
     site_boundary_contract = {
         "geometry": "authored boundary and gate openings only",
         "fence_family": design.design_preferences.boundary_kit,
         "gate_family": design.design_preferences.gate_kit,
+        "construction": (
+            "moderate-height industrial boundary with low concrete/masonry wall and open steel "
+            "infill; vehicular gate remains full authored road width and visibly truck-capable"
+        ),
         "consistency": "same height, leaf count, spacing, material and color in every view",
         "prohibited": "floating portal, disconnected frame, duplicate or relocated gate",
     }
     context_contract = {
         "mode": design.site_design.surrounding_context_mode,
         "allowed_geometry": "only context geometry visible in base RGB or semantic passes",
+        "estate_topology": (
+            "same gate-aligned external roads, approach connections, vegetation zones and proxy "
+            "positions in every camera"
+        ),
+        "proxy_appearance": (
+            "uniform neutral translucent massing at opacity "
+            f"{design.site_design.context_opacity:g}; "
+            "no facade, door, window, sign, roof equipment or opaque photoreal conversion"
+        ),
+        "reference_rule": (
+            "context reference controls only road scale, planting realism and industrial-estate "
+            "atmosphere; the camera-registered context composition guide controls proxy location "
+            "and translucency; never copy or reconstruct any reference building"
+        ),
         "free_pixels": "sky, atmospheric continuity and neutral ground only",
-        "prohibited": "invented warehouse, road, plot, fence or copied context object",
+        "prohibited": (
+            "invented warehouse, road, plot, fence, forest, isolated green island or copied "
+            "context object"
+        ),
     }
     contract: dict[str, object] = {
         "project_id": design.project_id,
@@ -166,6 +212,7 @@ def _identity_contract(design: DesignDNA) -> tuple[dict[str, object], str]:
             "boundary": design.design_preferences.boundary_kit,
             "gate": design.design_preferences.gate_kit,
             "accent_coverage_percent": design.design_preferences.accent_coverage_percent,
+            "loading_door_families": loading_door_families,
         },
     }
     prompt = (
@@ -186,6 +233,8 @@ def _identity_contract(design: DesignDNA) -> tuple[dict[str, object], str]:
         f"material roles={material_role_contract}. "
         f"site boundary family={site_boundary_contract}. "
         f"context policy={context_contract}. "
+        "All roads outside the fence and all public/perimeter approach roads remain dark asphalt; "
+        "only internal service yards and loading aprons use light concrete. "
         "Use one restrained, buildable facade family, roof finish, fence/gate family, landscape "
         "vocabulary, weather, exposure and color grade throughout the view set. The Design Master "
         "controls appearance only; each current base render controls geometry and camera."
@@ -218,12 +267,14 @@ def _select_master_view_id(render_root: Path, cameras: tuple[Camera, ...]) -> st
         ViewRole.LOADING_DETAIL: 1.0,
     }
     identity_bonus = {
-        ViewRole.DETAIL: 8.0,
-        ViewRole.OFFICE_HERO: 7.0,
-        ViewRole.HERO: 6.0,
-        ViewRole.OVERALL: 4.0,
+        # Prefer a meaningful facade run with operational openings. A tight detail can report
+        # high focus coverage while showing only a blank wall and cannot carry design identity.
+        ViewRole.HERO: 18.0,
+        ViewRole.LOADING_DETAIL: 8.0,
+        ViewRole.OFFICE_HERO: 3.0,
+        ViewRole.DETAIL: 2.0,
         ViewRole.CONTEXT: 3.0,
-        ViewRole.LOADING_DETAIL: 2.0,
+        ViewRole.OVERALL: 0.0,
     }
 
     def score(camera: Camera) -> tuple[float, str]:
@@ -349,6 +400,27 @@ def _request_id(
     return f"gen-{hashlib.sha256(payload).hexdigest()[:16]}"
 
 
+def _provider_references(
+    render_root: Path,
+    camera: Camera,
+    references: tuple[Path, ...],
+) -> tuple[Path, ...]:
+    """Attach the camera-registered context guide before the paid provider request."""
+
+    view_root = render_root / camera.view_id
+    proxy = view_root / "context_proxy_rgba.png"
+    if not proxy.is_file():
+        return references
+    guide = build_context_composition_guide(
+        view_root / "base_rgb.png",
+        proxy,
+        view_root / "context_composition_guide.png",
+    )
+    # The Gemini balanced path has room for one appearance reference plus the spatial guide.
+    # The Design Master is carried separately as style_anchor and therefore is not lost here.
+    return (*references[:1], guide)
+
+
 class RefineViewSet:
     def execute(
         self,
@@ -423,8 +495,10 @@ class RefineViewSet:
                     f"{_visible_facade_directive(design, camera)}"
                 ),
                 structure_guide=render_root / camera.view_id / "structure_guide.png",
-                reference_images=(reference_images_by_view or {}).get(
-                    camera.view_id, reference_images
+                reference_images=_provider_references(
+                    render_root,
+                    camera,
+                    (reference_images_by_view or {}).get(camera.view_id, reference_images),
                 ),
                 aspect_ratio=camera.aspect_ratio,
                 image_size=("1K" if profile is GenerationProfile.PREVIEW_FAST else "2K"),
@@ -511,6 +585,7 @@ class RefineViewSet:
                 effective_provider_model=(
                     str(getattr(renderer, "provenance", {}).get("master_model"))
                     if profile is GenerationProfile.TENDER_FINAL
+                    or (len(requests) == 1 and approved_master_path is not None)
                     else str(getattr(renderer, "provenance", {}).get("model"))
                 ),
             )

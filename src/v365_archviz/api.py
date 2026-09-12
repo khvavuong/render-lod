@@ -306,6 +306,34 @@ def _resolve_references(
     return tuple(refs), tuple(roles)
 
 
+def _with_active_quality_baseline(
+    artifact_dir: Path,
+    reference_refs: tuple[str, ...],
+    reference_roles: tuple[str, ...],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Fill missing reference roles from the latest human-approved visual baseline."""
+
+    required_roles = ("factory_design_reference", "context_realism_reference")
+    refs = list(reference_refs)
+    roles = list(reference_roles)
+    manifest_path = artifact_dir / "quality_baselines" / "active.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        baseline_ids = manifest["reference_ids"]
+    except (OSError, KeyError, TypeError, json.JSONDecodeError):
+        return reference_refs, reference_roles
+    for role in required_roles:
+        if role in roles:
+            continue
+        reference_id = baseline_ids.get(role)
+        if not isinstance(reference_id, str):
+            continue
+        baseline_refs, baseline_roles = _resolve_references(artifact_dir, (reference_id,))
+        refs.extend(baseline_refs)
+        roles.extend(baseline_roles)
+    return tuple(refs), tuple(roles)
+
+
 def _certification_state(job: GenerationJob, settings: Settings) -> CertificationState:
     model_revision = job.model_revision
     design_revision = job.design_revision
@@ -676,6 +704,9 @@ def create_view_set(design_revision: str, request: CreateViewSetRequest) -> View
     reference_refs, reference_roles = _resolve_references(
         settings.artifact_dir, request.reference_ids
     )
+    reference_refs, reference_roles = _with_active_quality_baseline(
+        settings.artifact_dir, reference_refs, reference_roles
+    )
     required_reference_roles = {
         "factory_design_reference",
         "context_realism_reference",
@@ -947,6 +978,8 @@ def approve_view_set(view_set_id: str) -> ViewSetJobResponse:
         )
         try:
             review = json.loads(review_path.read_text(encoding="utf-8"))
+            if review.get("view_set_id") not in {None, job.view_set_id}:
+                raise ValueError("Design Master belongs to a different view set")
             if not review.get("master_image_ref") or not Path(review["master_image_ref"]).is_file():
                 raise ValueError("Design Master image is missing")
         except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
@@ -977,6 +1010,21 @@ def approve_view_set(view_set_id: str) -> ViewSetJobResponse:
                     "các view lỗi trước khi duyệt bàn giao."
                 ),
             )
+        atomic_write(
+            qa_path.parent / "final_viewset_review.json",
+            json.dumps(
+                {
+                    "schema_version": "1.0.0",
+                    "status": "approved",
+                    "approved": True,
+                    "view_set_id": job.view_set_id,
+                    "technical_qa_sha256": hashlib.sha256(qa_path.read_bytes()).hexdigest(),
+                },
+                ensure_ascii=False,
+                indent=2,
+            ).encode("utf-8")
+            + b"\n",
+        )
     return _transition_view_set(view_set_id, WorkflowState.COMPOSING_BOARD)
 
 
@@ -986,7 +1034,10 @@ def approve_view_set(view_set_id: str) -> ViewSetJobResponse:
     status_code=status.HTTP_202_ACCEPTED,
     tags=["review"],
 )
-def reject_design_master(view_set_id: str) -> ViewSetJobResponse:
+def reject_design_master(
+    view_set_id: str,
+    scope: Literal["all", "facade"] = "all",
+) -> ViewSetJobResponse:
     """Reject the current master and regenerate it without rerunning upstream geometry."""
 
     _require_safe_identifier(view_set_id, "view_set_id")
@@ -995,8 +1046,11 @@ def reject_design_master(view_set_id: str) -> ViewSetJobResponse:
         job = _repository(settings).get_by_view_set(view_set_id)
     except OSError as exc:
         raise HTTPException(status_code=404, detail="view set not found") from exc
-    if job.state is not WorkflowState.DESIGN_MASTER_REVIEW:
-        raise HTTPException(status_code=409, detail="only a pending Design Master can be rejected")
+    if job.state not in {WorkflowState.DESIGN_MASTER_REVIEW, WorkflowState.HUMAN_REVIEW}:
+        raise HTTPException(
+            status_code=409,
+            detail="only a pending Design Master or final visual review can be rejected",
+        )
     review_path = (
         settings.artifact_dir
         / "generated"
@@ -1010,7 +1064,13 @@ def reject_design_master(view_set_id: str) -> ViewSetJobResponse:
         raise HTTPException(
             status_code=409, detail="Design Master review evidence is missing"
         ) from exc
-    review.update({"approved": False, "status": "rejected"})
+    review.update(
+        {
+            "approved": False,
+            "status": f"{scope}_rejected",
+            "approved_master_types": ["site"] if scope == "facade" else [],
+        }
+    )
     atomic_write(
         review_path,
         json.dumps(review, ensure_ascii=False, indent=2).encode("utf-8") + b"\n",
@@ -1036,12 +1096,38 @@ def retry_view_set(view_set_id: str) -> ViewSetJobResponse:
     if job.state is not WorkflowState.FAILED:
         raise HTTPException(status_code=409, detail="only failed jobs can be retried")
     generated_root = settings.artifact_dir / "generated" / job.model_revision / job.design_revision
-    target = (
-        WorkflowState.VALIDATING
-        if (generated_root / "viewset_generation_manifest.json").is_file()
-        and (generated_root / "protected_composite_manifest.json").is_file()
-        else WorkflowState.RENDERING_PASSES
-    )
+    review_path = generated_root / "design_master_review.json"
+    try:
+        review = json.loads(review_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        review = {}
+    if review.get("approved", False):
+        view_set_path = (
+            settings.artifact_dir
+            / "scenes"
+            / job.model_revision
+            / "designs"
+            / job.design_revision
+            / "view_set.json"
+        )
+        try:
+            view_set = ViewSet.model_validate_json(view_set_path.read_text(encoding="utf-8"))
+            complete_outputs = all(
+                any((generated_root / camera.view_id).glob("refined.*"))
+                for camera in view_set.cameras
+            )
+        except (OSError, ValueError):
+            complete_outputs = False
+        # FAILED resumes through a legal checkpoint. Valid conditioning is reused there before
+        # the worker advances to the approved-master generation branch.
+        target = WorkflowState.VALIDATING if complete_outputs else WorkflowState.RENDERING_PASSES
+    else:
+        target = (
+            WorkflowState.VALIDATING
+            if (generated_root / "viewset_generation_manifest.json").is_file()
+            and (generated_root / "protected_composite_manifest.json").is_file()
+            else WorkflowState.RENDERING_PASSES
+        )
     return _transition_view_set(view_set_id, target)
 
 

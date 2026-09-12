@@ -279,6 +279,8 @@ def test_review_approval_resumes_board_worker(tmp_path, monkeypatch) -> None:  #
     response = client.post("/v1/view-sets/view-set-review/approve")
 
     assert response.status_code == 202
+    final_review = tmp_path / "generated" / "model" / "design" / "final_viewset_review.json"
+    assert json.loads(final_review.read_text(encoding="utf-8"))["approved"] is True
     assert response.json()["state"] == "composing_board"
     assert dispatched == ["job-review"]
 

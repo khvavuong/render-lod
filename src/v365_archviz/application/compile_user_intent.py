@@ -280,7 +280,9 @@ class CompileUserRenderIntent:
             presentation=PresentationStrategy(
                 landscape_character=LANDSCAPE_LANGUAGE[normalized.landscape_preset],
                 paving_character=(
-                    "credible light-grey industrial concrete with drainage, joints and subtle wear"
+                    "dark asphalt on every external/perimeter road; credible light-grey industrial "
+                    "concrete with drainage, joints and subtle wear only on internal yards and "
+                    "loading aprons"
                 ),
                 entourage_density=(
                     {"clean": "low", "active": "medium", "logistics": "medium"}[
@@ -332,8 +334,8 @@ class CompileUserRenderIntent:
             roof_ridge_orientation="long_axis",
             roof_grouping_mode="continuous_rows",
             roof_group_gap_tolerance_m=10.0,
-            solar_panels=False,
-            grammar_version=f"industrial-grammar-v6-intent-{DESIGN_OPTIONS.catalog_version}",
+            solar_panels=normalized.design_package is DesignPackage.TROPICAL_INDUSTRIAL,
+            grammar_version=f"industrial-grammar-v7-intent-{DESIGN_OPTIONS.catalog_version}",
             asset_library_version="baseline-assets-v2",
         )
         return CompiledUserIntent(
@@ -390,6 +392,16 @@ class CompileUserRenderIntent:
         updates: dict[str, float | int] = {
             "accent_bay_interval": max(8, round(55 / intent.accent_coverage_percent)),
         }
+        if intent.design_package is DesignPackage.TROPICAL_INDUSTRIAL:
+            # A sparse, buildable planted trellis system gives the sustainable package a real
+            # architectural identity. It is intentionally separate from the user accent color.
+            updates.update(
+                {
+                    "biophilic_bay_interval": 16,
+                    "biophilic_bay_width_m": 1.6,
+                    "biophilic_screen_depth_m": 0.55,
+                }
+            )
         if intent.envelope_kit.value == "panel_concrete_plinth":
             updates["plinth_height_m"] = 1.15
         office_updates = {

@@ -21,6 +21,13 @@ class LoadingDock(DomainModel):
     dock_id: str = Field(min_length=1)
     u: UnitInterval
     width_m: PositiveMeters
+    clear_height_m: PositiveMeters = Field(default=4.5, ge=3.2, le=6.5)
+    door_type: str = Field(
+        default="sectional_overhead", pattern=r"^(sectional_overhead|roller_shutter)$"
+    )
+    threshold_type: str = Field(default="grade_level", pattern=r"^(grade_level|dock_high)$")
+    canopy_projection_m: float = Field(default=1.2, ge=0.0, le=4.0)
+    include_safety_bollards: bool = True
     evidence_state: DesignEvidenceState = DesignEvidenceState.INFERRED_PROPOSAL
 
 
@@ -50,6 +57,11 @@ class FacadeArticulation(DomainModel):
     entrance_canopy_projection_m: float = Field(default=1.8, ge=0.0, le=6.0)
     vertical_fin_count: int = Field(default=4, ge=0, le=16)
     accent_bay_interval: int = Field(default=6, ge=0, le=20)
+    clerestory_band_height_m: float = Field(default=1.25, ge=0.0, le=3.0)
+    clerestory_sill_ratio: float = Field(default=0.62, ge=0.40, le=0.82)
+    biophilic_bay_interval: int = Field(default=0, ge=0, le=30)
+    biophilic_bay_width_m: float = Field(default=1.4, ge=0.6, le=3.0)
+    biophilic_screen_depth_m: float = Field(default=0.4, ge=0.1, le=1.2)
 
 
 class PresentationStrategy(DomainModel):

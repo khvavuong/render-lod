@@ -63,6 +63,8 @@ def _generated_image_block(image: GeneratedImage) -> dict[str, str]:
 
 
 def _reference_role(path: Path) -> str:
+    if path.name == "context_composition_guide.png":
+        return "context_composition_guide"
     try:
         metadata = json.loads((path.parent / "metadata.json").read_text(encoding="utf-8"))
         role = metadata.get("role")
@@ -153,7 +155,7 @@ class GeminiImageRenderer:
             ),
             "conditioning_mode": self._conditioning_mode.value,
             "input_policy": (
-                "base_rgb+structure_authority+design_master+one_quality_reference"
+                "base_rgb+structure_authority+design_master+two_role_references"
                 if self._conditioning_mode is GeminiConditioningMode.PHOTOREAL_BALANCED
                 else "legacy_control_pass_conditioning"
             ),
@@ -285,9 +287,25 @@ class GeminiImageRenderer:
                     _generated_image_block(style_anchor),
                 )
             )
-        if request.reference_images:
-            reference = request.reference_images[0]
+        for reference in request.reference_images[:2]:
             role = _reference_role(reference)
+            if role == "context_composition_guide":
+                blocks.extend(
+                    (
+                        {
+                            "type": "text",
+                            "text": (
+                                "CAMERA-REGISTERED CONTEXT COMPOSITION GUIDE — preserve the "
+                                "focus project from Base RGB, but represent every pale proxy "
+                                "volume at this exact projected location as a simple grounded "
+                                "neutral translucent mass. Keep its count and spacing. Do not "
+                                "turn proxies into detailed, opaque or floating buildings:"
+                            ),
+                        },
+                        _image_block(reference),
+                    )
+                )
+                continue
             permitted = (
                 "construction detail, material response and human scale"
                 if role == "factory_design_reference"
@@ -413,8 +431,14 @@ class GeminiImageRenderer:
     def generate_view_set(self, request: ViewSetGenerationInput) -> GeneratedViewSet:
         """Generate every multi-view set from one project appearance authority."""
 
+        quality_model = (
+            self._settings.gemini_master_image_model or self._settings.gemini_image_model
+        )
+        # In preview, the site master stays on Flash: it follows the registered composition and
+        # approved context reference more literally. The facade master is derived from that site
+        # anchor on the quality model because its construction detail propagates downstream.
         master_model = (
-            self._settings.gemini_master_image_model
+            quality_model
             if request.profile != "preview_fast"
             else self._settings.gemini_image_model
         )
@@ -430,10 +454,9 @@ class GeminiImageRenderer:
                         style_anchor=request.design_master,
                         identity_prompt=request.identity_prompt,
                         model=(
-                            master_model
-                            if request.design_master is None
-                            and view.view_id == request.master_view_id
-                            else final_view_model
+                            quality_model
+                            if request.design_master is not None
+                            else master_model
                         ),
                     ),
                 )

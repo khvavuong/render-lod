@@ -57,6 +57,22 @@ def test_failed_job_can_only_resume_from_explicit_safe_checkpoints() -> None:
         job.transition(WorkflowState.COMPOSING_BOARD)
 
 
+def test_human_review_can_explicitly_reject_and_regenerate_viewset() -> None:
+    job = GenerationJob.create(
+        job_id="job-review-reject",
+        idempotency_key="key-review-reject",
+        project_id="project",
+        model_revision="model",
+        design_revision="design",
+        view_set_id="views",
+        profile=GenerationProfile.MARKETING_HERO,
+        initial_state=WorkflowState.VALIDATING,
+    ).transition(WorkflowState.HUMAN_REVIEW)
+
+    regenerated = job.transition(WorkflowState.GENERATING_VIEWSET)
+    assert regenerated.state is WorkflowState.GENERATING_VIEWSET
+
+
 def test_repository_deduplicates_generation_job(tmp_path: Path) -> None:
     repository = LocalJobRepository(tmp_path / "metadata")
     view_set = ViewSet(

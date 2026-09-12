@@ -23,15 +23,19 @@ def test_plans_six_reproducible_cameras(tmp_path: Path, valid_scene: CanonicalSc
         ViewRole.OFFICE_HERO,
         ViewRole.LOADING_DETAIL,
     }
-    assert first.view_set_id.endswith("standard-v21")
+    assert first.view_set_id.endswith("standard-v30")
     close_hero = next(camera for camera in first.cameras if camera.role is ViewRole.HERO)
     human_view = next(camera for camera in first.cameras if camera.role is ViewRole.LOADING_DETAIL)
+    reverse_overall = next(
+        camera for camera in first.cameras if camera.role is ViewRole.OFFICE_HERO
+    )
     assert close_hero.position[2] < 30
     assert human_view.position[2] == 1.65
-    assert human_view.focal_length_mm == 30
+    assert human_view.focal_length_mm == 32
+    assert reverse_overall.position[2] < 80
     # A single-row model has no internal corridor. The human camera must stay
     # outside the architectural envelope instead of landing inside the shed.
     assert human_view.position[1] <= -34
-    assert human_view.position[0] < 0
+    assert 0 <= human_view.position[0] <= 60
     assert human_view.target[1] >= -10
     assert ViewSet.model_validate_json((tmp_path / "view_set.json").read_text()) == first

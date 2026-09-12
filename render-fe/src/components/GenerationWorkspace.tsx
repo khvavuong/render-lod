@@ -42,6 +42,7 @@ interface GenerationWorkspaceProps {
   onRefresh: () => void;
   onApprove: () => void;
   onRejectMaster: () => void;
+  onRejectViewSet: () => void;
   onRetry: () => void;
 }
 
@@ -175,6 +176,7 @@ export function GenerationWorkspace({
   onRefresh,
   onApprove,
   onRejectMaster,
+  onRejectViewSet,
   onRetry,
 }: GenerationWorkspaceProps) {
   const [filter, setFilter] = useState<"all" | "image" | "video">("all");
@@ -262,8 +264,18 @@ export function GenerationWorkspace({
           className="review-action-panel"
           type="warning"
           showIcon
-          message="Bộ 6 ảnh đã được tạo và đang chờ duyệt"
-          description="Hard QA đang không đạt. Bộ ảnh chỉ được xem để đánh giá; cần sửa hoặc tạo lại view lỗi trước khi có thể hoàn tất bàn giao."
+          message="Duyệt trực quan bộ 6 ảnh trước khi hoàn tất"
+          description="Technical QA đã chạy xong. Hãy kiểm tra tính đồng nhất của kiến trúc, vật liệu, cổng, hàng rào và bối cảnh giữa cả 6 góc. Chỉ bộ ảnh được duyệt ở bước này mới có thể trở thành baseline chất lượng."
+          action={
+            <Space>
+              <Button loading={submittingReview} onClick={onRejectViewSet}>
+                Chưa đạt · Tạo lại
+              </Button>
+              <Button type="primary" loading={submittingReview} onClick={onApprove}>
+                Duyệt và hoàn tất bộ ảnh
+              </Button>
+            </Space>
+          }
         />
       )}
 
@@ -277,7 +289,7 @@ export function GenerationWorkspace({
           action={
             <Space>
               <Button loading={submittingReview} onClick={onRejectMaster}>
-                Tạo lại master
+                Tạo lại Facade Master
               </Button>
               <Button type="primary" loading={submittingReview} onClick={onApprove}>
                 Duyệt và tạo 4 góc còn lại

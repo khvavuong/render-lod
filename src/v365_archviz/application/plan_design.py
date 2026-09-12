@@ -34,11 +34,20 @@ def _element_surfaces(scene: CanonicalScene, element: SceneElement) -> tuple[Sce
 
 
 def _loading_docks(surface: SceneSurface, count: int) -> tuple[LoadingDock, ...]:
+    # These are buildable industrial logistics openings rather than generic facade doors.
+    # Their positions remain model/yard-derived, while the shared kit fixes their proportions
+    # and detailing across every camera and provider request.
+    clear_width = min(4.8, max(3.6, surface.width_m / (count + 2)))
     return tuple(
         LoadingDock(
             dock_id=f"{surface.surface_id}:dock-{index + 1:02d}",
             u=(index + 1) / (count + 1),
-            width_m=min(4.2, surface.width_m / (count + 2)),
+            width_m=clear_width,
+            clear_height_m=min(5.0, max(4.2, clear_width * 1.05)),
+            door_type="sectional_overhead",
+            threshold_type="grade_level",
+            canopy_projection_m=1.35,
+            include_safety_bollards=True,
         )
         for index in range(count)
     )

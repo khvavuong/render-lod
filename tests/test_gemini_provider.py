@@ -156,7 +156,7 @@ def test_photoreal_balanced_uses_only_clean_authority_inputs(tmp_path: Path) -> 
             "image_size": "1K",
         }
         assert body["generation_config"] == {"thinking_level": "high"}
-        assert len(body["input"]) == 7
+        assert len(body["input"]) == 9
         labels = [block["text"] for block in body["input"] if block["type"] == "text"]
         prompt = labels[0]
         assert "AUTHORITY" in prompt
@@ -202,7 +202,7 @@ def test_photoreal_balanced_uses_only_clean_authority_inputs(tmp_path: Path) -> 
 
     assert renderer.name == "gemini-photoreal_balanced"
     assert renderer.provenance["input_policy"] == (
-        "base_rgb+structure_authority+design_master+one_quality_reference"
+        "base_rgb+structure_authority+design_master+two_role_references"
     )
     assert result.provider_request_id == "interaction-balanced"
 
@@ -412,6 +412,55 @@ def test_single_design_master_uses_the_quality_model(tmp_path: Path) -> None:
         profile="marketing_hero",
         views=(master,),
         master_view_id="view-04",
+    )
+    settings = replace(_settings(), gemini_master_image_model="gemini-3-pro-image")
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        GeminiImageRenderer(settings, client=client).generate_view_set(generation_request)
+
+    assert models == ["gemini-3-pro-image"]
+
+
+def test_preview_facade_master_with_site_anchor_still_uses_quality_model(
+    tmp_path: Path,
+) -> None:
+    image = tmp_path / "pass.png"
+    Image.new("RGB", (2, 2), "white").save(image)
+    models: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = __import__("json").loads(request.content)
+        models.append(body["model"])
+        return httpx.Response(
+            200,
+            json={
+                "id": "interaction-master",
+                "output": {
+                    "mime_type": "image/png",
+                    "data": base64.b64encode(b"master-output").decode(),
+                },
+            },
+        )
+
+    master = ViewConditioningInput(
+        view_id="view-03",
+        base_rgb=image,
+        depth=image,
+        instance_id=image,
+        semantic=image,
+        edges=image,
+        prompt="VIEW PURPOSE — FACADE MASTER",
+    )
+    generation_request = ViewSetGenerationInput(
+        request_id="generation-preview-master",
+        project_id="project-1",
+        model_revision="model-1",
+        design_revision="design-1",
+        view_set_id="views-1",
+        profile="preview_fast",
+        views=(master,),
+        master_view_id="view-02",
+        design_master=GeneratedImage(b"site-master", "image/png", None),
     )
     settings = replace(_settings(), gemini_master_image_model="gemini-3-pro-image")
 

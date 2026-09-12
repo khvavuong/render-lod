@@ -87,6 +87,7 @@ class DockerConditioningRenderer:
         }[profile]
         manifest = {
             "schema_version": "1.0.0",
+            "view_set_id": view_set.view_set_id,
             "renderer_image": self.image,
             "renderer_image_id": self._image_id(),
             "render_profile": profile.value,

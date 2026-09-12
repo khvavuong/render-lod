@@ -209,6 +209,7 @@ export interface StudioGateway {
   getJob(viewSetId: string): Promise<StudioJob>;
   approveViewSet(viewSetId: string): Promise<StudioJob>;
   rejectDesignMaster(viewSetId: string): Promise<StudioJob>;
+  rejectViewSet(viewSetId: string): Promise<StudioJob>;
   retryViewSet(viewSetId: string): Promise<StudioJob>;
   createVideo(viewSetId: string): Promise<StudioVideoJob>;
   getVideoJob(videoJobId: string): Promise<StudioVideoJob>;

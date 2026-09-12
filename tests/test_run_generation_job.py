@@ -59,6 +59,7 @@ def test_generation_stops_after_site_and_facade_masters_until_approval(
     )
     (design_root / "design_dna.json").write_text("{}", encoding="utf-8")
     selected: list[tuple[str, ...]] = []
+    approved_masters: list[Path | None] = []
 
     class RendererContext:
         def __enter__(self):  # type: ignore[no-untyped-def]
@@ -70,6 +71,7 @@ def test_generation_stops_after_site_and_facade_masters_until_approval(
     def refine(_self, _renderer, _render_root, generated_root, *_args, **kwargs):  # type: ignore[no-untyped-def]
         view_ids = kwargs["view_ids"]
         selected.append(view_ids)
+        approved_masters.append(kwargs.get("approved_master_path"))
         view_root = generated_root / view_ids[0]
         view_root.mkdir(parents=True)
         Image.new("RGB", (16, 9), "white").save(view_root / "refined.jpg")
@@ -101,10 +103,15 @@ def test_generation_stops_after_site_and_facade_masters_until_approval(
 
     assert result.state is WorkflowState.DESIGN_MASTER_REVIEW
     assert selected == [("view-01",), ("view-02",)]
+    assert approved_masters[0] is None
+    assert approved_masters[1] == (
+        tmp_path / "generated" / "model" / "design" / "view-01" / "refined.jpg"
+    )
     review = __import__("json").loads(
         (tmp_path / "generated" / "model" / "design" / "design_master_review.json").read_text()
     )
     assert review["approved"] is False
+    assert review["view_set_id"] == "view-set"
     assert review["master_view_ids"] == {"site": "view-01", "facade": "view-02"}
     assert review["quality_standard"]["role"] == "facade_quality_master"
     assert review["quality_standard"]["view_id"] == "view-02"

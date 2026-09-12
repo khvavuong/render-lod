@@ -14,7 +14,9 @@ AUTHORITY
 The current Base RGB fixes camera, project massing, continuous roof geometry, footprint, authored
 roads, yards, landscape zones, gate openings and fence runs. Preserve all of them exactly. Facade
 details already present in Base RGB are approved shared-scene design proposals and must stay in the
-same locations. Empty sky and the explicit context-ground region may receive realistic industrial
+same locations. Treat its clerestory datum, accent spacing, industrial shutter family, weather
+canopies, jambs and bollards as one immutable facade kit across all cameras. Empty sky and the
+explicit context-ground region may receive realistic industrial
 estate continuity. Do not create neighbouring buildings: deterministic translucent context proxies
 are composited after this step.
 
@@ -63,12 +65,17 @@ Material roles: roof={palette.roof_hex}; dominant wall={palette.primary_hex}; se
 plinth, doors and flashings={palette.secondary_hex}; authored glazing={palette.glass_hex};
 restrained
 accent={palette.accent_hex} at no more than {preferences.accent_coverage_percent}% of facade;
-fence/gate={palette.boundary_hex}; paving={palette.paving_hex}. Never swap these roles.
+fence/gate={palette.boundary_hex}; internal service yards/loading aprons={palette.paving_hex};
+external approach and perimeter roads=dark charcoal asphalt. External roads must never render as
+white/light concrete. Never swap these roles.
 Roof: {", ".join(roofs)}; {len(design.roof_assemblies)} continuous assemblies, long-axis ridges.
 Facade system: {preferences.envelope_kit}, {preferences.facade_rhythm_kit}; approved proposed
 entrances={proposal_entrances}, approved proposed loading doors={proposal_docks}. Do not add more.
 Boundary/gate: {preferences.boundary_kit}, {preferences.gate_kit}. Preserve every visible run and
-opening. Opaque auxiliary buildings={auxiliary_count}; keep them secondary but real.
+opening. Keep the moderate-height low wall plus open steel infill, and make the unobstructed
+authored vehicular opening read at its real truck-capable scale. Opaque auxiliary
+buildings={auxiliary_count};
+keep them secondary but real.
 Context: {context.mode if context else design.site_design.surrounding_context_mode};
 deterministic proxy count={len(context.proxy_buildings) if context else 0}; proxies are excluded
 from AI authority and restored later. Environment: {design.environment.time},

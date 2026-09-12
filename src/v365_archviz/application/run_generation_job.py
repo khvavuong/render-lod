@@ -16,6 +16,7 @@ from v365_archviz.application.build_correspondence import BuildCorrespondenceInd
 from v365_archviz.application.compose_viewset_board import ComposeViewSetBoard
 from v365_archviz.application.create_certification_report import CreateCertificationReport
 from v365_archviz.application.evaluate_consistency import EvaluateConsistency
+from v365_archviz.application.promote_quality_baseline import PromoteQualityBaseline
 from v365_archviz.application.protect_refinement import ProtectRefinement
 from v365_archviz.application.refine_viewset import RefineViewSet, select_master_view_ids
 from v365_archviz.application.refinement_prompt import build_refinement_prompt
@@ -81,20 +82,33 @@ class RunGenerationJob:
             reference_pairs = tuple(zip(references, job.reference_roles, strict=True))
             review_path = paths.generated_root / "design_master_review.json"
             review = self._read_master_review(review_path)
+            if review.get("view_set_id") != job.view_set_id:
+                review = {}
             if not review.get("approved", False):
                 site_master_id, facade_master_id = select_master_view_ids(
                     paths.render_root, view_set.cameras
                 )
+                stored_master_ids = review.get("master_view_ids", {})
+                stored_master_refs = review.get("master_image_refs", {})
+                preserve_site = (
+                    "site" in review.get("approved_master_types", [])
+                    and isinstance(stored_master_ids, dict)
+                    and stored_master_ids.get("site") == site_master_id
+                    and isinstance(stored_master_refs, dict)
+                    and isinstance(stored_master_refs.get("site"), str)
+                    and Path(stored_master_refs["site"]).is_file()
+                )
+                generated_manifest_path = (
+                    paths.generated_root / "viewset_generation_manifest.json"
+                )
                 with create_image_renderer(settings, job.image_provider) as renderer:
-                    master_roles = {
-                        site_master_id: "context_realism_reference",
-                        facade_master_id: "factory_design_reference",
-                    }
-                    for master_view_id in dict.fromkeys((site_master_id, facade_master_id)):
-                        matching_references = tuple(
+                    if preserve_site:
+                        site_master_path = Path(stored_master_refs["site"])
+                    else:
+                        site_references = tuple(
                             path
                             for path, role in reference_pairs
-                            if role == master_roles[master_view_id]
+                            if role == "context_realism_reference"
                         )
                         generated = RefineViewSet().execute(
                             renderer,
@@ -105,9 +119,37 @@ class RunGenerationJob:
                             job.model_revision,
                             prompt,
                             profile=job.profile,
-                            view_ids=(master_view_id,),
-                            reference_images=matching_references or references,
+                            view_ids=(site_master_id,),
+                            reference_images=site_references or references,
                         )
+                        generated_manifest_path = generated.manifest_path
+                        site_master_path = self._refined_image(
+                            paths.generated_root / site_master_id
+                        )
+                    if facade_master_id != site_master_id:
+                        # The facade master is derived from the already generated site master.
+                        # This makes the two approval images one identity chain instead of two
+                        # unrelated Gemini generations.
+                        facade_references = tuple(
+                            path
+                            for path, role in reference_pairs
+                            if role == "factory_design_reference"
+                        )
+                        generated = RefineViewSet().execute(
+                            renderer,
+                            paths.render_root,
+                            paths.generated_root,
+                            paths.view_set,
+                            paths.design_dna,
+                            job.model_revision,
+                            prompt,
+                            profile=job.profile,
+                            view_ids=(facade_master_id,),
+                            reference_images=facade_references or references,
+                            approved_master_path=site_master_path,
+                            approved_master_view_id=site_master_id,
+                        )
+                        generated_manifest_path = generated.manifest_path
                 protected = ProtectRefinement().execute(
                     paths.render_root,
                     paths.generated_root,
@@ -132,8 +174,10 @@ class RunGenerationJob:
                     json.dumps(
                         {
                             "schema_version": "1.0.0",
+                            "view_set_id": job.view_set_id,
                             "status": "pending",
                             "approved": False,
+                            "approved_master_types": (["site"] if preserve_site else []),
                             "master_view_id": site_master_id,
                             "master_image_ref": str(master_path),
                             "master_view_ids": {
@@ -167,7 +211,7 @@ class RunGenerationJob:
                     repository,
                     job,
                     WorkflowState.DESIGN_MASTER_REVIEW,
-                    generated.manifest_path,
+                    generated_manifest_path,
                     protected.manifest_path,
                     review_path,
                     master_path,
@@ -203,25 +247,23 @@ class RunGenerationJob:
                 )
                 reference_images_by_view = {
                     camera.view_id: tuple(
-                        dict.fromkeys(
-                            (
-                                *(
-                                    path
-                                    for path, role in reference_pairs
-                                    if role
-                                    == (
-                                        "context_realism_reference"
-                                        if camera.role in {ViewRole.OVERALL, ViewRole.CONTEXT}
-                                        else "factory_design_reference"
-                                    )
-                                ),
-                                *(
-                                    (facade_quality_standard,)
-                                    if camera.role in {ViewRole.OVERALL, ViewRole.CONTEXT}
-                                    else ()
-                                ),
+                        tuple(
+                            dict.fromkeys(
+                                (
+                                    *(
+                                        path
+                                        for path, role in reference_pairs
+                                        if role
+                                        == (
+                                            "context_realism_reference"
+                                            if camera.role in {ViewRole.OVERALL, ViewRole.CONTEXT}
+                                            else "factory_design_reference"
+                                        )
+                                    ),
+                                    facade_quality_standard,
+                                )
                             )
-                        )
+                        )[:2]
                     )
                     for camera in view_set.cameras
                     if camera.view_id in remaining_view_ids
@@ -309,13 +351,10 @@ class RunGenerationJob:
                 paths.generated_root / "protected_composite_manifest.json",
                 certification_path,
             )
-            target_state = (
-                WorkflowState.COMPOSING_BOARD if validation.passed else WorkflowState.HUMAN_REVIEW
-            )
             job = self._advance(
                 repository,
                 job,
-                target_state,
+                WorkflowState.HUMAN_REVIEW,
                 validation.report_path,
                 consistency.report_path,
                 certification_path,
@@ -331,6 +370,15 @@ class RunGenerationJob:
                 paths.generated_root,
                 board_path=board.board_path,
             )
+            if self._read_master_review(paths.generated_root / "final_viewset_review.json").get(
+                "approved", False
+            ):
+                PromoteQualityBaseline().execute(
+                    settings.artifact_dir,
+                    job.model_revision,
+                    job.design_revision,
+                    job.view_set_id,
+                )
             job = self._advance(
                 repository,
                 job,
@@ -429,7 +477,16 @@ class RunGenerationJob:
 
     @staticmethod
     def _conditioning_complete(render_root: Path, view_set: ViewSet) -> bool:
-        if not (render_root / "render_manifest.json").is_file():
+        manifest_path = render_root / "render_manifest.json"
+        if not manifest_path.is_file():
+            return False
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return False
+        # Camera values can remain equal while renderer semantics or context composition changes.
+        # The versioned view-set identity is therefore part of the conditioning cache key.
+        if manifest.get("view_set_id") != view_set.view_set_id:
             return False
         names = (
             "base_rgb.png",

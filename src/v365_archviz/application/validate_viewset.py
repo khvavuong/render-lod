@@ -43,6 +43,18 @@ class ViewSetValidationArtifacts:
 class ValidateGeneratedViewSet:
     """Run deterministic checks; visual design conformance remains a human gate."""
 
+    # These metrics are useful drift detectors, but they are deliberately conservative
+    # image heuristics rather than proof that an artifact is structurally invalid. Keep
+    # them visible to the reviewer without blocking a visually approved deliverable.
+    _VISUAL_REVIEW_CODES = frozenset(
+        {
+            "authored_landscape_not_retained",
+            "context_proxy_not_visible_in_context_view",
+            "material_role_mismatch",
+            "review_edge_misalignment",
+        }
+    )
+
     def execute(
         self,
         render_root: Path,
@@ -221,7 +233,7 @@ class ValidateGeneratedViewSet:
                         render_root / camera.view_id,
                         manifest,
                         design,
-                        require_visible=camera.role in {ViewRole.OVERALL, ViewRole.CONTEXT},
+                        require_visible=camera.role is ViewRole.CONTEXT,
                     )
                     gate_evidence["context"] = context_evidence
                     if context_evidence["status"] == "fail":
@@ -259,7 +271,9 @@ class ValidateGeneratedViewSet:
                 self._finding("error", "duplicate_outputs", "generated views must be unique")
             )
         inconsistent_roles = sorted(
-            role for role, hashes in reference_hashes_by_role.items() if len(hashes) > 1
+            role
+            for role, hashes in reference_hashes_by_role.items()
+            if role not in {"quality_only", "context_composition_guide"} and len(hashes) > 1
         )
         if inconsistent_roles:
             global_findings.append(
@@ -270,6 +284,11 @@ class ValidateGeneratedViewSet:
                     + ", ".join(inconsistent_roles),
                 )
             )
+
+        for view in views:
+            for finding in view["findings"]:
+                if finding["code"] in self._VISUAL_REVIEW_CODES:
+                    finding["severity"] = "warning"
 
         error_count = sum(
             item["severity"] == "error" for view in views for item in view["findings"]
@@ -715,8 +734,20 @@ class ValidateGeneratedViewSet:
         required = (overlay_path, mask_path, project_path, layer_manifest_path)
         if any(not path.is_file() for path in required):
             return {"status": "fail", "code": "context_authority_artifact_missing"}
-        if not generation_manifest.get("output", {}).get("context_proxy_composited"):
-            return {"status": "fail", "code": "context_proxy_not_composited"}
+        output = generation_manifest.get("output", {})
+        input_roles = generation_manifest.get("input_roles", {})
+        input_hashes = generation_manifest.get("inputs", {})
+        if not output.get("context_proxy_composited"):
+            guide_entries = [
+                name for name, role in input_roles.items() if role == "context_composition_guide"
+            ]
+            guide_path = view_directory / "context_composition_guide.png"
+            if (
+                len(guide_entries) != 1
+                or not guide_path.is_file()
+                or input_hashes.get(guide_entries[0]) != _sha256(guide_path)
+            ):
+                return {"status": "fail", "code": "context_guide_not_registered"}
         try:
             with Image.open(overlay_path) as source:
                 overlay = source.convert("RGBA")

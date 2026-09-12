@@ -152,7 +152,8 @@
         "preview_fast",
         "base_pro",
         "strict_geometry",
-        "marketing_hero"
+        "marketing_hero",
+        "tender_final"
       ],
       "title": "GenerationProfile",
       "type": "string"

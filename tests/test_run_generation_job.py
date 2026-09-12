@@ -17,8 +17,9 @@ from v365_archviz.domain.workflow import (
 from v365_archviz.providers.local_jobs import LocalJobRepository
 
 
-def test_generation_stops_after_one_design_master_until_approval(
-    tmp_path: Path, monkeypatch  # type: ignore[no-untyped-def]
+def test_generation_stops_after_site_and_facade_masters_until_approval(
+    tmp_path: Path,
+    monkeypatch,  # type: ignore[no-untyped-def]
 ) -> None:
     settings = replace(Settings.from_env(), artifact_dir=tmp_path)
     repository = LocalJobRepository(tmp_path / "metadata")
@@ -58,6 +59,7 @@ def test_generation_stops_after_one_design_master_until_approval(
     )
     (design_root / "design_dna.json").write_text("{}", encoding="utf-8")
     selected: list[tuple[str, ...]] = []
+    approved_masters: list[Path | None] = []
 
     class RendererContext:
         def __enter__(self):  # type: ignore[no-untyped-def]
@@ -69,6 +71,7 @@ def test_generation_stops_after_one_design_master_until_approval(
     def refine(_self, _renderer, _render_root, generated_root, *_args, **kwargs):  # type: ignore[no-untyped-def]
         view_ids = kwargs["view_ids"]
         selected.append(view_ids)
+        approved_masters.append(kwargs.get("approved_master_path"))
         view_root = generated_root / view_ids[0]
         view_root.mkdir(parents=True)
         Image.new("RGB", (16, 9), "white").save(view_root / "refined.jpg")
@@ -83,36 +86,40 @@ def test_generation_stops_after_one_design_master_until_approval(
         lambda *_args: ({}, "prompt"),
     )
     monkeypatch.setattr(
-        "v365_archviz.application.run_generation_job._select_master_view_id",
-        lambda *_args: "view-02",
+        "v365_archviz.application.run_generation_job.select_master_view_ids",
+        lambda *_args: ("view-01", "view-02"),
     )
     monkeypatch.setattr(
         "v365_archviz.application.run_generation_job.create_image_renderer",
         lambda *_args: RendererContext(),
     )
-    monkeypatch.setattr(
-        "v365_archviz.application.run_generation_job.RefineViewSet.execute", refine
-    )
+    monkeypatch.setattr("v365_archviz.application.run_generation_job.RefineViewSet.execute", refine)
     monkeypatch.setattr(
         "v365_archviz.application.run_generation_job.ProtectRefinement.execute",
-        lambda *_args, **_kwargs: SimpleNamespace(
-            rejected_count=0, manifest_path=protected
-        ),
+        lambda *_args, **_kwargs: SimpleNamespace(rejected_count=0, manifest_path=protected),
     )
 
     result = RunGenerationJob().execute(job.job_id, settings)
 
     assert result.state is WorkflowState.DESIGN_MASTER_REVIEW
-    assert selected == [("view-02",)]
+    assert selected == [("view-01",), ("view-02",)]
+    assert approved_masters[0] is None
+    assert approved_masters[1] == (
+        tmp_path / "generated" / "model" / "design" / "view-01" / "refined.jpg"
+    )
     review = __import__("json").loads(
         (tmp_path / "generated" / "model" / "design" / "design_master_review.json").read_text()
     )
     assert review["approved"] is False
-    assert review["master_view_id"] == "view-02"
+    assert review["view_set_id"] == "view-set"
+    assert review["master_view_ids"] == {"site": "view-01", "facade": "view-02"}
+    assert review["quality_standard"]["role"] == "facade_quality_master"
+    assert review["quality_standard"]["view_id"] == "view-02"
 
 
 def test_technical_qa_failure_publishes_images_for_human_review(
-    tmp_path: Path, monkeypatch  # type: ignore[no-untyped-def]
+    tmp_path: Path,
+    monkeypatch,  # type: ignore[no-untyped-def]
 ) -> None:
     monkeypatch.setenv("V365_ARTIFACT_DIR", str(tmp_path))
     settings = Settings.from_env()

@@ -58,6 +58,8 @@ export interface DesignFormValues {
   realismPreset: RealismPreset;
   time: string;
   creativePrompt?: string;
+  factoryDesignReference?: File;
+  contextRealismReference?: File;
 }
 
 export interface UserRenderIntent {
@@ -144,6 +146,12 @@ export interface DesignPreview {
   previewToken: string;
   normalizedIntent: UserRenderIntent;
   capabilities: ModelDesignCapabilities;
+  industrialContext: {
+    mode: string;
+    seed: string;
+    roads: unknown[];
+    proxy_buildings: unknown[];
+  };
   warnings: IntentWarning[];
 }
 
@@ -200,6 +208,8 @@ export interface StudioGateway {
   ): Promise<StudioJob>;
   getJob(viewSetId: string): Promise<StudioJob>;
   approveViewSet(viewSetId: string): Promise<StudioJob>;
+  rejectDesignMaster(viewSetId: string): Promise<StudioJob>;
+  rejectViewSet(viewSetId: string): Promise<StudioJob>;
   retryViewSet(viewSetId: string): Promise<StudioJob>;
   createVideo(viewSetId: string): Promise<StudioVideoJob>;
   getVideoJob(videoJobId: string): Promise<StudioVideoJob>;

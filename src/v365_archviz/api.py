@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import re
@@ -14,6 +15,7 @@ from urllib.parse import unquote
 from fastapi import FastAPI, Header, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from starlette.concurrency import run_in_threadpool
 
@@ -27,10 +29,11 @@ from v365_archviz.application.extract_ifc import ExtractIfc
 from v365_archviz.application.inspect_model import InspectModel
 from v365_archviz.application.plan_cameras import PlanStandardCameras
 from v365_archviz.application.plan_design import PlanDesign
+from v365_archviz.application.plan_industrial_context import PlanIndustrialContext
 from v365_archviz.artifacts import atomic_write
 from v365_archviz.config import Settings
 from v365_archviz.domain.controlled_realism import CertificationReport, CertificationState
-from v365_archviz.domain.design import DesignBrief, DesignDNA
+from v365_archviz.domain.design import DesignBrief, DesignDNA, IndustrialContextPlan
 from v365_archviz.domain.jobs import GenerationJob
 from v365_archviz.domain.render_intent import (
     DESIGN_OPTIONS,
@@ -52,6 +55,7 @@ from v365_archviz.providers.local_video_jobs import LocalVideoJobRepository
 
 OutputKind = Literal["image", "board", "video"]
 MAX_RVT_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024
+MAX_REFERENCE_UPLOAD_BYTES = 20 * 1024 * 1024
 
 app = FastAPI(
     title="V365 ArchViz Control Plane",
@@ -148,6 +152,7 @@ class DesignPreviewResponse(BaseModel):
     preview_token: str = Field(pattern=r"^[a-f0-9]{64}$")
     normalized_intent: UserRenderIntent
     capabilities: ModelDesignCapabilities
+    industrial_context: IndustrialContextPlan
     warnings: tuple[IntentWarning, ...] = ()
 
 
@@ -157,6 +162,17 @@ class CreateViewSetRequest(BaseModel):
     model_revision: str = Field(pattern=SAFE_IDENTIFIER_PATTERN)
     profile: GenerationProfile = GenerationProfile.PREVIEW_FAST
     render_profile: RenderProfile = RenderProfile.STANDARD_EEVEE
+    reference_ids: tuple[str, ...] = Field(default=(), max_length=2)
+
+
+class ReferenceUploadResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reference_id: str = Field(pattern=r"^[a-f0-9]{64}$")
+    role: Literal["factory_design_reference", "context_realism_reference"]
+    file_name: str
+    width: int = Field(gt=0)
+    height: int = Field(gt=0)
 
 
 class ViewSetJobResponse(BaseModel):
@@ -264,6 +280,60 @@ def _design_directory(artifact_dir: Path, model_revision: str, design_revision: 
     return artifact_dir / "scenes" / model_revision / "designs" / design_revision
 
 
+def _resolve_references(
+    artifact_dir: Path, reference_ids: tuple[str, ...]
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    refs: list[str] = []
+    roles: list[str] = []
+    for reference_id in reference_ids:
+        if not re.fullmatch(r"[a-f0-9]{64}", reference_id):
+            raise HTTPException(status_code=422, detail="invalid reference ID")
+        root = artifact_dir / "references" / reference_id
+        metadata_path = root / "metadata.json"
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            source = root / str(metadata["stored_name"])
+            role = str(metadata["role"])
+        except (OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=404, detail="reference image not found") from exc
+        if not source.is_file() or role not in {
+            "factory_design_reference",
+            "context_realism_reference",
+        }:
+            raise HTTPException(status_code=409, detail="reference metadata is invalid")
+        refs.append(str(source))
+        roles.append(role)
+    return tuple(refs), tuple(roles)
+
+
+def _with_active_quality_baseline(
+    artifact_dir: Path,
+    reference_refs: tuple[str, ...],
+    reference_roles: tuple[str, ...],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Fill missing reference roles from the latest human-approved visual baseline."""
+
+    required_roles = ("factory_design_reference", "context_realism_reference")
+    refs = list(reference_refs)
+    roles = list(reference_roles)
+    manifest_path = artifact_dir / "quality_baselines" / "active.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        baseline_ids = manifest["reference_ids"]
+    except (OSError, KeyError, TypeError, json.JSONDecodeError):
+        return reference_refs, reference_roles
+    for role in required_roles:
+        if role in roles:
+            continue
+        reference_id = baseline_ids.get(role)
+        if not isinstance(reference_id, str):
+            continue
+        baseline_refs, baseline_roles = _resolve_references(artifact_dir, (reference_id,))
+        refs.extend(baseline_refs)
+        roles.extend(baseline_roles)
+    return tuple(refs), tuple(roles)
+
+
 def _certification_state(job: GenerationJob, settings: Settings) -> CertificationState:
     model_revision = job.model_revision
     design_revision = job.design_revision
@@ -346,6 +416,77 @@ def latest_model() -> ActiveModelResponse:
         raise HTTPException(status_code=404, detail="no canonical model is available")
     latest = max(candidates, key=lambda path: path.stat().st_mtime_ns)
     return ActiveModelResponse(model_revision=latest.parent.name)
+
+
+@app.post(
+    "/v1/references",
+    response_model=ReferenceUploadResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["references"],
+)
+async def upload_reference(
+    request: Request,
+    x_filename: str = Header(..., min_length=1, max_length=512),
+    x_reference_role: Literal["factory_design_reference", "context_realism_reference"] = Header(
+        ...
+    ),
+) -> ReferenceUploadResponse:
+    file_name = Path(unquote(x_filename)).name
+    content_length = request.headers.get("content-length")
+    if content_length and int(content_length) > MAX_REFERENCE_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="reference image exceeds 20 MiB")
+    content = await request.body()
+    if not content:
+        raise HTTPException(status_code=422, detail="reference image is empty")
+    if len(content) > MAX_REFERENCE_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="reference image exceeds 20 MiB")
+    try:
+        with Image.open(io.BytesIO(content)) as source:
+            source.verify()
+        with Image.open(io.BytesIO(content)) as source:
+            width, height = source.size
+            image_format = (source.format or "").lower()
+    except (UnidentifiedImageError, OSError) as exc:
+        raise HTTPException(status_code=422, detail="reference must be a valid image") from exc
+    extensions = {"jpeg": ".jpg", "png": ".png", "webp": ".webp"}
+    if image_format not in extensions:
+        raise HTTPException(status_code=422, detail="reference must be JPEG, PNG or WebP")
+    content_sha = hashlib.sha256(content).hexdigest()
+    reference_id = hashlib.sha256(f"{x_reference_role}\n{content_sha}".encode()).hexdigest()
+    root = _settings().artifact_dir / "references" / reference_id
+    stored_name = f"source{extensions[image_format]}"
+    atomic_write(root / stored_name, content)
+    atomic_write(
+        root / "metadata.json",
+        json.dumps(
+            {
+                "schema_version": "1.0.0",
+                "reference_id": reference_id,
+                "role": x_reference_role,
+                "file_name": file_name,
+                "stored_name": stored_name,
+                "content_sha256": content_sha,
+                "width": width,
+                "height": height,
+                "allowed_influence": (
+                    ["construction_detail", "material_response", "human_scale"]
+                    if x_reference_role == "factory_design_reference"
+                    else ["industrial_context", "roads", "atmosphere"]
+                ),
+                "prohibited_influence": ["project_geometry", "camera", "palette", "logo"],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ).encode("utf-8")
+        + b"\n",
+    )
+    return ReferenceUploadResponse(
+        reference_id=reference_id,
+        role=x_reference_role,
+        file_name=file_name,
+        width=width,
+        height=height,
+    )
 
 
 @app.post(
@@ -441,6 +582,7 @@ def preview_design(
         request.intent,
         capabilities,
     )
+    design_revision = PlanDesign.revision(scene, compiled.brief)
     return DesignPreviewResponse(
         model_revision=model_revision,
         preview_token=_preview_token(
@@ -450,6 +592,9 @@ def preview_design(
         ),
         normalized_intent=compiled.normalized_intent,
         capabilities=capabilities,
+        industrial_context=PlanIndustrialContext().execute(
+            scene, design_revision, compiled.brief.site_design
+        ),
         warnings=compiled.warnings,
     )
 
@@ -556,6 +701,25 @@ def create_view_set(design_revision: str, request: CreateViewSetRequest) -> View
     if design.design_revision != design_revision:
         raise HTTPException(status_code=409, detail="design revision is not immutable")
     view_set = PlanStandardCameras().execute(scene_path, design_path)
+    reference_refs, reference_roles = _resolve_references(
+        settings.artifact_dir, request.reference_ids
+    )
+    reference_refs, reference_roles = _with_active_quality_baseline(
+        settings.artifact_dir, reference_refs, reference_roles
+    )
+    required_reference_roles = {
+        "factory_design_reference",
+        "context_realism_reference",
+    }
+    if (
+        request.profile is not GenerationProfile.PREVIEW_FAST
+        and not required_reference_roles.issubset(reference_roles)
+    ):
+        missing = sorted(required_reference_roles - set(reference_roles))
+        raise HTTPException(
+            status_code=422,
+            detail=("tender generation requires approved reference roles: " + ", ".join(missing)),
+        )
     created = CreateGenerationJob().execute(
         _repository(settings),
         project_id=design.project_id,
@@ -565,6 +729,8 @@ def create_view_set(design_revision: str, request: CreateViewSetRequest) -> View
         profile=request.profile,
         render_profile=request.render_profile,
         image_provider=settings.image_provider,
+        reference_image_refs=reference_refs,
+        reference_roles=reference_roles,
     )
     job = created.job
     if created.created:
@@ -812,6 +978,8 @@ def approve_view_set(view_set_id: str) -> ViewSetJobResponse:
         )
         try:
             review = json.loads(review_path.read_text(encoding="utf-8"))
+            if review.get("view_set_id") not in {None, job.view_set_id}:
+                raise ValueError("Design Master belongs to a different view set")
             if not review.get("master_image_ref") or not Path(review["master_image_ref"]).is_file():
                 raise ValueError("Design Master image is missing")
         except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
@@ -822,7 +990,92 @@ def approve_view_set(view_set_id: str) -> ViewSetJobResponse:
             json.dumps(review, ensure_ascii=False, indent=2).encode("utf-8") + b"\n",
         )
         return _transition_view_set(view_set_id, WorkflowState.GENERATING_VIEWSET)
+    if job.state is WorkflowState.HUMAN_REVIEW:
+        qa_path = (
+            settings.artifact_dir
+            / "generated"
+            / job.model_revision
+            / job.design_revision
+            / "technical_qa.json"
+        )
+        try:
+            qa = json.loads(qa_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=409, detail="technical QA evidence is missing") from exc
+        if not qa.get("passed", False):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Không thể hoàn tất: bộ ảnh còn hard QA failure. Hãy sửa hoặc tạo lại "
+                    "các view lỗi trước khi duyệt bàn giao."
+                ),
+            )
+        atomic_write(
+            qa_path.parent / "final_viewset_review.json",
+            json.dumps(
+                {
+                    "schema_version": "1.0.0",
+                    "status": "approved",
+                    "approved": True,
+                    "view_set_id": job.view_set_id,
+                    "technical_qa_sha256": hashlib.sha256(qa_path.read_bytes()).hexdigest(),
+                },
+                ensure_ascii=False,
+                indent=2,
+            ).encode("utf-8")
+            + b"\n",
+        )
     return _transition_view_set(view_set_id, WorkflowState.COMPOSING_BOARD)
+
+
+@app.post(
+    "/v1/view-sets/{view_set_id}/masters/reject",
+    response_model=ViewSetJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    tags=["review"],
+)
+def reject_design_master(
+    view_set_id: str,
+    scope: Literal["all", "facade"] = "all",
+) -> ViewSetJobResponse:
+    """Reject the current master and regenerate it without rerunning upstream geometry."""
+
+    _require_safe_identifier(view_set_id, "view_set_id")
+    settings = _settings()
+    try:
+        job = _repository(settings).get_by_view_set(view_set_id)
+    except OSError as exc:
+        raise HTTPException(status_code=404, detail="view set not found") from exc
+    if job.state not in {WorkflowState.DESIGN_MASTER_REVIEW, WorkflowState.HUMAN_REVIEW}:
+        raise HTTPException(
+            status_code=409,
+            detail="only a pending Design Master or final visual review can be rejected",
+        )
+    review_path = (
+        settings.artifact_dir
+        / "generated"
+        / job.model_revision
+        / job.design_revision
+        / "design_master_review.json"
+    )
+    try:
+        review = json.loads(review_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise HTTPException(
+            status_code=409, detail="Design Master review evidence is missing"
+        ) from exc
+    review.update(
+        {
+            "approved": False,
+            "status": f"{scope}_rejected",
+            "approved_master_types": ["site"] if scope == "facade" else [],
+        }
+    )
+    atomic_write(
+        review_path,
+        json.dumps(review, ensure_ascii=False, indent=2).encode("utf-8") + b"\n",
+    )
+    return _transition_view_set(view_set_id, WorkflowState.GENERATING_VIEWSET)
 
 
 @app.post(
@@ -843,12 +1096,38 @@ def retry_view_set(view_set_id: str) -> ViewSetJobResponse:
     if job.state is not WorkflowState.FAILED:
         raise HTTPException(status_code=409, detail="only failed jobs can be retried")
     generated_root = settings.artifact_dir / "generated" / job.model_revision / job.design_revision
-    target = (
-        WorkflowState.VALIDATING
-        if (generated_root / "viewset_generation_manifest.json").is_file()
-        and (generated_root / "protected_composite_manifest.json").is_file()
-        else WorkflowState.RENDERING_PASSES
-    )
+    review_path = generated_root / "design_master_review.json"
+    try:
+        review = json.loads(review_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        review = {}
+    if review.get("approved", False):
+        view_set_path = (
+            settings.artifact_dir
+            / "scenes"
+            / job.model_revision
+            / "designs"
+            / job.design_revision
+            / "view_set.json"
+        )
+        try:
+            view_set = ViewSet.model_validate_json(view_set_path.read_text(encoding="utf-8"))
+            complete_outputs = all(
+                any((generated_root / camera.view_id).glob("refined.*"))
+                for camera in view_set.cameras
+            )
+        except (OSError, ValueError):
+            complete_outputs = False
+        # FAILED resumes through a legal checkpoint. Valid conditioning is reused there before
+        # the worker advances to the approved-master generation branch.
+        target = WorkflowState.VALIDATING if complete_outputs else WorkflowState.RENDERING_PASSES
+    else:
+        target = (
+            WorkflowState.VALIDATING
+            if (generated_root / "viewset_generation_manifest.json").is_file()
+            and (generated_root / "protected_composite_manifest.json").is_file()
+            else WorkflowState.RENDERING_PASSES
+        )
     return _transition_view_set(view_set_id, target)
 
 

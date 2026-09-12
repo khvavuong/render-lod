@@ -64,7 +64,10 @@ export function DesignPanel(props: DesignPanelProps) {
   } = props;
   const [form] = Form.useForm<DesignFormValues>();
   const [modelFiles, setModelFiles] = useState<UploadFile[]>([]);
+  const [factoryReferenceFiles, setFactoryReferenceFiles] = useState<UploadFile[]>([]);
+  const [contextReferenceFiles, setContextReferenceFiles] = useState<UploadFile[]>([]);
   const [modelError, setModelError] = useState<string>();
+  const [referenceError, setReferenceError] = useState<string>();
   const capabilities = useMemo(
     () => new Map(preparedModel?.capabilities.components.map((item) => [item.key, item]) ?? []),
     [preparedModel],
@@ -98,7 +101,23 @@ export function DesignPanel(props: DesignPanelProps) {
       setModelError('Chọn một file Revit trước khi tiếp tục');
       return;
     }
-    const completeValues = { ...DEFAULT_FORM_VALUES, ...values, modelFile: file };
+    if (
+      preparedModel
+      && designPreview
+      && values.deliveryQuality === 'tender'
+      && (!factoryReferenceFiles.length || !contextReferenceFiles.length)
+    ) {
+      setReferenceError('Chất lượng hồ sơ thầu cần đủ reference facade và bối cảnh khu công nghiệp.');
+      return;
+    }
+    setReferenceError(undefined);
+    const completeValues = {
+      ...DEFAULT_FORM_VALUES,
+      ...values,
+      modelFile: file,
+      factoryDesignReference: factoryReferenceFiles[0]?.originFileObj,
+      contextRealismReference: contextReferenceFiles[0]?.originFileObj,
+    };
     if (!preparedModel) {
       handlePrepare();
     } else if (!designPreview) {
@@ -219,6 +238,36 @@ export function DesignPanel(props: DesignPanelProps) {
                 <Form.Item label="Hoạt động vận hành" name="operatingScene"><Select options={constrainedOptions(designOptions.operating_scenes)} /></Form.Item>
                 <Form.Item label="Thời điểm" name="time"><Input type="time" /></Form.Item>
                 <Form.Item label="Mục tiêu hình ảnh" name="realismPreset"><Select options={designOptions.realism_presets} /></Form.Item>
+                <Form.Item label="Reference thiết kế nhà xưởng" tooltip="Chỉ ảnh hưởng độ chi tiết, vật liệu và tỷ lệ vận hành; không sao chép hình khối hoặc màu.">
+                  <Upload
+                    accept="image/png,image/jpeg,image/webp"
+                    beforeUpload={() => false}
+                    fileList={factoryReferenceFiles}
+                    maxCount={1}
+                    onChange={({ fileList }) => {
+                      setFactoryReferenceFiles(fileList.slice(-1));
+                      setReferenceError(undefined);
+                      onIntentChange();
+                    }}
+                  >
+                    <Button icon={<CloudUploadOutlined />}>Chọn ảnh facade thực tế</Button>
+                  </Upload>
+                </Form.Item>
+                <Form.Item label="Reference bối cảnh khu công nghiệp" tooltip="Chỉ ảnh hưởng đường, cây xanh, atmosphere và cảm giác khu công nghiệp.">
+                  <Upload
+                    accept="image/png,image/jpeg,image/webp"
+                    beforeUpload={() => false}
+                    fileList={contextReferenceFiles}
+                    maxCount={1}
+                    onChange={({ fileList }) => {
+                      setContextReferenceFiles(fileList.slice(-1));
+                      setReferenceError(undefined);
+                      onIntentChange();
+                    }}
+                  >
+                    <Button icon={<CloudUploadOutlined />}>Chọn ảnh bối cảnh thực tế</Button>
+                  </Upload>
+                </Form.Item>
                 <Form.Item label="Chất lượng lượt sinh" name="deliveryQuality" className="last-form-item"><Segmented block options={designOptions.delivery_qualities} /></Form.Item>
               </>,
             }]} />
@@ -236,10 +285,11 @@ export function DesignPanel(props: DesignPanelProps) {
               showIcon
               message="Phương án đã được kiểm tra"
               description={designPreview.warnings.length
-                ? designPreview.warnings.map((item) => item.message).join(' ')
-                : 'Các lựa chọn phù hợp với semantic evidence của model. Có thể tạo Design Master.'}
+                ? `${designPreview.warnings.map((item) => item.message).join(' ')} Bối cảnh quy hoạch: ${designPreview.industrialContext.proxy_buildings.length} khối xưởng lân cận trong suốt, ${designPreview.industrialContext.roads.length} tuyến đường.`
+                : `Các lựa chọn phù hợp với semantic evidence của model. Bối cảnh quy hoạch gồm ${designPreview.industrialContext.proxy_buildings.length} khối xưởng lân cận trong suốt và ${designPreview.industrialContext.roads.length} tuyến đường; đây là dữ liệu conceptual, không phải hiện trạng BIM.`}
             />
           )}
+          {referenceError && <Alert type="error" showIcon message={referenceError} />}
         </Flex>
 
         <Flex vertical gap={8} className="form-actions">

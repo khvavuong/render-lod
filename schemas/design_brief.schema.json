@@ -200,6 +200,41 @@
           "title": "Accent Bay Interval",
           "type": "integer"
         },
+        "biophilic_bay_interval": {
+          "default": 0,
+          "maximum": 30,
+          "minimum": 0,
+          "title": "Biophilic Bay Interval",
+          "type": "integer"
+        },
+        "biophilic_bay_width_m": {
+          "default": 1.4,
+          "maximum": 3.0,
+          "minimum": 0.6,
+          "title": "Biophilic Bay Width M",
+          "type": "number"
+        },
+        "biophilic_screen_depth_m": {
+          "default": 0.4,
+          "maximum": 1.2,
+          "minimum": 0.1,
+          "title": "Biophilic Screen Depth M",
+          "type": "number"
+        },
+        "clerestory_band_height_m": {
+          "default": 1.25,
+          "maximum": 3.0,
+          "minimum": 0.0,
+          "title": "Clerestory Band Height M",
+          "type": "number"
+        },
+        "clerestory_sill_ratio": {
+          "default": 0.62,
+          "maximum": 0.82,
+          "minimum": 0.4,
+          "title": "Clerestory Sill Ratio",
+          "type": "number"
+        },
         "entrance_canopy_projection_m": {
           "default": 1.8,
           "maximum": 6.0,
@@ -355,7 +390,7 @@
         },
         "surrounding_context_mode": {
           "default": "authored_only",
-          "pattern": "^(authored_only|procedural_perimeter)$",
+          "pattern": "^(authored_only|procedural_perimeter|conceptual_industrial_park|none)$",
           "title": "Surrounding Context Mode",
           "type": "string"
         },

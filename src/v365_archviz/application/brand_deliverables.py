@@ -48,7 +48,10 @@ class BrandDeliverables:
             if len(candidates) != 1:
                 raise InvalidModelError(f"expected one refined image in {view_dir}")
             output = candidates[0]
-            source = _preserved_source(output, f"provider_source{output.suffix}")
+            # `refined` may already contain deterministic protected/context composites.
+            # `provider_source` is the raw AI response and must never be used as the branding
+            # source because doing so would silently discard those post-generation layers.
+            source = _preserved_source(output, f"unbranded_refined{output.suffix}")
             watermark.apply_image(source, output)
             generation_manifest_path = view_dir / "generation_manifest.json"
             if generation_manifest_path.is_file():

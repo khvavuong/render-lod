@@ -268,7 +268,9 @@ def build_materials(
     requested_context_opacity = (
         design_data.get("site_design", {}).get("context_opacity", 0.46) if design_data else 0.46
     )
-    context_opacity = max(0.42, min(0.58, requested_context_opacity))
+    # Context sheds are a planning aid, not part of the proposed architecture. Keep them
+    # unmistakably secondary; a separate deterministic overlay preserves this opacity after AI.
+    context_opacity = max(0.22, min(0.30, requested_context_opacity))
 
     def resolved(
         role: str,
@@ -319,9 +321,7 @@ def build_materials(
         "secondary_entrance": material(
             "secondary_entrance", _hex_color(palette["secondary_hex"]), 0.25, 0.42
         ),
-        "site_boundary": material(
-            "site_boundary", _hex_color(palette["boundary_hex"]), 0.15, 0.55
-        ),
+        "site_boundary": material("site_boundary", _hex_color(palette["boundary_hex"]), 0.15, 0.55),
         "loading_zone": resolved("loading_zone", _hex_color(palette["paving_hex"]), 0.0, 0.75),
         "roof": resolved("roof", _hex_color(palette["roof_hex"]), 0.48, 0.28),
         "primary_facade": resolved("primary_facade", _hex_color(palette["primary_hex"]), 0.35, 0.3),
@@ -633,6 +633,49 @@ def create_context_environment(
     asset_data: dict | None = None,
 ) -> int:
     site = design_data.get("site_design", {})
+    context_plan = design_data.get("industrial_context") or {}
+    if context_plan.get("mode") == "conceptual_industrial_park":
+        materials = build_materials(design_data, asset_data)
+        index = start_index
+
+        def add_box(name: str, box: dict, material_value, role: str) -> None:
+            nonlocal index
+            minimum = box["minimum"]
+            maximum = box["maximum"]
+            index += 1
+            _oriented_box(
+                name,
+                Vector(tuple((minimum[axis] + maximum[axis]) / 2 for axis in range(3))),
+                tuple(
+                    (
+                        Vector(
+                            (1 if axis == 0 else 0, 1 if axis == 1 else 0, 1 if axis == 2 else 0)
+                        ),
+                        maximum[axis] - minimum[axis],
+                    )
+                    for axis in range(3)
+                ),
+                material_value,
+                index,
+                semantic_role=role,
+            )
+
+        if context_plan.get("ground"):
+            add_box(
+                "conceptual-context-ground",
+                context_plan["ground"],
+                materials["context_landscape"],
+                "context_landscape",
+            )
+        for road in context_plan.get("roads", []):
+            add_box(
+                road["road_id"], road["bounding_box"], materials["site_road"], "context_landscape"
+            )
+        for proxy in context_plan.get("proxy_buildings", []):
+            add_box(
+                proxy["proxy_id"], proxy["bounding_box"], materials["context"], "context_building"
+            )
+        return index
     if site.get("surrounding_context_mode") != "procedural_perimeter":
         return start_index
     elements = scene_data["elements"]
@@ -1040,7 +1083,7 @@ def create_deterministic_entourage(
 
     # Service vehicles are only valid when tied to an authored loading dock. A truck at the
     # centre of a generic yard can obstruct the human camera and invent an operational layout.
-    if truck_asset and density != "low":
+    if truck_asset and density == "high":
         surfaces = {surface["surface_id"]: surface for surface in scene_data["surfaces"]}
         docks = [
             (dock, surfaces.get(facade["surface_id"]))
@@ -1049,7 +1092,8 @@ def create_deterministic_entourage(
             for facade in building.get("facades", [])
             for dock in facade.get("loading_docks", [])
         ]
-        cap = max(1, round(2 * density_factor))
+        # Always leave at least one complete logistics bay unobstructed for design review.
+        cap = min(max(0, len(docks) - 1), max(1, round(2 * density_factor)))
         dimensions = tuple(truck_asset.get("physical_dimensions_m") or (6.8, 2.35, 2.75))
         # Keep the nearest approach zone legible: the camera planner enters each row from its
         # minimum longitudinal end, so prefer the far authored docks for sparse entourage.
@@ -1159,9 +1203,7 @@ def _subtract_intervals(
 
     start, end = whole
     clipped = sorted(
-        (max(start, left), min(end, right))
-        for left, right in gaps
-        if right > start and left < end
+        (max(start, left), min(end, right)) for left, right in gaps if right > start and left < end
     )
     runs: list[tuple[float, float]] = []
     cursor = start
@@ -1230,7 +1272,9 @@ def _create_site_fence(
                     else Vector((fixed, run_center, ground_z))
                 )
                 index += 1
-                plinth_height = 0.4 if boundary_kit == "mesh_low_plinth" else 0.22
+                # A low masonry/concrete wall with open steel infill is the normal industrial
+                # boundary language here. Keep it transparent enough to present the factory.
+                plinth_height = 0.60 if boundary_kit == "mesh_low_plinth" else 0.32
                 _oriented_box(
                     f"{boundary['scene_element_id']}:{side_name}-{run_number}:plinth",
                     center + up * (plinth_height / 2),
@@ -1239,7 +1283,7 @@ def _create_site_fence(
                     index,
                     semantic_role="site_boundary",
                 )
-                for rail_height in (1.05, 1.85):
+                for rail_height in (0.72, 2.05):
                     index += 1
                     _oriented_box(
                         f"{boundary['scene_element_id']}:{side_name}-{run_number}:rail-{rail_height}",
@@ -1253,15 +1297,15 @@ def _create_site_fence(
                 for post_number in range(post_count + 1):
                     position = left + length * post_number / post_count
                     post_center = (
-                        Vector((position, fixed, ground_z + 1.05))
+                        Vector((position, fixed, ground_z + 1.10))
                         if run_axis == "x"
-                        else Vector((fixed, position, ground_z + 1.05))
+                        else Vector((fixed, position, ground_z + 1.10))
                     )
                     index += 1
                     _oriented_box(
                         f"{boundary['scene_element_id']}:{side_name}-{run_number}:post-{post_number}",
                         post_center,
-                        ((axis, 0.12), (cross, 0.16), (up, 2.10)),
+                        ((axis, 0.14), (cross, 0.18), (up, 2.20)),
                         material,
                         index,
                         semantic_role="site_boundary",
@@ -1276,16 +1320,16 @@ def _create_site_fence(
                 for infill_number in range(1, infill_count):
                     position = left + length * infill_number / infill_count
                     infill_center = (
-                        Vector((position, fixed, ground_z + 1.05))
+                        Vector((position, fixed, ground_z + 1.36))
                         if run_axis == "x"
-                        else Vector((fixed, position, ground_z + 1.05))
+                        else Vector((fixed, position, ground_z + 1.36))
                     )
                     index += 1
                     _oriented_box(
                         f"{boundary['scene_element_id']}:{side_name}-{run_number}:"
                         f"infill-{infill_number}",
                         infill_center,
-                        ((axis, infill_width), (cross, 0.055), (up, 1.65)),
+                        ((axis, infill_width), (cross, 0.055), (up, 1.36)),
                         material,
                         index,
                         semantic_role="site_boundary",
@@ -1300,9 +1344,7 @@ def _create_auxiliary_details(
 ) -> int:
     """Give authored support blocks restrained service doors on their road-facing side."""
 
-    roads = [
-        item for item in scene_data["elements"] if item["semantic_role"] == "site_road"
-    ]
+    roads = [item for item in scene_data["elements"] if item["semantic_role"] == "site_road"]
     if not roads:
         return start_index
     road_centers = [
@@ -1388,6 +1430,7 @@ def create_design_details(
         "boundary": resolved_materials["site_boundary"],
         "roof": resolved_materials["roof"],
         "shutter": resolved_materials["door_shutter"],
+        "biophilic": resolved_materials["tree_foliage"],
     }
     preferences = design_data.get("design_preferences", {})
     boundary_kit = preferences.get("boundary_kit", "preserve_model")
@@ -1417,8 +1460,10 @@ def create_design_details(
         traffic_axis = Vector((0, 1, 0)) if size_x >= size_y else Vector((1, 0, 0))
         opening_width = max(size_x, size_y)
         center = Vector(((x0 + x1) / 2, (y0 + y1) / 2, z1))
-        post_height = 2.2
-        post_size = min(0.28, opening_width * 0.035)
+        is_sliding_gate = gate_kit == "industrial_sliding"
+        # Preserve the authored traffic width and avoid a tall ceremonial portal.
+        post_height = 2.45 if is_sliding_gate else 2.2
+        post_size = min(0.42 if is_sliding_gate else 0.28, opening_width * 0.045)
         gate_material = detail_materials["boundary"]
         for side, direction in (("left", -1), ("right", 1)):
             detail_index += 1
@@ -1439,13 +1484,14 @@ def create_design_details(
                 detail_index,
                 semantic_role=entrance["semantic_role"],
             )
-        # Buildable two-leaf steel gate: low horizontal rails and regular pickets, with no
-        # overhead ceremonial portal. The gate shares the exact fence material family.
-        for rail_name, rail_height in (("bottom", 0.35), ("top", 1.85)):
+        # A sliding leaf is shown parked clear of the authored traffic opening. This makes the
+        # entrance legible without inventing a ceremonial portal or blocking the approach road.
+        leaf_center = center + span_axis * opening_width if is_sliding_gate else center
+        for rail_name, rail_height in (("bottom", 0.32), ("middle", 1.08), ("top", 2.02)):
             detail_index += 1
             _oriented_box(
                 f"{entrance['scene_element_id']}:gate-rail-{rail_name}",
-                center + Vector((0, 0, rail_height)),
+                leaf_center + Vector((0, 0, rail_height)),
                 (
                     (span_axis, opening_width - post_size * 2),
                     (traffic_axis, 0.10),
@@ -1462,11 +1508,11 @@ def create_design_details(
             offset = -opening_width / 2 + opening_width * picket_number / picket_count
             _oriented_box(
                 f"{entrance['scene_element_id']}:gate-picket-{picket_number:02d}",
-                center + span_axis * offset + Vector((0, 0, 1.1)),
+                leaf_center + span_axis * offset + Vector((0, 0, 1.17)),
                 (
                     (span_axis, 0.055),
                     (traffic_axis, 0.08),
-                    (Vector((0, 0, 1)), 1.65),
+                    (Vector((0, 0, 1)), 1.70),
                 ),
                 gate_material,
                 detail_index,
@@ -1541,6 +1587,43 @@ def create_design_details(
                         detail_materials["seam"],
                         detail_index,
                     )
+            clerestory_height = min(
+                float(articulation.get("clerestory_band_height_m", 0.0)), height * 0.16
+            )
+            if width >= 30.0 and height >= 8.0 and clerestory_height >= 0.45:
+                clerestory_sill = height * float(articulation.get("clerestory_sill_ratio", 0.62))
+                clerestory_center_z = min(
+                    height - parapet_height - clerestory_height / 2 - 0.25,
+                    clerestory_sill + clerestory_height / 2,
+                )
+                detail_index += 1
+                _detail_box(
+                    f"{facade['surface_id']}:clerestory-band",
+                    surface,
+                    width / 2,
+                    clerestory_center_z,
+                    width * 0.94,
+                    clerestory_height,
+                    0.10,
+                    detail_materials["glass"],
+                    detail_index,
+                    semantic_role="glazing",
+                )
+                mullion_count = max(2, int(width / 7.2))
+                for mullion_number in range(1, mullion_count):
+                    detail_index += 1
+                    _detail_box(
+                        f"{facade['surface_id']}:clerestory-mullion-{mullion_number:02d}",
+                        surface,
+                        width * mullion_number / mullion_count,
+                        clerestory_center_z,
+                        0.10,
+                        clerestory_height,
+                        0.14,
+                        detail_materials["secondary"],
+                        detail_index,
+                        semantic_role="glazing",
+                    )
             accent_interval = articulation.get("accent_bay_interval", 0)
             if accent_interval:
                 for seam_number in range(accent_interval, seam_count, accent_interval):
@@ -1556,46 +1639,216 @@ def create_design_details(
                         detail_materials["accent"],
                         detail_index,
                     )
-            for dock in facade["loading_docks"]:
+            biophilic_interval = int(articulation.get("biophilic_bay_interval", 0))
+            if biophilic_interval and width >= 36.0 and height >= 7.0:
+                trellis_width = min(
+                    float(articulation.get("biophilic_bay_width_m", 1.4)),
+                    module * 2.2,
+                )
+                trellis_depth = float(articulation.get("biophilic_screen_depth_m", 0.4))
+                occupied = [
+                    (
+                        dock["u"] * width - dock["width_m"] / 2 - 1.8,
+                        dock["u"] * width + dock["width_m"] / 2 + 1.8,
+                    )
+                    for dock in facade["loading_docks"]
+                ]
+                entrance = facade.get("office_entrance")
+                if entrance:
+                    occupied.append(
+                        (
+                            entrance["u"] * width - entrance["width_m"] * 2.0,
+                            entrance["u"] * width + entrance["width_m"] * 2.0,
+                        )
+                    )
+                for bay_number in range(biophilic_interval, seam_count, biophilic_interval):
+                    u_center = min(bay_number * module, width - trellis_width)
+                    if any(start <= u_center <= end for start, end in occupied):
+                        continue
+                    screen_height = max(3.6, height - plinth_height - parapet_height - 0.8)
+                    screen_center_z = plinth_height + screen_height / 2 + 0.2
+                    detail_index += 1
+                    _detail_box(
+                        f"{facade['surface_id']}:biophilic-infill-{bay_number:03d}",
+                        surface,
+                        u_center,
+                        screen_center_z,
+                        trellis_width * 0.72,
+                        screen_height * 0.92,
+                        max(0.12, trellis_depth * 0.55),
+                        detail_materials["biophilic"],
+                        detail_index,
+                        semantic_role="design_detail",
+                    )
+                    for rail_side in (-1.0, 1.0):
+                        detail_index += 1
+                        _detail_box(
+                            f"{facade['surface_id']}:biophilic-rail-{bay_number:03d}-{rail_side:+g}",
+                            surface,
+                            u_center + rail_side * trellis_width * 0.43,
+                            screen_center_z,
+                            0.10,
+                            screen_height,
+                            trellis_depth,
+                            detail_materials["secondary"],
+                            detail_index,
+                            semantic_role="design_detail",
+                        )
+                    for cross_number in range(1, 5):
+                        detail_index += 1
+                        _detail_box(
+                            f"{facade['surface_id']}:biophilic-cross-{bay_number:03d}-{cross_number}",
+                            surface,
+                            u_center,
+                            plinth_height + screen_height * cross_number / 5,
+                            trellis_width,
+                            0.08,
+                            trellis_depth,
+                            detail_materials["secondary"],
+                            detail_index,
+                            semantic_role="design_detail",
+                        )
+            for dock_number, dock in enumerate(facade["loading_docks"], start=1):
+                clear_height = float(dock.get("clear_height_m", 4.5))
+                door_center_z = clear_height / 2
                 detail_index += 1
                 _detail_box(
                     dock["dock_id"],
                     surface,
                     dock["u"] * width,
-                    2.25,
+                    door_center_z,
                     dock["width_m"],
-                    4.5,
+                    clear_height,
                     0.16,
                     detail_materials["dock"],
                     detail_index,
+                    semantic_role="loading_zone",
                 )
                 # A recessed dark frame plus a lighter sectional shutter reads as a real
                 # industrial door at both aerial and human eye-level views.
                 detail_index += 1
-                shutter_width = max(0.8, dock["width_m"] - 0.42)
+                shutter_width = max(0.8, dock["width_m"] - 0.46)
+                shutter_height = max(3.0, clear_height - 0.34)
                 _detail_box(
                     f"{dock['dock_id']}:shutter",
                     surface,
                     dock["u"] * width,
-                    2.25,
+                    shutter_height / 2 + 0.08,
                     shutter_width,
-                    4.08,
+                    shutter_height,
                     0.20,
                     detail_materials["shutter"],
                     detail_index,
+                    semantic_role="loading_zone",
                 )
-                for slat_number in range(1, 9):
+                slat_count = max(7, int(shutter_height / 0.46))
+                for slat_number in range(1, slat_count):
                     detail_index += 1
                     _detail_box(
                         f"{dock['dock_id']}:slat-{slat_number:02d}",
                         surface,
                         dock["u"] * width,
-                        0.25 + slat_number * 0.45,
+                        0.08 + slat_number * shutter_height / slat_count,
                         shutter_width * 0.94,
                         0.035,
                         0.23,
                         detail_materials["seam"],
                         detail_index,
+                        semantic_role="loading_zone",
+                    )
+                frame = surface["frame"]
+                origin = Vector(frame["origin"])
+                u_axis = Vector(frame["u_axis"])
+                v_axis = Vector(frame["v_axis"])
+                normal = Vector(frame["normal"])
+                dock_u = dock["u"] * width
+                frame_width = 0.22
+                # Explicit jambs/head stop the opening reading as a generic black rectangle.
+                for frame_name, frame_u, frame_z, member_width, member_height in (
+                    (
+                        "left-jamb",
+                        dock_u - dock["width_m"] / 2,
+                        door_center_z,
+                        frame_width,
+                        clear_height,
+                    ),
+                    (
+                        "right-jamb",
+                        dock_u + dock["width_m"] / 2,
+                        door_center_z,
+                        frame_width,
+                        clear_height,
+                    ),
+                    ("head", dock_u, clear_height, dock["width_m"] + frame_width, frame_width),
+                ):
+                    detail_index += 1
+                    _detail_box(
+                        f"{dock['dock_id']}:{frame_name}",
+                        surface,
+                        frame_u,
+                        frame_z,
+                        member_width,
+                        member_height,
+                        0.28,
+                        detail_materials["secondary"],
+                        detail_index,
+                        semantic_role="loading_zone",
+                    )
+                canopy_projection = float(dock.get("canopy_projection_m", 1.2))
+                if canopy_projection > 0:
+                    detail_index += 1
+                    canopy_center = (
+                        origin
+                        + u_axis * dock_u
+                        + v_axis * (clear_height + 0.45)
+                        + normal * (canopy_projection / 2 + 0.08)
+                    )
+                    _oriented_box(
+                        f"{dock['dock_id']}:weather-canopy",
+                        canopy_center,
+                        (
+                            (u_axis, dock["width_m"] + 0.8),
+                            (normal, canopy_projection),
+                            (v_axis, 0.18),
+                        ),
+                        detail_materials["secondary"],
+                        detail_index,
+                        semantic_role="loading_zone",
+                    )
+                if dock.get("include_safety_bollards", True):
+                    for side, bollard_u in (
+                        ("left", dock_u - dock["width_m"] / 2 - 0.38),
+                        ("right", dock_u + dock["width_m"] / 2 + 0.38),
+                    ):
+                        detail_index += 1
+                        _detail_box(
+                            f"{dock['dock_id']}:bollard-{side}",
+                            surface,
+                            bollard_u,
+                            0.55,
+                            0.18,
+                            1.10,
+                            0.42,
+                            detail_materials["secondary"],
+                            detail_index,
+                            semantic_role="loading_zone",
+                        )
+                # One personnel egress door per logistics group supplies a credible hierarchy
+                # without repeating domestic-looking doors beside every shutter.
+                if dock_number == 1:
+                    personnel_u = min(width - 0.7, dock_u + dock["width_m"] / 2 + 1.45)
+                    detail_index += 1
+                    _detail_box(
+                        f"{dock['dock_id']}:personnel-door",
+                        surface,
+                        personnel_u,
+                        1.10,
+                        1.05,
+                        2.20,
+                        0.18,
+                        detail_materials["secondary"],
+                        detail_index,
+                        semantic_role="loading_zone",
                     )
             entrance = facade.get("office_entrance")
             if entrance:
@@ -1908,6 +2161,14 @@ def file_output(tree, source, socket_name: str, directory: Path, prefix: str, fi
 
 def render_pbr(view_dir: Path) -> None:
     scene = bpy.context.scene
+    context_objects = [
+        obj
+        for obj in scene.objects
+        if obj.type == "MESH" and obj.get("semantic_role") == "context_building"
+    ]
+    original_visibility = {obj: obj.hide_render for obj in context_objects}
+    for obj in context_objects:
+        obj.hide_render = True
     layer = scene.view_layers[0]
     layer.use_pass_z = True
     layer.use_pass_normal = True
@@ -1923,7 +2184,13 @@ def render_pbr(view_dir: Path) -> None:
     tree.links.new(render_layers.outputs["Depth"], normalized_depth.inputs["Value"])
     file_output(tree, normalized_depth, "Value", view_dir, "depth_preview_", "PNG")
     scene.render.filepath = str(view_dir / "base_rgb.png")
-    bpy.ops.render.render(write_still=True)
+    try:
+        # Keep geometry authority photoreal-friendly. Proxy massing is supplied separately as a
+        # camera-registered composition guide and is never overlaid after generative reframing.
+        bpy.ops.render.render(write_still=True)
+    finally:
+        for obj, hidden in original_visibility.items():
+            obj.hide_render = hidden
     for prefix, extension in (
         ("depth_", "exr"),
         ("normal_", "exr"),
@@ -1933,6 +2200,55 @@ def render_pbr(view_dir: Path) -> None:
         if matches:
             name = "depth.png" if prefix == "depth_preview_" else f"{prefix.rstrip('_')}.exr"
             os.replace(matches[-1], view_dir / name)
+
+
+def render_context_proxy_overlay(view_dir: Path) -> None:
+    """Render context sheds as camera-aligned RGBA with project geometry as holdouts."""
+
+    scene = bpy.context.scene
+    mesh_objects = [obj for obj in scene.objects if obj.type == "MESH"]
+    context_objects = [
+        obj for obj in mesh_objects if obj.get("semantic_role") == "context_building"
+    ]
+    if not context_objects:
+        return
+
+    original_materials = {obj: obj.data.materials[0] for obj in mesh_objects}
+    original_visibility = {obj: obj.hide_render for obj in mesh_objects}
+    original_film_transparent = scene.render.film_transparent
+    original_color_mode = scene.render.image_settings.color_mode
+    original_format = scene.render.image_settings.file_format
+    original_scene_nodes = scene.use_nodes
+    original_filepath = scene.render.filepath
+
+    holdout = bpy.data.materials.new("context-proxy-holdout")
+    holdout.use_nodes = True
+    holdout.node_tree.nodes.clear()
+    output = holdout.node_tree.nodes.new("ShaderNodeOutputMaterial")
+    holdout_node = holdout.node_tree.nodes.new("ShaderNodeHoldout")
+    holdout.node_tree.links.new(holdout_node.outputs["Holdout"], output.inputs["Surface"])
+
+    try:
+        for obj in mesh_objects:
+            obj.hide_render = False
+            if obj not in context_objects:
+                obj.data.materials.clear()
+                obj.data.materials.append(holdout)
+        scene.use_nodes = False
+        scene.render.film_transparent = True
+        scene.render.image_settings.file_format = "PNG"
+        scene.render.image_settings.color_mode = "RGBA"
+        scene.render.filepath = str(view_dir / "context_proxy_rgba.png")
+        bpy.ops.render.render(write_still=True)
+    finally:
+        _replace_materials(original_materials)
+        for obj, hidden in original_visibility.items():
+            obj.hide_render = hidden
+        scene.render.film_transparent = original_film_transparent
+        scene.render.image_settings.color_mode = original_color_mode
+        scene.render.image_settings.file_format = original_format
+        scene.use_nodes = original_scene_nodes
+        scene.render.filepath = original_filepath
 
 
 def _replace_materials(materials_by_object: dict) -> None:
@@ -2240,6 +2556,7 @@ def main() -> None:
         )
         camera = configure_camera(camera_spec)
         render_pbr(view_dir)
+        render_context_proxy_overlay(view_dir)
         if not args.pbr_only:
             render_masks(view_dir)
             render_material_ids(view_dir)

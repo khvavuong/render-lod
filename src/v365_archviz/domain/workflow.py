@@ -52,6 +52,7 @@ class GenerationProfile(str, Enum):
     BASE_PRO = "base_pro"
     STRICT_GEOMETRY = "strict_geometry"
     MARKETING_HERO = "marketing_hero"
+    TENDER_FINAL = "tender_final"
 
 
 class RenderProfile(str, Enum):

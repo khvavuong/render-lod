@@ -9,7 +9,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from v365_archviz.application.brand_watermark import BrandWatermark
-from v365_archviz.application.refine_view import PROMPT_VERSION, RefineView
+from v365_archviz.application.refine_view import (
+    PROMPT_VERSION,
+    RefineView,
+    build_context_composition_guide,
+)
 from v365_archviz.artifacts import atomic_write
 from v365_archviz.domain.design import DesignDNA
 from v365_archviz.domain.workflow import Camera, GenerationProfile, ViewRole, ViewSet
@@ -24,11 +28,11 @@ from v365_archviz.providers.contracts import (
 
 VIEW_DIRECTIVES = {
     ViewRole.OVERALL: (
-        "VIEW PURPOSE — CAMPUS MASTERPLAN: show the complete authored project parcel in one frame. "
-        "Do not crop any side of the project boundary. Keep every perimeter road, external "
-        "approach, entrance/security gatehouse, parking area, landscape strip and all focus "
-        "buildings legible. Make it read as a real high-resolution drone photograph with natural "
-        "atmospheric depth, not an isometric masterplan rendering."
+        "VIEW PURPOSE — PRIMARY ARRIVAL: preserve this near-frontal approach from outside the "
+        "authored main gate looking into the project. The slight three-quarter offset must reveal "
+        "the full vehicular opening, two-way driveway depth, connected fence and focus factory. "
+        "Do not turn it into an aerial, flatten it into an elevation or let gate furniture, "
+        "planting or vehicles obstruct the access. Make it read as a premium arrival photograph."
     ),
     ViewRole.CONTEXT: (
         "VIEW PURPOSE — CONTEXT: explain the opposite approach, adjoining roads and the "
@@ -36,27 +40,28 @@ VIEW_DIRECTIVES = {
         "drone optics and distance haze from a real industrial estate."
     ),
     ViewRole.HERO: (
-        "VIEW PURPOSE — CLOSE HERO: retain this low, close corridor composition and emphasize a "
-        "buildable facade, entrances and human scale; do not turn it into an aerial view. Use the "
-        "natural perspective and exposure of a full-frame architectural photograph."
+        "VIEW PURPOSE — FACADE HERO: retain this lower oblique composition and explain the long "
+        "factory elevation, operational forecourt, facade hierarchy and human scale. Keep all "
+        "approved clerestory, accent and logistics modules aligned to the shared design grammar."
     ),
     ViewRole.DETAIL: (
-        "VIEW PURPOSE — LONG FACADE: retain this oblique side view so the long elevation, loading "
-        "access, roof edge, drainage and facade rhythm can be assessed. Show real cladding, seals, "
-        "joints and surface response rather than pristine procedural panels."
+        "VIEW PURPOSE — LOGISTICS FACADE: show a readable factory loading frontage at a modest "
+        "elevated three-quarter angle. Industrial openings must remain sectional overhead or "
+        "roller shutter doors with robust jambs/head, shallow weather canopies, safety bollards "
+        "and a separate personnel egress door—never domestic doors, shopfronts or repeated "
+        "office bays."
     ),
     ViewRole.OFFICE_HERO: (
-        "VIEW PURPOSE — OPPOSITE CORNER: retain this distinct reverse three-quarter composition "
-        "and show its access frontage; do not copy the close-hero camera. Use plausible ground "
-        "texture, contact and full-frame architectural-photo optics."
+        "VIEW PURPOSE — REVERSE OVERALL: preserve this opposite bird's-eye three-quarter view to "
+        "document the roof, rear/secondary frontage, perimeter circulation and boundary. It must "
+        "complement rather than duplicate the primary overall/context camera."
     ),
     ViewRole.LOADING_DETAIL: (
-        "VIEW PURPOSE — EXTERIOR HUMAN EYE LEVEL: keep the camera at pedestrian eye height in "
-        "the open-air authored circulation space, outside every building envelope. The sky and "
-        "exterior facade must remain visible. Never reinterpret this as an interior, covered hall, "
-        "warehouse interior or courtyard. Show realistic scale and access without converting it "
-        "to a drone view. Use a 28-35 mm documentary architectural-photo character at 1.65 m eye "
-        "height, with natural surface variation and no miniature look."
+        "VIEW PURPOSE — LOW FACADE EXPERIENCE: preserve this low elevated, oblique camera along "
+        "the unobstructed reverse facade. Explain the full facade rhythm, planted trellis bays, "
+        "boundary landscape and industrial scale in one credible composition. Keep facade depth "
+        "and sky visible; never turn it into an interior, dead-end alley, square-on blank wall or "
+        "drone overview. Use a documentary architectural-photo character."
     ),
 }
 
@@ -100,6 +105,19 @@ def _identity_contract(design: DesignDNA) -> tuple[dict[str, object], str]:
     ]
     entrance_facades = [facade for facade in focus_facades if facade.office_entrance is not None]
     loading_dock_count = sum(len(facade.loading_docks) for facade in focus_facades)
+    loading_door_families = sorted(
+        {
+            (
+                dock.door_type,
+                dock.threshold_type,
+                round(dock.width_m, 2),
+                round(dock.clear_height_m, 2),
+                round(dock.canopy_projection_m, 2),
+            )
+            for facade in focus_facades
+            for dock in facade.loading_docks
+        }
+    )
     panel_modules = sorted({facade.panel_module_m for facade in focus_facades})
     articulation = focus_facades[0].articulation if focus_facades else None
     articulation_grammar = (
@@ -108,13 +126,19 @@ def _identity_contract(design: DesignDNA) -> tuple[dict[str, object], str]:
         f"{articulation.feature_frame_depth_m:g}m; entrance canopy="
         f"{articulation.entrance_canopy_projection_m:g}m; vertical fins="
         f"{articulation.vertical_fin_count}; accent interval="
-        f"{articulation.accent_bay_interval}. "
+        f"{articulation.accent_bay_interval}; clerestory="
+        f"{articulation.clerestory_band_height_m:g}m at sill ratio "
+        f"{articulation.clerestory_sill_ratio:g}; biophilic trellis interval="
+        f"{articulation.biophilic_bay_interval} bays, width="
+        f"{articulation.biophilic_bay_width_m:g}m, depth="
+        f"{articulation.biophilic_screen_depth_m:g}m. "
         if articulation is not None
         else ""
     )
     facade_grammar = (
         f"cladding module={','.join(f'{value:g}m' for value in panel_modules) or 'model-derived'}; "
         f"office entrance bays={len(entrance_facades)}; loading docks={loading_dock_count}. "
+        f"loading door families={loading_door_families}. "
         f"{articulation_grammar}"
         "Confine office glazing and feature fins to authored entrance/design-detail bays; do not "
         "spread an office glazing ratio across plain factory elevations or shed end walls."
@@ -129,20 +153,42 @@ def _identity_contract(design: DesignDNA) -> tuple[dict[str, object], str]:
             f"{design.design_preferences.accent_coverage_percent}_percent"
         ): palette["accent_hex"],
         "continuous_fence_and_gate": palette["boundary_hex"],
-        "authored_roads_and_yards": palette["paving_hex"],
+        "external_and_perimeter_site_roads": "dark charcoal asphalt, never pale concrete",
+        "internal_service_yards_and_loading_aprons": palette["paving_hex"],
     }
     site_boundary_contract = {
         "geometry": "authored boundary and gate openings only",
         "fence_family": design.design_preferences.boundary_kit,
         "gate_family": design.design_preferences.gate_kit,
+        "construction": (
+            "moderate-height industrial boundary with low concrete/masonry wall and open steel "
+            "infill; vehicular gate remains full authored road width and visibly truck-capable"
+        ),
         "consistency": "same height, leaf count, spacing, material and color in every view",
         "prohibited": "floating portal, disconnected frame, duplicate or relocated gate",
     }
     context_contract = {
         "mode": design.site_design.surrounding_context_mode,
         "allowed_geometry": "only context geometry visible in base RGB or semantic passes",
+        "estate_topology": (
+            "same gate-aligned external roads, approach connections, vegetation zones and proxy "
+            "positions in every camera"
+        ),
+        "proxy_appearance": (
+            "uniform neutral translucent massing at opacity "
+            f"{design.site_design.context_opacity:g}; "
+            "no facade, door, window, sign, roof equipment or opaque photoreal conversion"
+        ),
+        "reference_rule": (
+            "context reference controls only road scale, planting realism and industrial-estate "
+            "atmosphere; the camera-registered context composition guide controls proxy location "
+            "and translucency; never copy or reconstruct any reference building"
+        ),
         "free_pixels": "sky, atmospheric continuity and neutral ground only",
-        "prohibited": "invented warehouse, road, plot, fence or copied context object",
+        "prohibited": (
+            "invented warehouse, road, plot, fence, forest, isolated green island or copied "
+            "context object"
+        ),
     }
     contract: dict[str, object] = {
         "project_id": design.project_id,
@@ -166,6 +212,7 @@ def _identity_contract(design: DesignDNA) -> tuple[dict[str, object], str]:
             "boundary": design.design_preferences.boundary_kit,
             "gate": design.design_preferences.gate_kit,
             "accent_coverage_percent": design.design_preferences.accent_coverage_percent,
+            "loading_door_families": loading_door_families,
         },
     }
     prompt = (
@@ -186,6 +233,8 @@ def _identity_contract(design: DesignDNA) -> tuple[dict[str, object], str]:
         f"material roles={material_role_contract}. "
         f"site boundary family={site_boundary_contract}. "
         f"context policy={context_contract}. "
+        "All roads outside the fence and all public/perimeter approach roads remain dark asphalt; "
+        "only internal service yards and loading aprons use light concrete. "
         "Use one restrained, buildable facade family, roof finish, fence/gate family, landscape "
         "vocabulary, weather, exposure and color grade throughout the view set. The Design Master "
         "controls appearance only; each current base render controls geometry and camera."
@@ -218,12 +267,14 @@ def _select_master_view_id(render_root: Path, cameras: tuple[Camera, ...]) -> st
         ViewRole.LOADING_DETAIL: 1.0,
     }
     identity_bonus = {
-        ViewRole.DETAIL: 8.0,
-        ViewRole.OFFICE_HERO: 7.0,
-        ViewRole.HERO: 6.0,
-        ViewRole.OVERALL: 4.0,
+        # Prefer a meaningful facade run with operational openings. A tight detail can report
+        # high focus coverage while showing only a blank wall and cannot carry design identity.
+        ViewRole.HERO: 18.0,
+        ViewRole.LOADING_DETAIL: 8.0,
+        ViewRole.OFFICE_HERO: 3.0,
+        ViewRole.DETAIL: 2.0,
         ViewRole.CONTEXT: 3.0,
-        ViewRole.LOADING_DETAIL: 2.0,
+        ViewRole.OVERALL: 0.0,
     }
 
     def score(camera: Camera) -> tuple[float, str]:
@@ -251,6 +302,49 @@ def _select_master_view_id(render_root: Path, cameras: tuple[Camera, ...]) -> st
         )
 
     return max(cameras, key=score).view_id
+
+
+def select_master_view_ids(render_root: Path, cameras: tuple[Camera, ...]) -> tuple[str, str]:
+    """Select complementary site and facade masters from semantic camera evidence."""
+
+    if not cameras:
+        raise InvalidModelError("cannot select masters from an empty view set")
+    evidence: dict[str, dict[str, object]] = {}
+    report_path = render_root / "conditioning_qa.json"
+    if report_path.is_file():
+        try:
+            document = json.loads(report_path.read_text(encoding="utf-8"))
+            evidence = {
+                str(item["view_id"]): item
+                for item in document.get("views", [])
+                if isinstance(item, dict) and item.get("view_id")
+            }
+        except (OSError, json.JSONDecodeError, KeyError, TypeError):
+            evidence = {}
+
+    def metric(camera: Camera, name: str) -> float:
+        value = evidence.get(camera.view_id, {}).get(name, 0.0)
+        return float(value) if isinstance(value, (int, float)) else 0.0
+
+    # The context view now owns complete-site composition; VIEW-01 is a frontal arrival.
+    site_priority = {ViewRole.CONTEXT: 20.0, ViewRole.OVERALL: 16.0}
+    site = max(
+        cameras,
+        key=lambda camera: (
+            site_priority.get(camera.role, 0.0)
+            + metric(camera, "circulation_coverage") * 120
+            + metric(camera, "context_coverage") * 90
+            + metric(camera, "focus_coverage") * 20,
+            camera.view_id,
+        ),
+    )
+    facade_candidates = tuple(camera for camera in cameras if camera.view_id != site.view_id)
+    facade = (
+        _select_master_view_id(render_root, facade_candidates)
+        if facade_candidates
+        else site.view_id
+    )
+    return site.view_id, facade
 
 
 def _visible_facade_directive(design: DesignDNA, camera: Camera) -> str:
@@ -306,6 +400,27 @@ def _request_id(
     return f"gen-{hashlib.sha256(payload).hexdigest()[:16]}"
 
 
+def _provider_references(
+    render_root: Path,
+    camera: Camera,
+    references: tuple[Path, ...],
+) -> tuple[Path, ...]:
+    """Attach the camera-registered context guide before the paid provider request."""
+
+    view_root = render_root / camera.view_id
+    proxy = view_root / "context_proxy_rgba.png"
+    if not proxy.is_file():
+        return references
+    guide = build_context_composition_guide(
+        view_root / "base_rgb.png",
+        proxy,
+        view_root / "context_composition_guide.png",
+    )
+    # The Gemini balanced path has room for one appearance reference plus the spatial guide.
+    # The Design Master is carried separately as style_anchor and therefore is not lost here.
+    return (*references[:1], guide)
+
+
 class RefineViewSet:
     def execute(
         self,
@@ -322,6 +437,8 @@ class RefineViewSet:
         view_ids: tuple[str, ...] = (),
         approved_master_path: Path | None = None,
         approved_master_view_id: str | None = None,
+        reference_images_by_view: dict[str, tuple[Path, ...]] | None = None,
+        quality_standard_path: Path | None = None,
     ) -> RefinedViewSetArtifacts:
         view_set = ViewSet.model_validate_json(view_set_path.read_text(encoding="utf-8"))
         design = DesignDNA.model_validate_json(design_dna_path.read_text(encoding="utf-8"))
@@ -337,6 +454,11 @@ class RefineViewSet:
         unknown_view_ids = set(view_ids) - known_view_ids
         if unknown_view_ids:
             raise InvalidModelError(f"unknown benchmark view IDs: {sorted(unknown_view_ids)}")
+        unknown_reference_view_ids = set(reference_images_by_view or {}) - known_view_ids
+        if unknown_reference_view_ids:
+            raise InvalidModelError(
+                f"unknown per-view reference IDs: {sorted(unknown_reference_view_ids)}"
+            )
         selected_cameras = tuple(
             camera for camera in view_set.cameras if not view_ids or camera.view_id in view_ids
         )
@@ -356,6 +478,10 @@ class RefineViewSet:
                 media_type=media_type,
                 provider_request_id=None,
             )
+        if quality_standard_path is not None and not quality_standard_path.is_file():
+            raise InvalidModelError(
+                f"approved facade quality standard does not exist: {quality_standard_path}"
+            )
         requests = tuple(
             ViewConditioningInput(
                 view_id=camera.view_id,
@@ -369,7 +495,11 @@ class RefineViewSet:
                     f"{_visible_facade_directive(design, camera)}"
                 ),
                 structure_guide=render_root / camera.view_id / "structure_guide.png",
-                reference_images=reference_images,
+                reference_images=_provider_references(
+                    render_root,
+                    camera,
+                    (reference_images_by_view or {}).get(camera.view_id, reference_images),
+                ),
                 aspect_ratio=camera.aspect_ratio,
                 image_size=("1K" if profile is GenerationProfile.PREVIEW_FAST else "2K"),
             )
@@ -389,7 +519,19 @@ class RefineViewSet:
             ),
             tuple(camera.view_id for camera in selected_cameras),
             (
-                *(hashlib.sha256(path.read_bytes()).hexdigest() for path in reference_images),
+                *(
+                    hashlib.sha256(path.read_bytes()).hexdigest()
+                    for path in dict.fromkeys(
+                        (
+                            *reference_images,
+                            *(
+                                path
+                                for paths in (reference_images_by_view or {}).values()
+                                for path in paths
+                            ),
+                        )
+                    )
+                ),
                 *(
                     (hashlib.sha256(approved_master_path.read_bytes()).hexdigest(),)
                     if approved_master_path is not None
@@ -427,6 +569,7 @@ class RefineViewSet:
                 "provider returned a view set with a mismatched request or view order"
             )
 
+        references_by_view_id = {request.view_id: request.reference_images for request in requests}
         artifacts = tuple(
             RefineView().execute(
                 renderer,
@@ -434,11 +577,17 @@ class RefineViewSet:
                 result.view_id,
                 output_directory,
                 prompt,
-                reference_images,
+                references_by_view_id[result.view_id],
                 project_id=design.project_id,
                 design_revision=design.design_revision,
                 generated_image=result.image,
                 watermark=watermark,
+                effective_provider_model=(
+                    str(getattr(renderer, "provenance", {}).get("master_model"))
+                    if profile is GenerationProfile.TENDER_FINAL
+                    or (len(requests) == 1 and approved_master_path is not None)
+                    else str(getattr(renderer, "provenance", {}).get("model"))
+                ),
             )
             for result in generated.views
         )
@@ -451,11 +600,24 @@ class RefineViewSet:
             **identity_contract,
             "provider": renderer.name,
             "provider_configuration": getattr(renderer, "provenance", {}),
+            "effective_view_model": (
+                getattr(renderer, "provenance", {}).get("master_model")
+                if profile is GenerationProfile.TENDER_FINAL
+                else getattr(renderer, "provenance", {}).get("model")
+            ),
             "master_view_id": master_view_id,
             "master_sha256": hashlib.sha256(master_image.content).hexdigest(),
             "master_provider_request_id": master_image.provider_request_id,
             "approved_master_ref": (
                 str(approved_master_path) if approved_master_path is not None else None
+            ),
+            "facade_quality_standard_ref": (
+                str(quality_standard_path) if quality_standard_path is not None else None
+            ),
+            "facade_quality_standard_sha256": (
+                hashlib.sha256(quality_standard_path.read_bytes()).hexdigest()
+                if quality_standard_path is not None
+                else None
             ),
             "render_intent_ref": str(render_intent_path) if render_intent_path.is_file() else None,
             "render_intent_sha256": render_intent_sha256,
@@ -470,6 +632,28 @@ class RefineViewSet:
             json.dumps(identity_pack, ensure_ascii=False, indent=2).encode() + b"\n",
         )
         manifest_path = output_directory / "viewset_generation_manifest.json"
+        generated_view_manifests: list[dict[str, object]] = []
+        for camera in view_set.cameras:
+            generated_manifest_path = output_directory / camera.view_id / "generation_manifest.json"
+            if not generated_manifest_path.is_file():
+                continue
+            try:
+                document = json.loads(generated_manifest_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if isinstance(document, dict):
+                generated_view_manifests.append(document)
+        reference_roles: list[str] = []
+        for document in generated_view_manifests:
+            input_roles = document.get("input_roles", {})
+            if not isinstance(input_roles, dict):
+                continue
+            reference_roles.extend(
+                str(role)
+                for name, role in input_roles.items()
+                if str(name).startswith("reference_")
+            )
+        reference_roles = sorted(set(reference_roles))
         manifest = {
             "schema_version": "1.0.0",
             "request_id": request_id,
@@ -480,6 +664,11 @@ class RefineViewSet:
             "profile": profile.value,
             "provider": renderer.name,
             "provider_configuration": getattr(renderer, "provenance", {}),
+            "effective_view_model": (
+                getattr(renderer, "provenance", {}).get("master_model")
+                if profile is GenerationProfile.TENDER_FINAL
+                else getattr(renderer, "provenance", {}).get("model")
+            ),
             "prompt_version": PROMPT_VERSION,
             "generation_strategy": (
                 "design-master-sequential"
@@ -494,7 +683,9 @@ class RefineViewSet:
             "conditioning_policy": getattr(renderer, "provenance", {}).get(
                 "input_policy", "provider_defined"
             ),
-            "reference_roles": ["quality_only" for _ in reference_images],
+            # Aggregate persisted per-view evidence. Dual masters intentionally use different
+            # references, so the final call must not erase the Site Master's context role.
+            "reference_roles": reference_roles,
             "design_identity_pack": str(identity_pack_path),
             "master_view_id": master_view_id,
             "generated_view_ids": [
@@ -505,6 +696,14 @@ class RefineViewSet:
             "resumed_from_approved_master": approved_master_path is not None,
             "approved_master_ref": (
                 str(approved_master_path) if approved_master_path is not None else None
+            ),
+            "facade_quality_standard_ref": (
+                str(quality_standard_path) if quality_standard_path is not None else None
+            ),
+            "facade_quality_standard_sha256": (
+                hashlib.sha256(quality_standard_path.read_bytes()).hexdigest()
+                if quality_standard_path is not None
+                else None
             ),
             "master_sha256": hashlib.sha256(master_image.content).hexdigest(),
             "render_intent_ref": str(render_intent_path) if render_intent_path.is_file() else None,

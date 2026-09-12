@@ -16,7 +16,7 @@ from v365_archviz.errors import ConfigurationError, ProviderError
 
 
 class DockerConditioningRenderer:
-    image = "v365-archviz-renderer:foundation"
+    image = "v365-archviz-renderer:layered-v1"
 
     def __init__(self, workspace: Path | None = None) -> None:
         self._workspace = (workspace or Path.cwd()).resolve()
@@ -70,6 +70,7 @@ class DockerConditioningRenderer:
         }[profile]
         manifest = {
             "schema_version": "1.0.0",
+            "view_set_id": view_set.view_set_id,
             "renderer_image": self.image,
             "renderer_image_id": self._image_id(),
             "render_profile": profile.value,
@@ -80,7 +81,18 @@ class DockerConditioningRenderer:
             "asset_library_version": library.library_version,
             "asset_library_sha256": self._sha256(asset_library),
             "view_ids": [camera.view_id for camera in view_set.cameras],
+            "industrial_context": (
+                design.industrial_context.model_dump(mode="json")
+                if design.industrial_context is not None
+                else None
+            ),
         }
+        if design.industrial_context is not None:
+            context_content = (
+                design.industrial_context.model_dump_json(indent=2).encode("utf-8") + b"\n"
+            )
+            atomic_write(output_directory / "industrial_context_plan.json", context_content)
+            manifest["industrial_context_plan_sha256"] = hashlib.sha256(context_content).hexdigest()
         atomic_write(
             output_directory / "render_manifest.json",
             json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8") + b"\n",

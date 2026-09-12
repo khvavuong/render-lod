@@ -272,16 +272,22 @@ def test_review_approval_resumes_board_worker(tmp_path, monkeypatch) -> None:  #
         initial_state=WorkflowState.VALIDATING,
     ).transition(WorkflowState.HUMAN_REVIEW)
     repository.create_or_get(job)
+    qa_path = tmp_path / "generated" / "model" / "design" / "technical_qa.json"
+    qa_path.parent.mkdir(parents=True)
+    qa_path.write_text('{"passed": true}', encoding="utf-8")
 
     response = client.post("/v1/view-sets/view-set-review/approve")
 
     assert response.status_code == 202
+    final_review = tmp_path / "generated" / "model" / "design" / "final_viewset_review.json"
+    assert json.loads(final_review.read_text(encoding="utf-8"))["approved"] is True
     assert response.json()["state"] == "composing_board"
     assert dispatched == ["job-review"]
 
 
 def test_design_master_approval_resumes_remaining_view_generation(
-    tmp_path, monkeypatch  # type: ignore[no-untyped-def]
+    tmp_path,
+    monkeypatch,  # type: ignore[no-untyped-def]
 ) -> None:
     monkeypatch.setenv("V365_ARTIFACT_DIR", str(tmp_path))
     monkeypatch.setenv("V365_ENABLE_LOCAL_WORKER", "1")
@@ -327,9 +333,7 @@ def test_design_master_approval_resumes_remaining_view_generation(
     assert dispatched == ["job-master-review"]
 
 
-def test_failed_job_retries_from_persisted_generated_checkpoint(
-    tmp_path, monkeypatch
-) -> None:  # type: ignore[no-untyped-def]
+def test_failed_job_retries_from_persisted_generated_checkpoint(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setenv("V365_ARTIFACT_DIR", str(tmp_path))
     monkeypatch.setenv("V365_ENABLE_LOCAL_WORKER", "1")
     dispatched: list[str] = []
@@ -403,7 +407,8 @@ def test_design_revision_compiles_safe_user_intent(
     assert design["design_preferences"]["style_preset"] == "minimal_industrial"
     assert design["design_preferences"]["decor_level"] == "subtle"
     assert "độ nhám" in design["design_preferences"]["creative_prompt"]
-    assert design["site_design"]["surrounding_context_mode"] == "authored_only"
+    assert design["site_design"]["surrounding_context_mode"] == "conceptual_industrial_park"
+    assert design["industrial_context"]["mode"] == "conceptual_industrial_park"
 
 
 def test_api_rejects_revision_path_traversal(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]

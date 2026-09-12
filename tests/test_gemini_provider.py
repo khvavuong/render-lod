@@ -155,8 +155,8 @@ def test_photoreal_balanced_uses_only_clean_authority_inputs(tmp_path: Path) -> 
             "aspect_ratio": "16:9",
             "image_size": "1K",
         }
-        assert "generation_config" not in body
-        assert len(body["input"]) == 5
+        assert body["generation_config"] == {"thinking_level": "high"}
+        assert len(body["input"]) == 9
         labels = [block["text"] for block in body["input"] if block["type"] == "text"]
         prompt = labels[0]
         assert "AUTHORITY" in prompt
@@ -165,6 +165,7 @@ def test_photoreal_balanced_uses_only_clean_authority_inputs(tmp_path: Path) -> 
         assert "VIEW PURPOSE — TEST" in prompt
         assert any("BASE RGB" in label for label in labels)
         assert any("REALISM REFERENCE" in label for label in labels)
+        assert any("MONOCHROME STRUCTURE AUTHORITY" in label for label in labels)
         assert not any("DEPTH" in label for label in labels)
         assert not any("INSTANCE ID" in label for label in labels)
         assert not any("SEMANTIC ID" in label for label in labels)
@@ -187,10 +188,8 @@ def test_photoreal_balanced_uses_only_clean_authority_inputs(tmp_path: Path) -> 
         instance_id=image,
         semantic=image,
         edges=image,
-        prompt=(
-            "COLOR ROLE CONTRACT — KEEP THE APPROVED PALETTE\n\n"
-            "VIEW PURPOSE — TEST"
-        ),
+        structure_guide=image,
+        prompt=("COLOR ROLE CONTRACT — KEEP THE APPROVED PALETTE\n\nVIEW PURPOSE — TEST"),
         reference_images=(reference, image),
     )
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
@@ -202,7 +201,9 @@ def test_photoreal_balanced_uses_only_clean_authority_inputs(tmp_path: Path) -> 
         result = renderer.generate(request_input)
 
     assert renderer.name == "gemini-photoreal_balanced"
-    assert renderer.provenance["input_policy"] == ("base_rgb+design_master+one_quality_reference")
+    assert renderer.provenance["input_policy"] == (
+        "base_rgb+structure_authority+design_master+two_role_references"
+    )
     assert result.provider_request_id == "interaction-balanced"
 
 
@@ -324,6 +325,56 @@ def test_viewset_can_route_only_the_master_to_a_quality_model(tmp_path: Path) ->
     assert models == ["gemini-3-pro-image", "gemini-3.1-flash-image"]
 
 
+def test_tender_final_routes_every_view_to_the_quality_model(tmp_path: Path) -> None:
+    image = tmp_path / "pass.png"
+    Image.new("RGB", (2, 2), "white").save(image)
+    models: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = __import__("json").loads(request.content)
+        models.append(body["model"])
+        return httpx.Response(
+            200,
+            json={
+                "id": f"interaction-{len(models)}",
+                "output": {
+                    "mime_type": "image/png",
+                    "data": base64.b64encode(f"output-{len(models)}".encode()).decode(),
+                },
+            },
+        )
+
+    def view(view_id: str) -> ViewConditioningInput:
+        return ViewConditioningInput(
+            view_id=view_id,
+            base_rgb=image,
+            depth=image,
+            instance_id=image,
+            semantic=image,
+            edges=image,
+            prompt="VIEW PURPOSE — TEST",
+        )
+
+    generation_request = ViewSetGenerationInput(
+        request_id="generation-final",
+        project_id="project-1",
+        model_revision="model-1",
+        design_revision="design-1",
+        view_set_id="views-1",
+        profile="tender_final",
+        views=(view("view-01"), view("view-02"), view("view-03")),
+    )
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        renderer = GeminiImageRenderer(
+            replace(_settings(), gemini_master_image_model="gemini-3-pro-image"),
+            client=client,
+            conditioning_mode=GeminiConditioningMode.PHOTOREAL_BALANCED,
+        )
+        renderer.generate_view_set(generation_request)
+
+    assert models == ["gemini-3-pro-image"] * 3
+
+
 def test_single_design_master_uses_the_quality_model(tmp_path: Path) -> None:
     image = tmp_path / "pass.png"
     Image.new("RGB", (2, 2), "white").save(image)
@@ -361,6 +412,55 @@ def test_single_design_master_uses_the_quality_model(tmp_path: Path) -> None:
         profile="marketing_hero",
         views=(master,),
         master_view_id="view-04",
+    )
+    settings = replace(_settings(), gemini_master_image_model="gemini-3-pro-image")
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        GeminiImageRenderer(settings, client=client).generate_view_set(generation_request)
+
+    assert models == ["gemini-3-pro-image"]
+
+
+def test_preview_facade_master_with_site_anchor_still_uses_quality_model(
+    tmp_path: Path,
+) -> None:
+    image = tmp_path / "pass.png"
+    Image.new("RGB", (2, 2), "white").save(image)
+    models: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = __import__("json").loads(request.content)
+        models.append(body["model"])
+        return httpx.Response(
+            200,
+            json={
+                "id": "interaction-master",
+                "output": {
+                    "mime_type": "image/png",
+                    "data": base64.b64encode(b"master-output").decode(),
+                },
+            },
+        )
+
+    master = ViewConditioningInput(
+        view_id="view-03",
+        base_rgb=image,
+        depth=image,
+        instance_id=image,
+        semantic=image,
+        edges=image,
+        prompt="VIEW PURPOSE — FACADE MASTER",
+    )
+    generation_request = ViewSetGenerationInput(
+        request_id="generation-preview-master",
+        project_id="project-1",
+        model_revision="model-1",
+        design_revision="design-1",
+        view_set_id="views-1",
+        profile="preview_fast",
+        views=(master,),
+        master_view_id="view-02",
+        design_master=GeneratedImage(b"site-master", "image/png", None),
     )
     settings = replace(_settings(), gemini_master_image_model="gemini-3-pro-image")
 

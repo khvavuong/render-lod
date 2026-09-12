@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
+from pathlib import Path
 
 from v365_archviz.domain.jobs import GenerationJob
 from v365_archviz.domain.workflow import GenerationProfile, RenderProfile, ViewSet, WorkflowState
@@ -24,6 +25,7 @@ def generation_idempotency_key(
     profile: GenerationProfile,
     render_profile: RenderProfile,
     image_provider: str = "gemini",
+    reference_hashes: tuple[str, ...] = (),
 ) -> str:
     payload = "\n".join(
         (
@@ -34,6 +36,7 @@ def generation_idempotency_key(
             profile.value,
             render_profile.value,
             image_provider,
+            *reference_hashes,
         )
     ).encode()
     return hashlib.sha256(payload).hexdigest()
@@ -51,6 +54,8 @@ class CreateGenerationJob:
         profile: GenerationProfile,
         render_profile: RenderProfile = RenderProfile.STANDARD_EEVEE,
         image_provider: str = "gemini",
+        reference_image_refs: tuple[str, ...] = (),
+        reference_roles: tuple[str, ...] = (),
     ) -> CreatedGenerationJob:
         key = generation_idempotency_key(
             project_id,
@@ -60,6 +65,7 @@ class CreateGenerationJob:
             profile,
             render_profile,
             image_provider,
+            tuple(Path(value).parent.name for value in reference_image_refs),
         )
         candidate = GenerationJob.create(
             job_id=f"job-{key[:16]}",
@@ -71,6 +77,8 @@ class CreateGenerationJob:
             profile=profile,
             render_profile=render_profile,
             image_provider=image_provider,
+            reference_image_refs=reference_image_refs,
+            reference_roles=reference_roles,
             initial_state=WorkflowState.PLANNING_CAMERAS,
         )
         job, created = repository.create_or_get(candidate)

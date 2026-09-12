@@ -21,6 +21,16 @@ def test_loading_dock_must_be_on_surface_interval() -> None:
         LoadingDock(dock_id="dock-01", u=1.1, width_m=4.2)
 
 
+def test_loading_dock_defaults_to_buildable_industrial_door_kit() -> None:
+    dock = LoadingDock(dock_id="dock-01", u=0.5, width_m=4.8)
+
+    assert dock.door_type == "sectional_overhead"
+    assert dock.clear_height_m == 4.5
+    assert dock.threshold_type == "grade_level"
+    assert dock.canopy_projection_m == 1.2
+    assert dock.include_safety_bollards is True
+
+
 def test_facade_articulation_rejects_impossible_glazing_ratio() -> None:
     with pytest.raises(ValidationError):
         FacadeArticulation(office_glazing_ratio=1.1)

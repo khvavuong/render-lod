@@ -212,14 +212,20 @@ class CompileUserRenderIntent:
             if capabilities is not None
             else DECOR_ARTICULATION[normalized.decor_level.value]
         )
-        dock_count = (
-            0
+        logistics_supported = (
+            any(item.key == "logistics" and item.supported for item in capabilities.components)
             if capabilities is not None
-            else (
-                0
-                if normalized.loading_dock_policy is LoadingDockPolicy.PRESERVE_EXISTING
+            else True
+        )
+        dock_count = (
+            (
+                min(normalized.loading_dock_count, 4)
+                if normalized.loading_dock_policy is LoadingDockPolicy.SUGGEST_IF_MISSING
                 else normalized.loading_dock_count
             )
+            if logistics_supported
+            and normalized.loading_dock_policy is not LoadingDockPolicy.PRESERVE_EXISTING
+            else 0
         )
         if normalized.loading_dock_policy is LoadingDockPolicy.SUGGEST_IF_MISSING and dock_count:
             warnings += (
@@ -274,7 +280,9 @@ class CompileUserRenderIntent:
             presentation=PresentationStrategy(
                 landscape_character=LANDSCAPE_LANGUAGE[normalized.landscape_preset],
                 paving_character=(
-                    "credible light-grey industrial concrete with drainage, joints and subtle wear"
+                    "dark asphalt on every external/perimeter road; credible light-grey industrial "
+                    "concrete with drainage, joints and subtle wear only on internal yards and "
+                    "loading aprons"
                 ),
                 entourage_density=(
                     {"clean": "low", "active": "medium", "logistics": "medium"}[
@@ -289,9 +297,11 @@ class CompileUserRenderIntent:
                 preserve_landscape_boundaries=True,
                 context_render_mode="translucent_massing",
                 context_opacity=context_opacity,
-                surrounding_context_mode="authored_only",
-                surrounding_context_count=0,
-                surrounding_landscape_buffer=False,
+                surrounding_context_mode=(
+                    "conceptual_industrial_park" if capabilities is not None else "authored_only"
+                ),
+                surrounding_context_count=(6 if capabilities is not None else 0),
+                surrounding_landscape_buffer=capabilities is not None,
             ),
             design_preferences=DesignPreferences(
                 style_preset=normalized.style_preset,
@@ -324,8 +334,8 @@ class CompileUserRenderIntent:
             roof_ridge_orientation="long_axis",
             roof_grouping_mode="continuous_rows",
             roof_group_gap_tolerance_m=10.0,
-            solar_panels=False,
-            grammar_version=f"industrial-grammar-v6-intent-{DESIGN_OPTIONS.catalog_version}",
+            solar_panels=normalized.design_package is DesignPackage.TROPICAL_INDUSTRIAL,
+            grammar_version=f"industrial-grammar-v7-intent-{DESIGN_OPTIONS.catalog_version}",
             asset_library_version="baseline-assets-v2",
         )
         return CompiledUserIntent(
@@ -382,6 +392,16 @@ class CompileUserRenderIntent:
         updates: dict[str, float | int] = {
             "accent_bay_interval": max(8, round(55 / intent.accent_coverage_percent)),
         }
+        if intent.design_package is DesignPackage.TROPICAL_INDUSTRIAL:
+            # A sparse, buildable planted trellis system gives the sustainable package a real
+            # architectural identity. It is intentionally separate from the user accent color.
+            updates.update(
+                {
+                    "biophilic_bay_interval": 16,
+                    "biophilic_bay_width_m": 1.6,
+                    "biophilic_screen_depth_m": 0.55,
+                }
+            )
         if intent.envelope_kit.value == "panel_concrete_plinth":
             updates["plinth_height_m"] = 1.15
         office_updates = {

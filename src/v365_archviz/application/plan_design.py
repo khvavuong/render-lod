@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+from v365_archviz.application.plan_industrial_context import PlanIndustrialContext
 from v365_archviz.artifacts import atomic_write
 from v365_archviz.domain.design import (
     BuildingDesign,
@@ -33,11 +34,20 @@ def _element_surfaces(scene: CanonicalScene, element: SceneElement) -> tuple[Sce
 
 
 def _loading_docks(surface: SceneSurface, count: int) -> tuple[LoadingDock, ...]:
+    # These are buildable industrial logistics openings rather than generic facade doors.
+    # Their positions remain model/yard-derived, while the shared kit fixes their proportions
+    # and detailing across every camera and provider request.
+    clear_width = min(4.8, max(3.6, surface.width_m / (count + 2)))
     return tuple(
         LoadingDock(
             dock_id=f"{surface.surface_id}:dock-{index + 1:02d}",
             u=(index + 1) / (count + 1),
-            width_m=min(4.2, surface.width_m / (count + 2)),
+            width_m=clear_width,
+            clear_height_m=min(5.0, max(4.2, clear_width * 1.05)),
+            door_type="sectional_overhead",
+            threshold_type="grade_level",
+            canopy_projection_m=1.35,
+            include_safety_bollards=True,
         )
         for index in range(count)
     )
@@ -173,6 +183,11 @@ class PlanDesign:
         offices = [
             item for item in scene.elements if item.semantic_role is SemanticRole.OFFICE_BLOCK
         ]
+        logistics_zones = [
+            item
+            for item in scene.elements
+            if item.semantic_role in {SemanticRole.LOADING_ZONE, SemanticRole.SERVICE_YARD}
+        ]
         for element in scene.elements:
             surfaces = _element_surfaces(scene, element)
             if not surfaces and element.semantic_role is not SemanticRole.UTILITY_BLOCK:
@@ -206,7 +221,28 @@ class PlanDesign:
                 if peers
                 else None
             )
-            front_target = _element_center(nearest_peer) if nearest_peer else campus_center
+            nearest_logistics = (
+                min(
+                    logistics_zones,
+                    key=lambda zone: sum(
+                        (left - right) ** 2
+                        for left, right in zip(
+                            _element_center(element), _element_center(zone), strict=True
+                        )
+                    ),
+                )
+                if element.semantic_role is SemanticRole.MAIN_SHED
+                and brief.loading_docks_per_main_facade
+                and logistics_zones
+                else None
+            )
+            front_target = (
+                _element_center(nearest_logistics)
+                if nearest_logistics is not None
+                else _element_center(nearest_peer)
+                if nearest_peer
+                else campus_center
+            )
             front_surface = _front_surface(
                 surfaces,
                 front_target,
@@ -311,6 +347,9 @@ class PlanDesign:
             material_palette=brief.material_palette,
             presentation=brief.presentation,
             site_design=brief.site_design,
+            industrial_context=PlanIndustrialContext().execute(
+                scene, design_revision, brief.site_design
+            ),
             design_preferences=brief.design_preferences,
             buildings=tuple(buildings),
             roof_assemblies=roof_assemblies,

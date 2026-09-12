@@ -4,7 +4,11 @@ from pathlib import Path
 
 from PIL import Image
 
-from v365_archviz.application.refine_viewset import RefineViewSet, _select_master_view_id
+from v365_archviz.application.refine_viewset import (
+    RefineViewSet,
+    _select_master_view_id,
+    select_master_view_ids,
+)
 from v365_archviz.domain.design import DesignDNA, DesignLanguage, EnvironmentDesign
 from v365_archviz.domain.workflow import Camera, ViewRole, ViewSet
 from v365_archviz.providers.contracts import (
@@ -81,6 +85,7 @@ def test_selects_a_design_readable_master_instead_of_a_distant_overall(tmp_path:
     )
 
     assert _select_master_view_id(tmp_path, cameras) == "view-02"
+    assert select_master_view_ids(tmp_path, cameras) == ("view-01", "view-02")
 
 
 def test_refines_an_ordered_view_set_as_one_unit(tmp_path: Path) -> None:
@@ -135,6 +140,9 @@ def test_refines_an_ordered_view_set_as_one_unit(tmp_path: Path) -> None:
         target.mkdir(parents=True)
         for name in ("base_rgb", "depth", "instance_id", "semantic", "edges"):
             Image.new("RGB", (16, 9), "white").save(target / f"{name}.png")
+    Image.new("RGBA", (16, 9), (180, 180, 180, 64)).save(
+        render_root / "view-01" / "context_proxy_rgba.png"
+    )
 
     renderer = FakeViewSetRenderer()
     result = RefineViewSet().execute(
@@ -185,3 +193,6 @@ def test_refines_an_ordered_view_set_as_one_unit(tmp_path: Path) -> None:
     assert "context policy=" in renderer.last_request.identity_prompt
     assert "PRIMARY VISIBLE FACADE" in renderer.last_request.views[0].prompt
     assert "approved generated loading docks=0" in renderer.last_request.views[0].prompt
+    first_references = renderer.last_request.views[0].reference_images
+    assert first_references[-1].name == "context_composition_guide.png"
+    assert first_references[-1].is_file()

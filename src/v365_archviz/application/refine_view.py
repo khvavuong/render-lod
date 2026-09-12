@@ -21,7 +21,7 @@ from v365_archviz.providers.contracts import (
     ViewConditioningInput,
 )
 
-PROMPT_VERSION = "photoreal-balanced-v3"
+PROMPT_VERSION = "layered-authority-v6-paving-semantics"
 DEFAULT_PROMPT = """Create a photorealistic professional architectural visualization of this
 Vietnamese industrial project. Treat the base render and auxiliary passes as immutable spatial
 geometry: preserve the exact camera, site boundary, authored road and sidewalk centerlines and
@@ -33,8 +33,10 @@ never cross or alter the authored project/site geometry.
 
 Make the focus factory refined but buildable and restrained: realistic symmetric low-slope
 profiled-metal industrial roofs fitted inside the approved LOD100 envelope, gutters and downpipes;
-disciplined cladding modules; a durable plinth; limited accent bays; shaded office glazing and a
-practical entrance canopy. Preserve each approved continuous roof assembly as one uninterrupted
+disciplined cladding modules; a durable plinth; limited accent bays; an approved high-level
+clerestory ribbon; shaded office glazing and a practical entrance canopy. Keep the same facade
+datum lines, accent spacing and opening family in every camera. Preserve each approved continuous
+roof assembly as one uninterrupted
 longitudinal roof; never subdivide it into repeated transverse roofs at source-element seams.
 Avoid flat-box roof imagery, luxury-resort styling, parametric fantasy forms, excessive glass,
 arbitrary curves and decorative
@@ -45,7 +47,11 @@ color suggestion. Apply roof to the continuous profiled-metal roof; primary to t
 focus-factory wall cladding; secondary to plinths, structural grids, eaves, flashings, dock frames
 and doors; boundary to fence posts, infill and gate metalwork; glass only to authored glazing;
 accent only to a small entrance/signage datum occupying
-no more than roughly 8 percent of the focus facade; paving only to authored roads and yards. Keep
+no more than roughly 8 percent of the focus facade. PAVING SEMANTIC LOCK: every external approach,
+public/perimeter road outside the fence is dark charcoal asphalt with realistic aggregate, road
+markings, kerbs and drainage; it must never become white or light-grey concrete. Apply the approved
+paving color only to internal service yards, loading aprons and concrete drives inside the site.
+Keep
 these five role assignments, hue families, finish roughness and relative prominence identical in
 all six views despite distance, haze and exposure. Never collapse a user-selected chromatic primary
 or secondary back to generic white/black. Do not introduce red, orange, purple, cyan or electric
@@ -66,8 +72,9 @@ be sparse, correctly scaled and operationally plausible for an industrial site.
 PHOTOREALISM RULE: the result must read as a professional full-frame architectural photograph,
 not a clean 3D illustration. Use physically plausible global illumination, contact shadows,
 light-neutral metal micro-roughness, glazing reflections, atmospheric perspective and restrained
-sensor-like detail. Asphalt and concrete require fine aggregate variation, realistic joints,
-drainage edges, curbs and very subtle operational wear without changing any authored road shape.
+sensor-like detail. Dark asphalt roads and light concrete yards require visibly distinct aggregate
+variation; only concrete has panel joints. Preserve drainage edges, curbs and very subtle
+operational wear without changing any authored road shape.
 Planting must have non-repeating species/height variation, believable density, ground contact and
 shadows; vehicles and people must remain correctly scaled. Keep the exact same sun direction,
 clear-morning weather, white balance, exposure family, material response and color grade across
@@ -88,9 +95,16 @@ posts and rails instead of replacing it with planting. Use one buildable boundar
 a low durable concrete plinth where supported by geometry, regular galvanized or secondary-color
 steel posts, and restrained vertical-bar or welded-mesh infill. Read the gate as a controlled
 vehicular entrance connected to the authored internal and external roads, with its exact opening
-preserved. Use the same gate leaf count, post spacing, height, secondary-color metal finish and
+preserved and visually unobstructed. Its clear width must continue to read as truck-capable rather
+than a pedestrian or residential gate. Use the same gate leaf count, post spacing, height,
+secondary-color metal finish and
 fence connection in every view. The gate must be structurally anchored to fence posts; never render
 a floating accent rectangle, ceremonial portal, disconnected frame or arbitrary duplicate gate.
+INDUSTRIAL-DOOR RULE: approved loading openings are large logistics doors, never domestic doors or
+retail shopfronts. Preserve their exact count and positions and render one consistent sectional
+overhead/roller-shutter family with robust dark jambs and head, shallow metal weather canopy,
+impact bollards, credible threshold and a separate human-scale personnel egress door. Keep these
+components identical across every view in which the same bay is visible.
 UTILITY-BUILDING RULE: every authored utility/auxiliary mass is an opaque, secondary support
 building on the subject site. Preserve its exact footprint, height, service door and ventilation
 details. Give it restrained durable industrial finishes; never turn it into another main shed,
@@ -131,6 +145,40 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _reference_role(path: Path) -> str:
+    if path.name == "context_composition_guide.png":
+        return "context_composition_guide"
+    metadata_path = path.parent / "metadata.json"
+    try:
+        document = json.loads(metadata_path.read_text(encoding="utf-8"))
+        role = document.get("role")
+    except (OSError, json.JSONDecodeError):
+        role = None
+    return str(role) if role else "quality_only"
+
+
+def build_context_composition_guide(
+    base_path: Path, overlay_path: Path, target_path: Path
+) -> Path:
+    """Combine camera-aligned inputs for provider guidance, never for final pixel output."""
+
+    with Image.open(base_path) as base_source:
+        base = base_source.convert("RGBA")
+    with Image.open(overlay_path) as overlay_source:
+        overlay = overlay_source.convert("RGBA")
+    if overlay.size != base.size:
+        overlay = overlay.resize(base.size, Image.Resampling.LANCZOS)
+    # The deliverable opacity is intentionally subtle (~0.22), which is too faint to function as
+    # reliable visual conditioning. Strengthen only the guide; the prompt still owns final opacity.
+    guide_alpha = overlay.getchannel("A").point(lambda value: min(220, round(value * 3.25)))
+    overlay.putalpha(guide_alpha)
+    result = Image.alpha_composite(base, overlay)
+    buffer = io.BytesIO()
+    result.convert("RGB").save(buffer, format="PNG", optimize=True)
+    atomic_write(target_path, buffer.getvalue())
+    return target_path
+
+
 class RefineView:
     def execute(
         self,
@@ -144,6 +192,7 @@ class RefineView:
         design_revision: str | None = None,
         generated_image: GeneratedImage | None = None,
         watermark: BrandWatermark | None = None,
+        effective_provider_model: str | None = None,
     ) -> RefinedViewArtifacts:
         view_directory = render_root / view_id
         inputs = {
@@ -156,6 +205,16 @@ class RefineView:
         structure_guide = view_directory / "structure_guide.png"
         if structure_guide.is_file():
             inputs["structure_guide"] = structure_guide
+        context_proxy_path = view_directory / "context_proxy_rgba.png"
+        if context_proxy_path.is_file():
+            composition_guide = build_context_composition_guide(
+                inputs["base_rgb"],
+                context_proxy_path,
+                view_directory / "context_composition_guide.png",
+            )
+            # External imagery supplies photographic vocabulary; this registered guide supplies
+            # only proxy placement. Gemini's balanced mode consumes at most two references.
+            reference_images = (*reference_images[:1], composition_guide)
         missing = [name for name, path in inputs.items() if not path.is_file()]
         missing.extend(f"reference:{path.name}" for path in reference_images if not path.is_file())
         if missing:
@@ -185,12 +244,24 @@ class RefineView:
         target = output_directory / view_id
         image_path = target / f"refined{extension}"
         provider_source_path = target / f"provider_source{extension}"
+        provider_raw_path = target / f"provider_raw{extension}"
         manifest_path = target / "generation_manifest.json"
+        # Generated pixels can shift relative to the technical semantic pass. Keep road
+        # material control in the pre-generation prompt/identity contract; recolouring the
+        # result with the old pixel mask can corrupt sky and facade pixels.
+        final_content = generated.content
+        if context_proxy_path.is_file():
+            atomic_write(provider_raw_path, generated.content)
+        # This is the canonical input for any later branding pass.  Always refresh it,
+        # including unbranded generation jobs, so a one-view retry cannot be overwritten by
+        # an older preserved source when the complete deliverable set is branded again.
+        unbranded_path = target / f"unbranded_refined{extension}"
+        atomic_write(unbranded_path, final_content)
         if watermark is None:
-            atomic_write(image_path, generated.content)
+            atomic_write(image_path, final_content)
         else:
-            atomic_write(provider_source_path, generated.content)
-            watermark.apply_image(provider_source_path, image_path)
+            atomic_write(provider_source_path, final_content)
+            watermark.apply_image(unbranded_path, image_path)
         manifest = {
             "schema_version": "1.0.0",
             "view_id": view_id,
@@ -201,6 +272,7 @@ class RefineView:
                 getattr(renderer, "capabilities", ImageProviderCapabilities())
             ),
             "provider_configuration": getattr(renderer, "provenance", {}),
+            "effective_provider_model": effective_provider_model,
             "provider_request_id": generated.provider_request_id,
             "prompt_version": PROMPT_VERSION,
             "inputs": {
@@ -209,6 +281,11 @@ class RefineView:
                     f"reference_{index:02d}": _sha256(path)
                     for index, path in enumerate(reference_images, start=1)
                 },
+                **(
+                    {"context_proxy_rgba": _sha256(context_proxy_path)}
+                    if context_proxy_path.is_file()
+                    else {}
+                ),
             },
             "input_roles": {
                 "base_rgb": "geometry_authority",
@@ -222,15 +299,23 @@ class RefineView:
                     else {}
                 ),
                 **{
-                    f"reference_{index:02d}": "quality_only"
-                    for index, _ in enumerate(reference_images, start=1)
+                    f"reference_{index:02d}": _reference_role(path)
+                    for index, path in enumerate(reference_images, start=1)
                 },
+                **(
+                    {"context_proxy_rgba": "camera_registered_conditioning_evidence"}
+                    if context_proxy_path.is_file()
+                    else {}
+                ),
             },
             "output": {
                 "media_type": generated.media_type,
-                "provider_source_sha256": hashlib.sha256(generated.content).hexdigest(),
+                "provider_raw_sha256": hashlib.sha256(generated.content).hexdigest(),
+                "provider_source_sha256": hashlib.sha256(final_content).hexdigest(),
                 "sha256": _sha256(image_path),
                 "brand_watermark": watermark is not None,
+                "context_proxy_composited": False,
+                "external_road_material_control": "pre_generation_semantic_prompt",
             },
         }
         atomic_write(

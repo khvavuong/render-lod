@@ -41,6 +41,8 @@ interface GenerationWorkspaceProps {
   onGenerateVideo: () => void;
   onRefresh: () => void;
   onApprove: () => void;
+  onRejectMaster: () => void;
+  onRejectViewSet: () => void;
   onRetry: () => void;
 }
 
@@ -57,7 +59,7 @@ const STATE_META: Record<WorkflowState, { label: string; percent: number }> = {
   planning_cameras: { label: "Đang lập góc nhìn", percent: 27 },
   rendering_passes: { label: "Đang dựng geometry passes", percent: 28 },
   generating_viewset: { label: "Đang tạo ảnh", percent: 58 },
-  design_master_review: { label: "Chờ duyệt Design Master", percent: 48 },
+  design_master_review: { label: "Chờ duyệt Site & Facade Master", percent: 48 },
   validating: { label: "Đang kiểm tra chất lượng", percent: 76 },
   human_review: { label: "Chờ duyệt thiết kế", percent: 84 },
   repairing: { label: "Đang hiệu chỉnh", percent: 67 },
@@ -173,6 +175,8 @@ export function GenerationWorkspace({
   onGenerateVideo,
   onRefresh,
   onApprove,
+  onRejectMaster,
+  onRejectViewSet,
   onRetry,
 }: GenerationWorkspaceProps) {
   const [filter, setFilter] = useState<"all" | "image" | "video">("all");
@@ -260,12 +264,17 @@ export function GenerationWorkspace({
           className="review-action-panel"
           type="warning"
           showIcon
-          message="Bộ 6 ảnh đã được tạo và đang chờ duyệt"
-          description="Một hoặc nhiều kiểm tra tự động cần con người xác nhận. Bạn vẫn có thể xem đủ ảnh bên dưới; chỉ duyệt khi hình học và thiết kế đã đạt yêu cầu."
+          message="Duyệt trực quan bộ 6 ảnh trước khi hoàn tất"
+          description="Technical QA đã chạy xong. Hãy kiểm tra tính đồng nhất của kiến trúc, vật liệu, cổng, hàng rào và bối cảnh giữa cả 6 góc. Chỉ bộ ảnh được duyệt ở bước này mới có thể trở thành baseline chất lượng."
           action={
-            <Button type="primary" loading={submittingReview} onClick={onApprove}>
-              Duyệt và hoàn thiện board
-            </Button>
+            <Space>
+              <Button loading={submittingReview} onClick={onRejectViewSet}>
+                Chưa đạt · Tạo lại
+              </Button>
+              <Button type="primary" loading={submittingReview} onClick={onApprove}>
+                Duyệt và hoàn tất bộ ảnh
+              </Button>
+            </Space>
           }
         />
       )}
@@ -275,12 +284,17 @@ export function GenerationWorkspace({
           className="review-action-panel"
           type="info"
           showIcon
-          message="Duyệt Design Master trước khi sinh toàn bộ view set"
-          description="Hệ thống mới chỉ tạo một ảnh đại diện. Hãy kiểm tra ngôn ngữ facade, mái, màu vật liệu, cổng và hàng rào; chỉ khi duyệt mới phát sinh chi phí cho 5 ảnh còn lại."
+          message="Duyệt Site Master và Facade Master trước khi sinh toàn bộ view set"
+          description="Hệ thống mới chỉ tạo hai ảnh kiểm soát: Site Master cho tổng thể, cổng, hàng rào và bối cảnh; Facade Master cho vật liệu và thiết kế mặt đứng. Chỉ khi duyệt cả hai mới phát sinh chi phí cho 4 ảnh còn lại."
           action={
-            <Button type="primary" loading={submittingReview} onClick={onApprove}>
-              Duyệt và tạo 5 góc còn lại
-            </Button>
+            <Space>
+              <Button loading={submittingReview} onClick={onRejectMaster}>
+                Tạo lại Facade Master
+              </Button>
+              <Button type="primary" loading={submittingReview} onClick={onApprove}>
+                Duyệt và tạo 4 góc còn lại
+              </Button>
+            </Space>
           }
         />
       )}
@@ -372,7 +386,7 @@ export function GenerationWorkspace({
               },
               {
                 color: meta.percent >= 58 ? "green" : "gray",
-                children: "Duyệt Design Master và tạo bộ 6 ảnh đồng nhất",
+                children: "Duyệt hai master và tạo bộ 6 ảnh đồng nhất",
               },
               {
                 color: meta.percent >= 76 ? "green" : "gray",

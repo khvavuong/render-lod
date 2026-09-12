@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import io
+import json
 import mimetypes
 from enum import Enum
 from pathlib import Path
@@ -59,6 +60,17 @@ def _generated_image_block(image: GeneratedImage) -> dict[str, str]:
         "mime_type": image.media_type,
         "data": base64.b64encode(image.content).decode("ascii"),
     }
+
+
+def _reference_role(path: Path) -> str:
+    if path.name == "context_composition_guide.png":
+        return "context_composition_guide"
+    try:
+        metadata = json.loads((path.parent / "metadata.json").read_text(encoding="utf-8"))
+        role = metadata.get("role")
+    except (OSError, json.JSONDecodeError):
+        role = None
+    return str(role) if role else "quality_only"
 
 
 def _neutral_semantic_block(path: Path) -> dict[str, str]:
@@ -143,11 +155,12 @@ class GeminiImageRenderer:
             ),
             "conditioning_mode": self._conditioning_mode.value,
             "input_policy": (
-                "base_rgb+design_master+one_quality_reference"
+                "base_rgb+structure_authority+design_master+two_role_references"
                 if self._conditioning_mode is GeminiConditioningMode.PHOTOREAL_BALANCED
                 else "legacy_control_pass_conditioning"
             ),
             "store_interactions": self._settings.gemini_store_interactions,
+            "thinking_level": self._settings.gemini_thinking_level,
         }
 
     def close(self) -> None:
@@ -179,8 +192,9 @@ class GeminiImageRenderer:
                 style_anchor=style_anchor,
                 identity_prompt=identity_prompt,
             )
+        selected_model = model or self._settings.gemini_image_model
         payload = {
-            "model": model or self._settings.gemini_image_model,
+            "model": selected_model,
             "input": input_blocks,
             "store": self._settings.gemini_store_interactions,
             "response_format": {
@@ -189,6 +203,8 @@ class GeminiImageRenderer:
                 "image_size": request.image_size,
             },
         }
+        if "3.1-flash" in selected_model:
+            payload["generation_config"] = {"thinking_level": self._settings.gemini_thinking_level}
 
         try:
             response = self._client.post(
@@ -224,43 +240,13 @@ class GeminiImageRenderer:
         refinement_specification = request.prompt.strip()
         design_authority = identity_prompt.strip() or "Use the approved project Design DNA."
         prompt = (
-            "AUTHORITY\n"
-            "The BASE RGB is the sole authority for camera, composition, massing, footprint, "
-            "building count, roof orientation and continuity, roads, gates, fences, authored "
-            "landscape zones, object placement and major material-color regions. Preserve its "
-            "approved palette hue families and their placement while upgrading flat shader "
-            "response, simplified vegetation, lighting and CGI appearance to photographic "
-            "quality.\n\n"
-            "IMMUTABLE GEOMETRY\n"
-            "Preserve those elements exactly. Do not add, delete, duplicate, move, crop or "
-            "redesign primary or auxiliary buildings and site circulation. Preserve the exact "
-            "visible facade elevation, authored openings, accent frames and loading doors; the "
-            "Design Master never authorizes transferring its windows or entrances to this view.\n\n"
-            f"DESIGN IDENTITY\n{design_authority}\n\n"
-            "BOUNDED DESIGN FREEDOM\n"
-            "Within the existing envelopes, add construction-plausible industrial materials, "
-            "facade joints, doors, canopies, drainage, planting texture and sparse correctly "
-            "scaled entourage. Treat authored site and context geometry as a developed Vietnamese "
-            "industrial estate, refining only visible collector roads, curbs, drainage, divided "
-            "plots, low grass and sparse street-tree rows. Keep authored context buildings as "
-            "quiet neutral low-detail factory massing with reduced contrast and atmospheric fade, "
-            "not transparent glass boxes. Never create context buildings or infrastructure in "
-            "unmarked empty pixels. "
-            "Do not invent forest, wilderness, desert, mountains, water, dense urban towers or "
-            "rural scenery unless visible in the Base RGB.\n\n"
-            "PHOTOGRAPHIC DIRECTION\n"
-            "Create a professional real-world architectural photograph with physically plausible "
-            "daylight, contact shadows, material micro-roughness, glazing reflections, atmospheric "
-            "depth, subtle construction tolerances, non-uniform ground tone and restrained "
-            "operational wear. Use natural vegetation variation, sensor-level grain and gentle "
-            "lens falloff. The "
-            "result must look captured at a real built site, not exported from architectural "
-            "software. Avoid a clean BIM/CGI illustration, miniature/isometric appearance, "
-            "futuristic forms, semantic colors, text and invented logos.\n\n"
-            "APPROVED REFINEMENT SPECIFICATION\n"
-            "Apply every applicable rule below. These project rules are not legacy context and "
-            "must not be summarized away:\n"
-            f"{refinement_specification}"
+            "AUTHORITY\nThe current BASE RGB is the sole spatial and camera authority.\n\n"
+            f"{refinement_specification}\n\n"
+            "CROSS-VIEW IDENTITY\n"
+            f"{design_authority}\n"
+            "The current Base RGB always wins for geometry and camera; the identity contract "
+            "controls only shared materials, lighting and finish.\n\n"
+            "PHOTOGRAPHIC DIRECTION\nRender as a physically plausible architectural photograph."
         )
         blocks: list[dict[str, str]] = [
             {"type": "text", "text": prompt},
@@ -270,6 +256,22 @@ class GeminiImageRenderer:
             },
             _image_block(request.base_rgb),
         ]
+        if request.structure_guide is not None and request.structure_guide.is_file():
+            blocks.extend(
+                (
+                    {
+                        "type": "text",
+                        "text": (
+                            "MONOCHROME STRUCTURE AUTHORITY — preserve its project silhouette, "
+                            "roof continuity, facade bay boundaries and exact authored/proposed "
+                            "opening count. It is a constraint image, not a material or style "
+                            "target. Any outlined off-site proxy is reserved for deterministic "
+                            "post-composite; do not turn it into a detailed building:"
+                        ),
+                    },
+                    _image_block(request.structure_guide),
+                )
+            )
         if style_anchor is not None:
             blocks.extend(
                 (
@@ -285,17 +287,42 @@ class GeminiImageRenderer:
                     _generated_image_block(style_anchor),
                 )
             )
-        if request.reference_images:
+        for reference in request.reference_images[:2]:
+            role = _reference_role(reference)
+            if role == "context_composition_guide":
+                blocks.extend(
+                    (
+                        {
+                            "type": "text",
+                            "text": (
+                                "CAMERA-REGISTERED CONTEXT COMPOSITION GUIDE — preserve the "
+                                "focus project from Base RGB, but represent every pale proxy "
+                                "volume at this exact projected location as a simple grounded "
+                                "neutral translucent mass. Keep its count and spacing. Do not "
+                                "turn proxies into detailed, opaque or floating buildings:"
+                            ),
+                        },
+                        _image_block(reference),
+                    )
+                )
+                continue
+            permitted = (
+                "construction detail, material response and human scale"
+                if role == "factory_design_reference"
+                else "industrial-estate roads, planting, atmosphere and photographic depth"
+                if role == "context_realism_reference"
+                else "photographic finish"
+            )
             blocks.extend(
                 (
                     {
                         "type": "text",
                         "text": (
-                            "REALISM REFERENCE — photographic finish only; never copy its "
+                            f"REALISM REFERENCE ({role}) — use only {permitted}; never copy its "
                             "geometry, project, palette, facade motif, camera or site layout:"
                         ),
                     },
-                    _image_block(request.reference_images[0]),
+                    _image_block(reference),
                 )
             )
         return blocks
@@ -404,17 +431,32 @@ class GeminiImageRenderer:
     def generate_view_set(self, request: ViewSetGenerationInput) -> GeneratedViewSet:
         """Generate every multi-view set from one project appearance authority."""
 
+        quality_model = (
+            self._settings.gemini_master_image_model or self._settings.gemini_image_model
+        )
+        # In preview, the site master stays on Flash: it follows the registered composition and
+        # approved context reference more literally. The facade master is derived from that site
+        # anchor on the quality model because its construction detail propagates downstream.
+        master_model = (
+            quality_model
+            if request.profile != "preview_fast"
+            else self._settings.gemini_image_model
+        )
+        final_view_model = (
+            self._settings.gemini_master_image_model if request.profile == "tender_final" else None
+        )
         if len(request.views) < 2:
             views = tuple(
                 GeneratedView(
                     view_id=view.view_id,
                     image=self._generate(
                         view,
+                        style_anchor=request.design_master,
                         identity_prompt=request.identity_prompt,
                         model=(
-                            self._settings.gemini_master_image_model
-                            if view.view_id == request.master_view_id
-                            else None
+                            quality_model
+                            if request.design_master is not None
+                            else master_model
                         ),
                     ),
                 )
@@ -434,7 +476,7 @@ class GeminiImageRenderer:
             anchor = self._generate(
                 anchor_request,
                 identity_prompt=request.identity_prompt,
-                model=self._settings.gemini_master_image_model,
+                model=master_model,
             )
             generated_by_id = {anchor_request.view_id: anchor}
         else:
@@ -448,6 +490,7 @@ class GeminiImageRenderer:
                     view,
                     style_anchor=anchor,
                     identity_prompt=request.identity_prompt,
+                    model=final_view_model,
                 )
         views = tuple(
             GeneratedView(view_id=view.view_id, image=generated_by_id[view.view_id])

@@ -225,7 +225,7 @@ export function DesignPanel(props: DesignPanelProps) {
 
             <Card size="small" title={<SectionTitle icon={<SettingOutlined />} title="Yêu cầu bổ sung" />}>
               <Form.Item name="creativePrompt" className="last-form-item">
-                <Input.TextArea rows={3} maxLength={1000} showCount placeholder="Chỉ mô tả ưu tiên về vật liệu, ánh sáng hoặc cảm giác không gian; không yêu cầu đổi hình học." />
+                <Input.TextArea rows={3} maxLength={1000} showCount placeholder="Mô tả về vật liệu, ánh sáng hoặc cảm giác không gian" />
               </Form.Item>
             </Card>
           </fieldset>

@@ -245,7 +245,9 @@ class GeminiImageRenderer:
             "CROSS-VIEW IDENTITY\n"
             f"{design_authority}\n"
             "The current Base RGB always wins for geometry and camera; the identity contract "
-            "controls only shared materials, lighting and finish.\n\n"
+            "controls shared materials and finish. Keep common daylight unless the current view "
+            "directive explicitly requests the approved VIEW-06 golden-hour photography "
+            "variant.\n\n"
             "PHOTOGRAPHIC DIRECTION\nRender as a physically plausible architectural photograph."
         )
         blocks: list[dict[str, str]] = [
@@ -434,17 +436,10 @@ class GeminiImageRenderer:
         quality_model = (
             self._settings.gemini_master_image_model or self._settings.gemini_image_model
         )
-        # In preview, the site master stays on Flash: it follows the registered composition and
-        # approved context reference more literally. The facade master is derived from that site
-        # anchor on the quality model because its construction detail propagates downstream.
-        master_model = (
-            quality_model
-            if request.profile != "preview_fast"
-            else self._settings.gemini_image_model
-        )
-        final_view_model = (
-            self._settings.gemini_master_image_model if request.profile == "tender_final" else None
-        )
+        # Production image generation is deliberately single-model. Mixing Flash and Pro inside
+        # one view set produced visibly different facade language, material response and context
+        # treatment between cameras. Preview still controls render resolution and review gates;
+        # it must not silently downgrade the image model.
         if len(request.views) < 2:
             views = tuple(
                 GeneratedView(
@@ -453,11 +448,7 @@ class GeminiImageRenderer:
                         view,
                         style_anchor=request.design_master,
                         identity_prompt=request.identity_prompt,
-                        model=(
-                            quality_model
-                            if request.design_master is not None
-                            else master_model
-                        ),
+                        model=quality_model,
                     ),
                 )
                 for view in request.views
@@ -476,7 +467,7 @@ class GeminiImageRenderer:
             anchor = self._generate(
                 anchor_request,
                 identity_prompt=request.identity_prompt,
-                model=master_model,
+                model=quality_model,
             )
             generated_by_id = {anchor_request.view_id: anchor}
         else:
@@ -490,7 +481,7 @@ class GeminiImageRenderer:
                     view,
                     style_anchor=anchor,
                     identity_prompt=request.identity_prompt,
-                    model=final_view_model,
+                    model=quality_model,
                 )
         views = tuple(
             GeneratedView(view_id=view.view_id, image=generated_by_id[view.view_id])

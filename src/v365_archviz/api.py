@@ -360,6 +360,16 @@ def _require_safe_identifier(value: str, label: str) -> None:
         )
 
 
+_VIEW_TITLES = {
+    "view-01": "VIEW-01 · HERO AERIAL",
+    "view-02": "VIEW-02 · MAIN ENTRANCE",
+    "view-03": "VIEW-03 · LOGISTICS / OPERATION",
+    "view-04": "VIEW-04 · REVERSE AERIAL",
+    "view-05": "VIEW-05 · ARCHITECTURAL DETAIL",
+    "view-06": "VIEW-06 · HUMAN-SCALE / GOLDEN HOUR",
+}
+
+
 def _output_files(view_set_id: str) -> dict[str, tuple[Path, OutputKind, str, str | None]]:
     try:
         job = _repository(_settings()).get_by_view_set(view_set_id)
@@ -372,7 +382,8 @@ def _output_files(view_set_id: str) -> dict[str, tuple[Path, OutputKind, str, st
         candidates = tuple(view_dir.glob("refined.*"))
         if len(candidates) == 1 and candidates[0].is_file():
             asset_id = f"image-{view_dir.name}"
-            files[asset_id] = (candidates[0], "image", view_dir.name.upper(), view_dir.name)
+            title = _VIEW_TITLES.get(view_dir.name, view_dir.name.upper())
+            files[asset_id] = (candidates[0], "image", title, view_dir.name)
     board = generated / "viewset_board.jpg"
     if board.is_file():
         files["board"] = (board, "board", "Bộ 6 góc nhìn", None)

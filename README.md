@@ -25,6 +25,22 @@ SHA, project hay visual reference cụ thể:
 - FastAPI control plane, CLI, containers không chạy bằng root, JSON Schema,
   unit tests và CI quality gates.
 
+Standard view-set là một camera contract cố định theo mục đích trình bày, còn tọa độ được tính từ
+scene bounds và semantic evidence của từng model:
+
+| View | Vai trò | Camera mục tiêu |
+| --- | --- | --- |
+| VIEW-01 | Hero Aerial Oblique | Drone 25–40 m, góc 3/4, đọc hai mặt chính và 70–80% site |
+| VIEW-02 | Main Entrance / Arrival | Eye-level 1,6–2 m, 28–35 mm, đi theo trục giao thông qua cổng chính |
+| VIEW-03 | Logistics / Operation | Sân logistics, dock/cửa công nghiệp và khoảng vận hành xe; eye-level hoặc drone thấp |
+| VIEW-04 | Opposite Aerial | Drone ở phía đối diện VIEW-01 để xác nhận mặt hậu, service area và toàn khối |
+| VIEW-05 | Architectural Detail | 35–50 mm tại office entrance; fallback sang cửa/canopy công nghiệp đã authored |
+| VIEW-06 | Human-scale / Golden Hour | Camera thấp, giữ nguyên thiết kế và chỉ đổi photography DNA sang cuối chiều |
+
+Nếu model không có office entrance, loading dock hoặc gate được authored, planner dùng evidence gần
+nhất nhưng không tự bịa thêm khối công trình. `sample_image_4.png` chỉ là chuẩn tham khảo về ngôn ngữ
+bố cục; pipeline không dùng ảnh đó làm pixel reference và không tạo nhãn/footer lên ảnh bàn giao.
+
 Ảnh Blender là geometry-authoritative. Ảnh generative hiện là
 `MARKETING_GENERATIVE`: phải qua QA/human review vì provider vẫn có thể thay đổi hard geometry.
 
@@ -130,9 +146,10 @@ Gemini mặc định chạy `photoreal_balanced`: request beauty chỉ gửi Bas
 một quality reference. Depth, semantic, instance ID và structural edges vẫn được lưu nhưng dùng làm
 QA evidence thay vì đồng thời kéo ảnh cuối về phong cách CAD/CGI. Có thể đặt
 `GEMINI_CONDITIONING_MODE=full` hoặc `minimal` để chạy benchmark hồi quy.
-Có thể đặt `GEMINI_MASTER_IMAGE_MODEL=gemini-3-pro-image` để chỉ dùng model chất lượng cao cho
-Design Master; năm view sau vẫn dùng `GEMINI_IMAGE_MODEL`. Spike hiện tại chưa chứng minh Pro tốt
-hơn Flash cho loại guide LOD100 này, nên biến trên để trống theo mặc định.
+Pipeline dùng `gemini-3-pro-image` cho toàn bộ Design Master và sáu view. Cả
+`GEMINI_IMAGE_MODEL` và `GEMINI_MASTER_IMAGE_MODEL` mặc định trỏ tới Pro; router không hạ các view
+preview xuống Flash để tránh khác biệt facade, vật liệu và bối cảnh giữa các camera. Mọi ảnh đầu ra
+Gemini được yêu cầu ở 2K; `preview_fast` chỉ tiếp tục giảm chi phí render conditioning phía Blender.
 
 `V365_IMAGE_PROVIDER=gemini` tiếp tục dùng `GEMINI_API_KEY` hiện có. Có thể chuyển sang
 `openai-image` bằng `OPENAI_API_KEY`; worker API và CLI dùng chung một provider factory nên không

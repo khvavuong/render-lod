@@ -196,3 +196,10 @@ def test_refines_an_ordered_view_set_as_one_unit(tmp_path: Path) -> None:
     first_references = renderer.last_request.views[0].reference_images
     assert first_references[-1].name == "context_composition_guide.png"
     assert first_references[-1].is_file()
+    first_view_manifest = json.loads(
+        (tmp_path / "generated" / "view-01" / "generation_manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert first_view_manifest["input_roles"]["reference_01"] == "context_composition_guide"
+    assert "reference_02" not in first_view_manifest["input_roles"]

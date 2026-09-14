@@ -28,9 +28,16 @@ scaled vehicles and people only where they do not hide architecture or access.
 
 PHOTOGRAPHIC DIRECTION
 Natural full-frame architectural photography, physically plausible daylight, neutral white
-balance, subtle sensor detail and realistic ground contact. The site must read as an organized
-Vietnamese industrial park with curbs, drainage, verges and low industrial skyline—not forest,
-rural wilderness, a sterile CAD render or luxury architecture.
+balance, restrained highlight roll-off, subtle sensor detail and realistic ground contact. Preserve
+the exact camera height and lens intent, whether it is an aerial overview or a human-scale facade
+view. Corrugated metal must show fine seams, believable fasteners, flashing and shallow surface
+variation rather than smooth plastic planes. Concrete aprons and dark asphalt must have distinct
+aggregate, joints, drainage and restrained operational wear. Use ordinary buildable industrial
+details, correctly scaled loading vehicles and sparse workers; avoid showroom cleanliness and
+decorative excess. Distant terrain and industrial structures need natural atmospheric haze without
+making the focus project soft. The site must read as an organized Vietnamese industrial park with
+curbs, drainage, verges and low industrial skyline—not forest, rural wilderness, a sterile CAD
+render or luxury architecture.
 
 PROHIBITED
 No camera or topology drift; no roof subdivision; no relocated/duplicate gate; no missing fence or

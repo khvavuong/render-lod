@@ -88,6 +88,15 @@ const CERTIFICATION_META: Record<
   approved_final: { label: "Đã duyệt bàn giao", color: "success" },
 };
 
+const VIEW_LABELS = [
+  "HERO AERIAL",
+  "MAIN ENTRANCE",
+  "LOGISTICS / OPERATION",
+  "REVERSE AERIAL",
+  "ARCHITECTURAL DETAIL",
+  "HUMAN-SCALE / GOLDEN HOUR",
+];
+
 function ArtifactCard({ artifact }: { artifact: OutputArtifact }) {
   if (artifact.kind === "video") {
     return (
@@ -147,7 +156,9 @@ function EmptyCanvas() {
       <div className="view-placeholder-grid" aria-hidden="true">
         {Array.from({ length: 6 }, (_, index) => (
           <div className="view-placeholder" key={index}>
-            <span>VIEW-{String(index + 1).padStart(2, "0")}</span>
+            <span>
+              VIEW-{String(index + 1).padStart(2, "0")} · {VIEW_LABELS[index]}
+            </span>
           </div>
         ))}
       </div>

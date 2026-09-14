@@ -28,40 +28,49 @@ from v365_archviz.providers.contracts import (
 
 VIEW_DIRECTIVES = {
     ViewRole.OVERALL: (
-        "VIEW PURPOSE — PRIMARY ARRIVAL: preserve this near-frontal approach from outside the "
-        "authored main gate looking into the project. The slight three-quarter offset must reveal "
-        "the full vehicular opening, two-way driveway depth, connected fence and focus factory. "
-        "Do not turn it into an aerial, flatten it into an elevation or let gate furniture, "
-        "planting or vehicles obstruct the access. Make it read as a premium arrival photograph."
+        "VIEW PURPOSE — HERO AERIAL OBLIQUE: this is the primary bid cover. Preserve the approved "
+        "drone camera and three-quarter azimuth so two principal facades and roughly 70-80% of the "
+        "authored site remain legible. Explain the masterplan, continuous roof assemblies, "
+        "massing, "
+        "palette, landscape and relationships between buildings. Never flatten it into a frontal "
+        "elevation, crop the site into one facade or invent off-site development."
     ),
     ViewRole.CONTEXT: (
-        "VIEW PURPOSE — CONTEXT: explain the opposite approach, adjoining roads and the "
-        "relationship between the focus factory and subdued surrounding massing. Use credible "
-        "drone optics and distance haze from a real industrial estate."
+        "VIEW PURPOSE — MAIN ENTRANCE / ARRIVAL: preserve this pedestrian-eye approach along the "
+        "authored vehicle path from outside the main gate. Clearly show the truck-capable opening, "
+        "connected fence, entrance identity zone, office block, facade recognition, landscape and "
+        "arrival axis. Keep the 28-35 mm documentary perspective; never make the gate decorative, "
+        "too narrow, blocked or detached from the road. Do not invent readable signage or logos."
     ),
     ViewRole.HERO: (
-        "VIEW PURPOSE — FACADE HERO: retain this lower oblique composition and explain the long "
-        "factory elevation, operational forecourt, facade hierarchy and human scale. Keep all "
-        "approved clerestory, accent and logistics modules aligned to the shared design grammar."
+        "VIEW PURPOSE — LOGISTICS / OPERATION: prove that the project can operate. Preserve the "
+        "authored loading facade, truck apron, industrial shutter or sectional doors, docks, "
+        "canopies, bollards, turning clearance and service circulation. Add only sparse correctly "
+        "scaled operational trucks, pallets and workers where they do not hide doors or geometry. "
+        "This is a credible working yard, not a showroom, residential street or office frontage."
     ),
     ViewRole.DETAIL: (
-        "VIEW PURPOSE — LOGISTICS FACADE: show a readable factory loading frontage at a modest "
-        "elevated three-quarter angle. Industrial openings must remain sectional overhead or "
-        "roller shutter doors with robust jambs/head, shallow weather canopies, safety bollards "
-        "and a separate personnel egress door—never domestic doors, shopfronts or repeated "
-        "office bays."
+        "VIEW PURPOSE — OPPOSITE AERIAL / SECONDARY MASSING: preserve the drone position on the "
+        "opposite side of the Hero Aerial, not a small pan from it. Confirm rear facades, internal "
+        "roads, setbacks, planting, utility/service areas and the relationship between all "
+        "authored "
+        "masses. Keep the same project identity as VIEW-01 and expose inconsistencies rather than "
+        "redesigning unseen sides."
     ),
     ViewRole.OFFICE_HERO: (
-        "VIEW PURPOSE — REVERSE OVERALL: preserve this opposite bird's-eye three-quarter view to "
-        "document the roof, rear/secondary frontage, perimeter circulation and boundary. It must "
-        "complement rather than duplicate the primary overall/context camera."
+        "VIEW PURPOSE — ARCHITECTURAL DETAIL / OFFICE FACADE: preserve this close eye-level "
+        "composition of the best authored office entrance ensemble; when no office entrance exists "
+        "in the model, use the strongest authored industrial door/canopy facade ensemble instead. "
+        "Show glazing only where authored, panel modules, entrance or industrial door, plinth, "
+        "facade depth and restrained landscape at believable construction scale. It need not show "
+        "the whole factory. Do not invent an office block or spread office glazing into plain bays."
     ),
     ViewRole.LOADING_DETAIL: (
-        "VIEW PURPOSE — LOW FACADE EXPERIENCE: preserve this low elevated, oblique camera along "
-        "the unobstructed reverse facade. Explain the full facade rhythm, planted trellis bays, "
-        "boundary landscape and industrial scale in one credible composition. Keep facade depth "
-        "and sky visible; never turn it into an interior, dead-end alley, square-on blank wall or "
-        "drone overview. Use a documentary architectural-photo character."
+        "VIEW PURPOSE — HUMAN-SCALE / GOLDEN-HOUR HERO: preserve the low human-scale oblique "
+        "camera and all daytime design geometry, changing only photography DNA. Use credible late-"
+        "afternoon golden light or early blue hour, restrained warm interior/entrance lighting and "
+        "a modest number of people and vehicles. Keep facade materials neutral and technically "
+        "legible; no cinematic fantasy colours, wet-road spectacle or night-time darkness."
     ),
 }
 
@@ -222,7 +231,8 @@ def _identity_contract(design: DesignDNA) -> tuple[dict[str, object], str]:
         f"{design.design_language.secondary_material}, "
         f"{design.design_language.office_material}; "
         f"palette={', '.join(str(value) for value in palette.values())}; "
-        f"daylight={environment['time']} {environment['weather']}, "
+        f"base daylight={environment['time']} {environment['weather']} (VIEW-06 may override only "
+        "photography time to restrained golden/blue hour), "
         f"white balance={environment['white_balance_k']}K. "
         f"landscape={design.presentation.landscape_character}; "
         f"paving={design.presentation.paving_character}; "
@@ -260,18 +270,18 @@ def _select_master_view_id(render_root: Path, cameras: tuple[Camera, ...]) -> st
 
     fallback_priority = {
         ViewRole.OVERALL: 6.0,
-        ViewRole.CONTEXT: 5.0,
-        ViewRole.DETAIL: 4.0,
-        ViewRole.OFFICE_HERO: 3.0,
-        ViewRole.HERO: 2.0,
+        ViewRole.OFFICE_HERO: 5.0,
+        ViewRole.HERO: 4.0,
+        ViewRole.CONTEXT: 3.0,
+        ViewRole.DETAIL: 2.0,
         ViewRole.LOADING_DETAIL: 1.0,
     }
     identity_bonus = {
         # Prefer a meaningful facade run with operational openings. A tight detail can report
         # high focus coverage while showing only a blank wall and cannot carry design identity.
-        ViewRole.HERO: 18.0,
+        ViewRole.OFFICE_HERO: 18.0,
+        ViewRole.HERO: 10.0,
         ViewRole.LOADING_DETAIL: 8.0,
-        ViewRole.OFFICE_HERO: 3.0,
         ViewRole.DETAIL: 2.0,
         ViewRole.CONTEXT: 3.0,
         ViewRole.OVERALL: 0.0,
@@ -326,10 +336,14 @@ def select_master_view_ids(render_root: Path, cameras: tuple[Camera, ...]) -> tu
         value = evidence.get(camera.view_id, {}).get(name, 0.0)
         return float(value) if isinstance(value, (int, float)) else 0.0
 
-    # The context view now owns complete-site composition; VIEW-01 is a frontal arrival.
-    site_priority = {ViewRole.CONTEXT: 20.0, ViewRole.OVERALL: 16.0}
+    # VIEW-01 is the primary site identity; VIEW-04 is its genuinely opposite confirmation.
+    site_priority = {ViewRole.OVERALL: 100.0, ViewRole.DETAIL: 20.0}
+    site_candidates = (
+        tuple(camera for camera in cameras if camera.role in {ViewRole.OVERALL, ViewRole.DETAIL})
+        or cameras
+    )
     site = max(
-        cameras,
+        site_candidates,
         key=lambda camera: (
             site_priority.get(camera.role, 0.0)
             + metric(camera, "circulation_coverage") * 120
@@ -501,7 +515,9 @@ class RefineViewSet:
                     (reference_images_by_view or {}).get(camera.view_id, reference_images),
                 ),
                 aspect_ratio=camera.aspect_ratio,
-                image_size=("1K" if profile is GenerationProfile.PREVIEW_FAST else "2K"),
+                # Pro prices 1K and 2K outputs in the same tier. Keep the full-detail 2K source
+                # even for preview jobs; the render profile still controls upstream GPU cost.
+                image_size="2K",
             )
             for camera in selected_cameras
         )
@@ -582,11 +598,9 @@ class RefineViewSet:
                 design_revision=design.design_revision,
                 generated_image=result.image,
                 watermark=watermark,
-                effective_provider_model=(
-                    str(getattr(renderer, "provenance", {}).get("master_model"))
-                    if profile is GenerationProfile.TENDER_FINAL
-                    or (len(requests) == 1 and approved_master_path is not None)
-                    else str(getattr(renderer, "provenance", {}).get("model"))
+                effective_provider_model=str(
+                    getattr(renderer, "provenance", {}).get("master_model")
+                    or getattr(renderer, "provenance", {}).get("model")
                 ),
             )
             for result in generated.views
@@ -602,8 +616,7 @@ class RefineViewSet:
             "provider_configuration": getattr(renderer, "provenance", {}),
             "effective_view_model": (
                 getattr(renderer, "provenance", {}).get("master_model")
-                if profile is GenerationProfile.TENDER_FINAL
-                else getattr(renderer, "provenance", {}).get("model")
+                or getattr(renderer, "provenance", {}).get("model")
             ),
             "master_view_id": master_view_id,
             "master_sha256": hashlib.sha256(master_image.content).hexdigest(),

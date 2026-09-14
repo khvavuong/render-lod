@@ -23,16 +23,20 @@ def test_plans_six_reproducible_cameras(tmp_path: Path, valid_scene: CanonicalSc
         ViewRole.OFFICE_HERO,
         ViewRole.LOADING_DETAIL,
     }
-    assert first.view_set_id.endswith("standard-v30")
-    close_hero = next(camera for camera in first.cameras if camera.role is ViewRole.HERO)
+    assert first.view_set_id.endswith("standard-v32")
+    hero_aerial = next(camera for camera in first.cameras if camera.role is ViewRole.OVERALL)
+    arrival = next(camera for camera in first.cameras if camera.role is ViewRole.CONTEXT)
+    logistics = next(camera for camera in first.cameras if camera.role is ViewRole.HERO)
+    reverse_aerial = next(camera for camera in first.cameras if camera.role is ViewRole.DETAIL)
+    office_detail = next(camera for camera in first.cameras if camera.role is ViewRole.OFFICE_HERO)
     human_view = next(camera for camera in first.cameras if camera.role is ViewRole.LOADING_DETAIL)
-    reverse_overall = next(
-        camera for camera in first.cameras if camera.role is ViewRole.OFFICE_HERO
-    )
-    assert close_hero.position[2] < 30
+    assert 25 <= hero_aerial.position[2] <= 40
+    assert arrival.position[2] == 1.75
+    assert 3.2 <= logistics.position[2] <= 12
+    assert 28 <= reverse_aerial.position[2] <= 40
+    assert office_detail.position[2] == 1.85
     assert human_view.position[2] == 1.65
-    assert human_view.focal_length_mm == 32
-    assert reverse_overall.position[2] < 80
+    assert human_view.focal_length_mm == 35
     # A single-row model has no internal corridor. The human camera must stay
     # outside the architectural envelope instead of landing inside the shed.
     assert human_view.position[1] <= -34

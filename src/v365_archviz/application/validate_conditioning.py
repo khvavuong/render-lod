@@ -34,15 +34,15 @@ MAXIMUM_CENTRAL_OCCLUDER_COVERAGE = 0.12
 # Deliberately lenient hard-reject thresholds. They catch empty, excessively distant, or badly
 # cropped cameras; bid-quality composition remains a human/aesthetic gate until benchmark tuning.
 ROLE_THRESHOLDS: dict[ViewRole, tuple[float, float, float]] = {
-    ViewRole.OVERALL: (0.04, 0.60, 0.01),
-    ViewRole.CONTEXT: (0.08, 0.75, 0.01),
-    ViewRole.HERO: (0.15, 0.90, 0.00),
-    ViewRole.DETAIL: (0.15, 0.90, 0.00),
-    ViewRole.OFFICE_HERO: (0.12, 0.90, 0.00),
+    ViewRole.OVERALL: (0.06, 0.72, 0.02),
+    ViewRole.CONTEXT: (0.08, 0.88, 0.015),
+    ViewRole.HERO: (0.12, 0.90, 0.04),
+    ViewRole.DETAIL: (0.06, 0.75, 0.015),
+    ViewRole.OFFICE_HERO: (0.15, 0.92, 0.005),
     # At pedestrian eye level, a legible gate/fence opening can occupy less image area
     # than a drone-visible yard. Count authored entrances as circulation and keep the
     # threshold high enough to reject a hidden or cropped access point.
-    ViewRole.LOADING_DETAIL: (0.15, 0.90, 0.015),
+    ViewRole.LOADING_DETAIL: (0.12, 0.90, 0.01),
 }
 
 

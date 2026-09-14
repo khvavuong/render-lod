@@ -59,7 +59,7 @@ class Settings:
             artifact_dir=Path(os.getenv("V365_ARTIFACT_DIR", ".artifacts")),
             log_level=os.getenv("V365_LOG_LEVEL", "INFO"),
             gemini_api_key=os.getenv("GEMINI_API_KEY"),
-            gemini_image_model=os.getenv("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image"),
+            gemini_image_model=os.getenv("GEMINI_IMAGE_MODEL", "gemini-3-pro-image"),
             gemini_store_interactions=_as_bool(
                 os.getenv("GEMINI_STORE_INTERACTIONS"), default=False
             ),

@@ -98,9 +98,7 @@ class RunGenerationJob:
                     and isinstance(stored_master_refs.get("site"), str)
                     and Path(stored_master_refs["site"]).is_file()
                 )
-                generated_manifest_path = (
-                    paths.generated_root / "viewset_generation_manifest.json"
-                )
+                generated_manifest_path = paths.generated_root / "viewset_generation_manifest.json"
                 with create_image_renderer(settings, job.image_provider) as renderer:
                     if preserve_site:
                         site_master_path = Path(stored_master_refs["site"])
@@ -256,7 +254,7 @@ class RunGenerationJob:
                                         if role
                                         == (
                                             "context_realism_reference"
-                                            if camera.role in {ViewRole.OVERALL, ViewRole.CONTEXT}
+                                            if camera.role in {ViewRole.OVERALL, ViewRole.DETAIL}
                                             else "factory_design_reference"
                                         )
                                     ),
@@ -281,7 +279,7 @@ class RunGenerationJob:
                             camera.view_id
                             for camera in view_set.cameras
                             if camera.view_id in remaining_view_ids
-                            and camera.role in {ViewRole.OVERALL, ViewRole.CONTEXT}
+                            and camera.role in {ViewRole.OVERALL, ViewRole.DETAIL}
                         ),
                     ),
                     (
@@ -290,7 +288,7 @@ class RunGenerationJob:
                             camera.view_id
                             for camera in view_set.cameras
                             if camera.view_id in remaining_view_ids
-                            and camera.role not in {ViewRole.OVERALL, ViewRole.CONTEXT}
+                            and camera.role not in {ViewRole.OVERALL, ViewRole.DETAIL}
                         ),
                     ),
                 )

@@ -157,9 +157,7 @@ def _reference_role(path: Path) -> str:
     return str(role) if role else "quality_only"
 
 
-def build_context_composition_guide(
-    base_path: Path, overlay_path: Path, target_path: Path
-) -> Path:
+def build_context_composition_guide(base_path: Path, overlay_path: Path, target_path: Path) -> Path:
     """Combine camera-aligned inputs for provider guidance, never for final pixel output."""
 
     with Image.open(base_path) as base_source:
@@ -214,7 +212,10 @@ class RefineView:
             )
             # External imagery supplies photographic vocabulary; this registered guide supplies
             # only proxy placement. Gemini's balanced mode consumes at most two references.
-            reference_images = (*reference_images[:1], composition_guide)
+            # RefineViewSet already registers this guide before provider generation. Preserve one
+            # appearance reference plus one spatial guide without duplicating the same guide in
+            # provenance when the generated image is persisted afterwards.
+            reference_images = tuple(dict.fromkeys((*reference_images[:1], composition_guide)))
         missing = [name for name, path in inputs.items() if not path.is_file()]
         missing.extend(f"reference:{path.name}" for path in reference_images if not path.is_file())
         if missing:

@@ -274,7 +274,7 @@ def test_marketing_viewset_uses_overall_view_as_design_master(tmp_path: Path) ->
     assert "STYLE ANCHOR" in calls[1]["input"][0]["text"]  # type: ignore[index]
 
 
-def test_viewset_can_route_only_the_master_to_a_quality_model(tmp_path: Path) -> None:
+def test_viewset_routes_every_view_to_the_quality_model(tmp_path: Path) -> None:
     image = tmp_path / "pass.png"
     Image.new("RGB", (2, 2), "white").save(image)
     models: list[str] = []
@@ -322,7 +322,7 @@ def test_viewset_can_route_only_the_master_to_a_quality_model(tmp_path: Path) ->
         )
         renderer.generate_view_set(generation_request)
 
-    assert models == ["gemini-3-pro-image", "gemini-3.1-flash-image"]
+    assert models == ["gemini-3-pro-image"] * 2
 
 
 def test_tender_final_routes_every_view_to_the_quality_model(tmp_path: Path) -> None:

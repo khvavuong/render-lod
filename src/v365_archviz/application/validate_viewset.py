@@ -233,7 +233,7 @@ class ValidateGeneratedViewSet:
                         render_root / camera.view_id,
                         manifest,
                         design,
-                        require_visible=camera.role is ViewRole.CONTEXT,
+                        require_visible=camera.role in {ViewRole.OVERALL, ViewRole.DETAIL},
                     )
                     gate_evidence["context"] = context_evidence
                     if context_evidence["status"] == "fail":

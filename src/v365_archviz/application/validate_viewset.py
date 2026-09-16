@@ -46,14 +46,7 @@ class ValidateGeneratedViewSet:
     # These metrics are useful drift detectors, but they are deliberately conservative
     # image heuristics rather than proof that an artifact is structurally invalid. Keep
     # them visible to the reviewer without blocking a visually approved deliverable.
-    _VISUAL_REVIEW_CODES = frozenset(
-        {
-            "authored_landscape_not_retained",
-            "context_proxy_not_visible_in_context_view",
-            "material_role_mismatch",
-            "review_edge_misalignment",
-        }
-    )
+    _VISUAL_REVIEW_CODES = frozenset({"review_edge_misalignment"})
 
     def execute(
         self,
@@ -253,11 +246,6 @@ class ValidateGeneratedViewSet:
                 {
                     "view_id": camera.view_id,
                     "role": camera.role.value,
-                    "technical_status": (
-                        "pass"
-                        if not any(item["severity"] == "error" for item in findings)
-                        else "fail"
-                    ),
                     "image": str(image_path) if image_path else None,
                     "dimensions": dimensions,
                     "gate_evidence": gate_evidence,
@@ -289,17 +277,28 @@ class ValidateGeneratedViewSet:
             for finding in view["findings"]:
                 if finding["code"] in self._VISUAL_REVIEW_CODES:
                     finding["severity"] = "warning"
+            view["technical_status"] = (
+                "fail" if any(item["severity"] == "error" for item in view["findings"]) else "pass"
+            )
+            view["deliverable_status"] = (
+                "blocked" if view["technical_status"] == "fail" else "human_review"
+            )
 
         error_count = sum(
             item["severity"] == "error" for view in views for item in view["findings"]
         ) + sum(item["severity"] == "error" for item in global_findings)
+        critical_view_failures = [
+            str(view["view_id"]) for view in views if view["technical_status"] == "fail"
+        ]
+        passed = error_count == 0 and not critical_view_failures
         report = {
             "schema_version": "1.0.0",
             "scope": "technical_artifact_integrity",
             "project_id": design.project_id,
             "design_revision": design.design_revision,
-            "passed": error_count == 0,
+            "passed": passed,
             "error_count": error_count,
+            "critical_view_failures": critical_view_failures,
             "global_findings": global_findings,
             "views": views,
             "human_review_required": True,
@@ -313,7 +312,7 @@ class ValidateGeneratedViewSet:
             target,
             json.dumps(report, ensure_ascii=False, indent=2).encode("utf-8") + b"\n",
         )
-        return ViewSetValidationArtifacts(target, error_count == 0, error_count)
+        return ViewSetValidationArtifacts(target, passed, error_count)
 
     @staticmethod
     def _finding(severity: str, code: str, message: str) -> dict[str, str]:
@@ -364,6 +363,8 @@ class ValidateGeneratedViewSet:
                 "focus_coverage": view.get("focus_coverage"),
                 "circulation_coverage": view.get("circulation_coverage"),
                 "context_coverage": view.get("context_coverage"),
+                "role_target_coverage": view.get("role_target_coverage"),
+                "available_role_targets": view.get("available_role_targets", []),
                 "thresholds": view.get("thresholds", {}),
             }
         return evidence
@@ -441,6 +442,7 @@ class ValidateGeneratedViewSet:
         minimum_semantic_coverage: float = 0.001,
         minimum_landscape_green_ratio: float = 0.20,
         minimum_road_surface_ratio: float = 0.50,
+        minimum_asphalt_dark_ratio: float = 0.35,
     ) -> dict[str, Any]:
         if not semantic_path.is_file() or not semantic_manifest_path.is_file():
             return {"status": "review", "code": "semantic_retention_input_missing"}
@@ -475,6 +477,7 @@ class ValidateGeneratedViewSet:
 
         landscape = role_mask({"landscape_zone"})
         roads = role_mask({"site_road", "sidewalk", "service_yard", "parking", "loading_zone"})
+        asphalt = role_mask({"site_road"})
         # Pillow hue is 0..255. This range includes yellow-green through blue-green while
         # excluding neutral paving and the semantic annotation colors from the source pass.
         green = (
@@ -484,6 +487,7 @@ class ValidateGeneratedViewSet:
             & (hsv[:, :, 2] >= 32)
         )
         road_surface = (hsv[:, :, 1] <= 105) & (hsv[:, :, 2] >= 35)
+        asphalt_dark = (hsv[:, :, 1] <= 120) & (hsv[:, :, 2] >= 25) & (hsv[:, :, 2] <= 180)
         image_pixels = semantic.shape[0] * semantic.shape[1]
         sample_floor = min(
             image_pixels,
@@ -494,6 +498,7 @@ class ValidateGeneratedViewSet:
         )
         landscape_pixels = int(np.count_nonzero(landscape))
         road_pixels = int(np.count_nonzero(roads))
+        asphalt_pixels = int(np.count_nonzero(asphalt))
         landscape_ratio = (
             float(np.count_nonzero(green & landscape)) / int(np.count_nonzero(landscape))
             if landscape_pixels >= sample_floor
@@ -504,11 +509,18 @@ class ValidateGeneratedViewSet:
             if road_pixels >= sample_floor
             else None
         )
+        asphalt_dark_ratio = (
+            float(np.count_nonzero(asphalt_dark & asphalt)) / asphalt_pixels
+            if asphalt_pixels >= sample_floor
+            else None
+        )
         failures: list[str] = []
         if landscape_ratio is not None and landscape_ratio < minimum_landscape_green_ratio:
             failures.append("authored_landscape_not_retained")
         if road_ratio is not None and road_ratio < minimum_road_surface_ratio:
             failures.append("authored_circulation_surface_not_retained")
+        if asphalt_dark_ratio is not None and asphalt_dark_ratio < minimum_asphalt_dark_ratio:
+            failures.append("authored_asphalt_became_pale_paving")
         return {
             "status": "fail" if failures else "pass",
             "code": failures[0] if failures else "semantic_surface_retention_passed",
@@ -519,6 +531,9 @@ class ValidateGeneratedViewSet:
             "road_surface_ratio": road_ratio,
             "road_sample_pixels": road_pixels,
             "road_surface_threshold": minimum_road_surface_ratio,
+            "asphalt_dark_ratio": asphalt_dark_ratio,
+            "asphalt_sample_pixels": asphalt_pixels,
+            "asphalt_dark_threshold": minimum_asphalt_dark_ratio,
             "minimum_semantic_pixels": minimum_semantic_pixels,
             "minimum_semantic_coverage": minimum_semantic_coverage,
             "effective_sample_floor": sample_floor,

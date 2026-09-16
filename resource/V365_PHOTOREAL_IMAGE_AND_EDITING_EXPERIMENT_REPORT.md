@@ -250,3 +250,33 @@ Một pilot được coi là sẵn sàng bàn giao khi:
 ## 10. Quyết định đề xuất
 
 Không tiếp tục theo hướng “thêm prompt + thêm ảnh sample + tăng số candidate”. Tiếp tục với phương án C làm baseline kỹ thuật mới: **Gemini Pro, approved project master, registered context evidence, không external style reference mặc định**. Việc tiếp theo cần triển khai trước tiên là camera QA và fail-closed QA; đây là hai thay đổi có tác động chất lượng lớn nhất và không làm tăng chi phí sinh ảnh.
+
+## 11. Trạng thái triển khai sau kiểm nghiệm
+
+Baseline kỹ thuật trong kết luận trên đã được đưa vào pipeline:
+
+- Standard camera contract v32 có sáu vai trò riêng; camera được tính từ scene bounds và semantic
+  evidence thay vì tọa độ dự án.
+- Conditioning QA kiểm tra thêm target theo vai trò: cổng cho Arrival, loading/service yard cho
+  Operation, facade/detail cho Architectural Detail và circulation/context cho hai aerial view.
+- Gemini Pro 2K là model duy nhất cho Design Master và final view; không còn trộn Flash/Pro trong
+  cùng một view-set.
+- External appearance reference là tùy chọn. Production mặc định không tự nạp baseline dự án cũ;
+  reference do người dùng tải lên phải vượt gate resolution/aspect ratio, mỗi role chỉ có một ảnh
+  và worker không fallback chéo role.
+- Site Master và Facade Master của chính revision tiếp tục là identity anchors chính.
+- Technical QA tổng hợp theo phép AND của mọi critical view. Landscape, context proxy và material
+  role failures không còn bị hạ thành warning làm `passed=true` sai.
+- Endpoint targeted repair chỉ regenerate view được chọn, dùng approved master làm identity anchor,
+  chạy lại QA và ghi parent/output hash vào `repair_history.json`; không regenerate toàn bộ sáu ảnh.
+
+Chưa bật trong production:
+
+- Gemini multi-turn với `previous_interaction_id`;
+- masked local inpaint;
+- canvas click/box/brush/lasso và semantic selection resolver;
+- Design Edit propagation đa view.
+
+Các mục này thuộc P2/P3 và chỉ tiếp tục sau khi một pilot mới đạt six-view acceptance gate. Việc trì
+hoãn là có chủ đích để pixel editing không trở thành cách che lỗi camera, scene semantics hoặc
+generation nền.

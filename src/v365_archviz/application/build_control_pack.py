@@ -104,6 +104,7 @@ def _write_layer_authority_artifacts(
         combined(
             {
                 "service_yard",
+                "site_ground",
                 "site_road",
                 "sidewalk",
                 "parking",

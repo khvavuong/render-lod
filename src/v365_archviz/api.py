@@ -35,6 +35,7 @@ from v365_archviz.config import Settings
 from v365_archviz.domain.controlled_realism import CertificationReport, CertificationState
 from v365_archviz.domain.design import DesignBrief, DesignDNA, IndustrialContextPlan
 from v365_archviz.domain.jobs import GenerationJob
+from v365_archviz.domain.references import ReferenceRole, evaluate_reference_compatibility
 from v365_archviz.domain.render_intent import (
     DESIGN_OPTIONS,
     DesignOptionsCatalog,
@@ -173,6 +174,7 @@ class ReferenceUploadResponse(BaseModel):
     file_name: str
     width: int = Field(gt=0)
     height: int = Field(gt=0)
+    compatibility_status: Literal["compatible"] = "compatible"
 
 
 class ViewSetJobResponse(BaseModel):
@@ -193,6 +195,7 @@ class ViewActionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     view_set_id: str = Field(pattern=SAFE_IDENTIFIER_PATTERN)
+    instruction: str | None = Field(default=None, max_length=500)
 
 
 class OutputArtifactResponse(BaseModel):
@@ -294,15 +297,28 @@ def _resolve_references(
             metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
             source = root / str(metadata["stored_name"])
             role = str(metadata["role"])
+            width = int(metadata["width"])
+            height = int(metadata["height"])
+            source_kind = str(metadata.get("source", "user_upload"))
         except (OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
             raise HTTPException(status_code=404, detail="reference image not found") from exc
-        if not source.is_file() or role not in {
-            "factory_design_reference",
-            "context_realism_reference",
-        }:
+        if role not in {item.value for item in ReferenceRole}:
             raise HTTPException(status_code=409, detail="reference metadata is invalid")
+        compatibility = evaluate_reference_compatibility(width, height, ReferenceRole(role))
+        # A baseline can only reach this path after explicit full-view approval and is disabled
+        # by default. User uploads have no such evidence and must pass the objective input gate.
+        approved_internal_baseline = source_kind == "approved_viewset_baseline"
+        if not source.is_file() or (
+            not approved_internal_baseline and not compatibility.compatible
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="reference image did not pass the appearance compatibility gate",
+            )
         refs.append(str(source))
         roles.append(role)
+    if len(roles) != len(set(roles)):
+        raise HTTPException(status_code=422, detail="only one reference is allowed for each role")
     return tuple(refs), tuple(roles)
 
 
@@ -462,6 +478,16 @@ async def upload_reference(
     extensions = {"jpeg": ".jpg", "png": ".png", "webp": ".webp"}
     if image_format not in extensions:
         raise HTTPException(status_code=422, detail="reference must be JPEG, PNG or WebP")
+    role = ReferenceRole(x_reference_role)
+    compatibility = evaluate_reference_compatibility(width, height, role)
+    if not compatibility.compatible:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "reference image is not compatible with industrial presentation",
+                "findings": list(compatibility.findings),
+            },
+        )
     content_sha = hashlib.sha256(content).hexdigest()
     reference_id = hashlib.sha256(f"{x_reference_role}\n{content_sha}".encode()).hexdigest()
     root = _settings().artifact_dir / "references" / reference_id
@@ -479,6 +505,8 @@ async def upload_reference(
                 "content_sha256": content_sha,
                 "width": width,
                 "height": height,
+                "compatibility_status": "compatible",
+                "compatibility_findings": [],
                 "allowed_influence": (
                     ["construction_detail", "material_response", "human_scale"]
                     if x_reference_role == "factory_design_reference"
@@ -497,6 +525,7 @@ async def upload_reference(
         file_name=file_name,
         width=width,
         height=height,
+        compatibility_status="compatible",
     )
 
 
@@ -715,21 +744,9 @@ def create_view_set(design_revision: str, request: CreateViewSetRequest) -> View
     reference_refs, reference_roles = _resolve_references(
         settings.artifact_dir, request.reference_ids
     )
-    reference_refs, reference_roles = _with_active_quality_baseline(
-        settings.artifact_dir, reference_refs, reference_roles
-    )
-    required_reference_roles = {
-        "factory_design_reference",
-        "context_realism_reference",
-    }
-    if (
-        request.profile is not GenerationProfile.PREVIEW_FAST
-        and not required_reference_roles.issubset(reference_roles)
-    ):
-        missing = sorted(required_reference_roles - set(reference_roles))
-        raise HTTPException(
-            status_code=422,
-            detail=("tender generation requires approved reference roles: " + ", ".join(missing)),
+    if settings.auto_appearance_baseline:
+        reference_refs, reference_roles = _with_active_quality_baseline(
+            settings.artifact_dir, reference_refs, reference_roles
         )
     created = CreateGenerationJob().execute(
         _repository(settings),
@@ -1159,4 +1176,48 @@ def approve_view(view_id: str, request: ViewActionRequest) -> ViewSetJobResponse
 )
 def repair_view(view_id: str, request: ViewActionRequest) -> ViewSetJobResponse:
     _require_safe_identifier(view_id, "view_id")
+    settings = _settings()
+    try:
+        job = _repository(settings).get_by_view_set(request.view_set_id)
+        view_set_path = (
+            settings.artifact_dir
+            / "scenes"
+            / job.model_revision
+            / "designs"
+            / job.design_revision
+            / "view_set.json"
+        )
+        view_set = ViewSet.model_validate_json(view_set_path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise HTTPException(status_code=404, detail="view set not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail="view set contract is invalid") from exc
+    if job.state is not WorkflowState.HUMAN_REVIEW:
+        raise HTTPException(status_code=409, detail="only a reviewed view can be repaired")
+    if job.attempt >= 3:
+        raise HTTPException(status_code=409, detail="repair attempt limit reached")
+    if view_id not in {camera.view_id for camera in view_set.cameras}:
+        raise HTTPException(status_code=404, detail="view not found in view set")
+    request_path = (
+        settings.artifact_dir
+        / "generated"
+        / job.model_revision
+        / job.design_revision
+        / "manual_repair_request.json"
+    )
+    atomic_write(
+        request_path,
+        json.dumps(
+            {
+                "schema_version": "1.0.0",
+                "view_set_id": job.view_set_id,
+                "view_id": view_id,
+                "instruction": (request.instruction or "").strip(),
+                "attempt": job.attempt + 1,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ).encode("utf-8")
+        + b"\n",
+    )
     return _transition_view_set(request.view_set_id, WorkflowState.REPAIRING)

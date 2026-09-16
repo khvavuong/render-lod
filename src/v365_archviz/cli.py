@@ -397,6 +397,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.render_root,
                 args.output,
                 restore_locked_pixels=False,
+                composite_context_proxy=True,
             )
             BrandDeliverables().execute(BrandWatermark(), args.output)
             print(

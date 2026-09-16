@@ -274,6 +274,22 @@ class GeminiImageRenderer:
                     _image_block(request.structure_guide),
                 )
             )
+        if request.view_id in {"view-01", "view-04"}:
+            blocks.extend(
+                (
+                    {
+                        "type": "text",
+                        "text": (
+                            "AERIAL SITE-PLAN AUTHORITY — neutral categorical regions only. "
+                            "Preserve every boundary between the site substrate, asphalt roads, "
+                            "loading/service yards, parking, sidewalks, planting, gates and "
+                            "buildings. Tones are not materials or output colours. Do not merge "
+                            "regions or reinterpret the substrate as a concrete apron:"
+                        ),
+                    },
+                    _neutral_semantic_block(request.semantic),
+                )
+            )
         if style_anchor is not None:
             blocks.extend(
                 (

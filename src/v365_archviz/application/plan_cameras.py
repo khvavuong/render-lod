@@ -238,9 +238,11 @@ def _arrival_shot(
     # Keep the entrance as the visual axis, but add a restrained lateral offset. A perfectly
     # centred elevation compresses the access road and makes a 12 m truck gate look narrow;
     # this near-frontal approach retains evidence while revealing driveway depth.
-    setback = max(46.0, site_span * 0.22)
+    # A distant camera can technically contain a gate while reducing it to a few pixels. Keep a
+    # truck-scaled opening prominent enough to read as the actual arrival sequence.
+    setback = max(26.0, min(38.0, site_span * 0.13))
     tangent = (-outward[1], outward[0])
-    lateral_offset = min(30.0, max(16.0, site_span * 0.10))
+    lateral_offset = min(26.0, max(18.0, site_span * 0.09))
     focus_height = focus_maximum[2] - focus_minimum[2]
     position = (
         gate_center[0] + outward[0] * setback + tangent[0] * lateral_offset,
@@ -255,11 +257,45 @@ def _arrival_shot(
         min(max(gate_center[1], focus_minimum[1]), focus_maximum[1]),
     )
     target = (
-        gate_center[0] + (nearest_focus[0] - gate_center[0]) * 0.34,
-        gate_center[1] + (nearest_focus[1] - gate_center[1]) * 0.34,
+        gate_center[0]
+        + (nearest_focus[0] - gate_center[0]) * 0.34
+        - tangent[0] * lateral_offset * 0.32,
+        gate_center[1]
+        + (nearest_focus[1] - gate_center[1]) * 0.34
+        - tangent[1] * lateral_offset * 0.32,
         focus_minimum[2] + max(3.2, focus_height * 0.24),
     )
     return position, target
+
+
+def _golden_arrival_shot(
+    arrival_shot: tuple[tuple[float, float, float], tuple[float, float, float]] | None,
+) -> tuple[tuple[float, float, float], tuple[float, float, float]] | None:
+    """Create a closer, asymmetric human-scale marketing view from the authored arrival axis."""
+
+    if arrival_shot is None:
+        return None
+    position, target = arrival_shot
+    delta = (target[0] - position[0], target[1] - position[1])
+    distance = math.hypot(*delta)
+    if distance <= 1e-6:
+        return None
+    forward = (delta[0] / distance, delta[1] / distance)
+    tangent = (-forward[1], forward[0])
+    advance = min(14.0, max(9.0, distance * 0.28))
+    lateral = min(9.0, max(5.0, distance * 0.16))
+    return (
+        (
+            position[0] + forward[0] * advance + tangent[0] * lateral,
+            position[1] + forward[1] * advance + tangent[1] * lateral,
+            position[2],
+        ),
+        (
+            target[0] + forward[0] * min(5.0, distance * 0.1),
+            target[1] + forward[1] * min(5.0, distance * 0.1),
+            target[2],
+        ),
+    )
 
 
 class PlanStandardCameras:
@@ -315,6 +351,7 @@ class PlanStandardCameras:
             key=lambda coordinate: abs(coordinate - corridor_cross),
         )
         site_roles = {
+            SemanticRole.SITE_GROUND,
             SemanticRole.SITE_ROAD,
             SemanticRole.SIDEWALK,
             SemanticRole.SERVICE_YARD,
@@ -333,63 +370,45 @@ class PlanStandardCameras:
             (site_minimum[1] + site_maximum[1]) / 2,
             (site_minimum[2] + site_maximum[2]) / 2,
         )
-        overall_target = (
-            center[0],
-            center[1],
-            minimum[2] + height * 0.15,
-        )
+        # The two aerial views document the authored masterplan, not only the largest shed.
+        # Fit the complete site envelope and use a true downward oblique direction. The former
+        # implementation fitted the building, then clamped Z to 40 m; on wide campuses that
+        # produced a 7-10 degree grazing view in which the site plan was largely hidden.
+        overall_target = (site_center[0], site_center[1], minimum[2] + height * 0.12)
         overall_direction = _axis_point(
             (0.0, 0.0, 0.0),
             long_axis,
             -1.0,
             -0.85,
-            0.9,
+            0.72,
         )
         overall_position = _fit_camera_to_bounds(
-            minimum,
-            maximum,
+            site_minimum,
+            site_maximum,
             overall_target,
             overall_direction,
-            focal_length_mm=42.0,
+            focal_length_mm=28.0,
             sensor_width_mm=36.0,
-            frame_margin=0.84,
-        )
-        # Keep the drone within the requested commercial-photography altitude band. The fitted
-        # horizontal distance still adapts to each model/site instead of hardcoding coordinates.
-        hero_drone_altitude = min(40.0, max(25.0, height * 2.4))
-        overall_position = (
-            overall_position[0],
-            overall_position[1],
-            minimum[2] + hero_drone_altitude,
+            # A controlled crop gives the project presentation weight while retaining roughly
+            # 70-80% of the authored site, matching a commercial hero aerial rather than GIS.
+            frame_margin=1.18,
         )
         reverse_overall_direction = _axis_point(
             (0.0, 0.0, 0.0),
             long_axis,
             1.0,
             0.74,
-            0.30,
+            0.72,
         )
-        # VIEW-01 already documents the primary site composition. Fit the reverse angle to
-        # authored architecture so sparse off-site geometry cannot shrink the factory into
-        # a mostly empty frame.
-        reverse_overall_target = (
-            center[0],
-            center[1],
-            minimum[2] + height * 0.24,
-        )
+        reverse_overall_target = (site_center[0], site_center[1], minimum[2] + height * 0.18)
         reverse_overall_position = _fit_camera_to_bounds(
-            minimum,
-            maximum,
+            site_minimum,
+            site_maximum,
             reverse_overall_target,
             reverse_overall_direction,
-            focal_length_mm=42.0,
+            focal_length_mm=28.0,
             sensor_width_mm=36.0,
-            frame_margin=0.86,
-        )
-        reverse_overall_position = (
-            reverse_overall_position[0],
-            reverse_overall_position[1],
-            minimum[2] + min(40.0, max(28.0, height * 2.6)),
+            frame_margin=1.18,
         )
         arrival_shot = _arrival_shot(
             scene,
@@ -398,6 +417,7 @@ class PlanStandardCameras:
             site_center,
             max(site_maximum[0] - site_minimum[0], site_maximum[1] - site_minimum[1]),
         )
+        golden_arrival_shot = _golden_arrival_shot(arrival_shot)
 
         def point(long_offset: float, cross_offset: float, z: float) -> tuple[float, float, float]:
             return _axis_point(center, long_axis, long_offset, cross_offset, z)
@@ -592,15 +612,19 @@ class PlanStandardCameras:
                         ),
                         target,
                     )
-                    facade_detail_lateral = min(20.0, max(14.0, surface.width_m * 0.11))
+                    # Keep the close facade camera inside the verified service apron. A larger
+                    # normal offset can cross a narrow yard and put the camera inside the
+                    # opposite support building even though its target remains valid.
+                    facade_detail_lateral = min(26.0, max(22.0, surface.width_m * 0.14))
+                    facade_detail_outward = outward_distance
                     facade_detail_shot = (
                         (
                             door[0]
                             + frame.u_axis[0] * facade_detail_lateral * side
-                            + frame.normal[0] * outward_distance,
+                            + frame.normal[0] * facade_detail_outward,
                             door[1]
                             + frame.u_axis[1] * facade_detail_lateral * side
-                            + frame.normal[1] * outward_distance,
+                            + frame.normal[1] * facade_detail_outward,
                             minimum[2] + 2.8,
                         ),
                         target,
@@ -644,20 +668,19 @@ class PlanStandardCameras:
                         reverse_offset = min(24.0, max(16.0, cross_span * 0.22))
                         reverse_facade_shot = (
                             (
-                                *(
-                                    reverse.frame.origin[index]
-                                    + reverse.frame.u_axis[index] * reverse.width_m * 0.12
-                                    + reverse.frame.normal[index] * reverse_offset
-                                    for index in range(2)
-                                ),
+                                reverse.frame.origin[0]
+                                + reverse.frame.u_axis[0] * reverse.width_m * 0.12
+                                + reverse.frame.normal[0] * reverse_offset,
+                                reverse.frame.origin[1]
+                                + reverse.frame.u_axis[1] * reverse.width_m * 0.12
+                                + reverse.frame.normal[1] * reverse_offset,
                                 minimum[2] + 2.2,
                             ),
                             (
-                                *(
-                                    reverse.frame.origin[index]
-                                    + reverse.frame.u_axis[index] * reverse.width_m * 0.62
-                                    for index in range(2)
-                                ),
+                                reverse.frame.origin[0]
+                                + reverse.frame.u_axis[0] * reverse.width_m * 0.62,
+                                reverse.frame.origin[1]
+                                + reverse.frame.u_axis[1] * reverse.width_m * 0.62,
                                 minimum[2] + max(4.2, height * 0.26),
                             ),
                         )
@@ -674,7 +697,7 @@ class PlanStandardCameras:
                 role=ViewRole.OVERALL,
                 position=overall_position,
                 target=overall_target,
-                focal_length_mm=32,
+                focal_length_mm=28,
                 sensor_width_mm=36,
                 aspect_ratio="16:9",
             ),
@@ -730,7 +753,7 @@ class PlanStandardCameras:
                 role=ViewRole.DETAIL,
                 position=reverse_overall_position,
                 target=reverse_overall_target,
-                focal_length_mm=32,
+                focal_length_mm=28,
                 sensor_width_mm=36,
                 aspect_ratio="16:9",
             ),
@@ -757,7 +780,7 @@ class PlanStandardCameras:
                         long_min + long_span * 0.24, minimum[2] + min(3.6, height * 0.32)
                     )
                 ),
-                focal_length_mm=42,
+                focal_length_mm=35,
                 sensor_width_mm=36,
                 aspect_ratio="16:9",
             ),
@@ -765,19 +788,23 @@ class PlanStandardCameras:
                 view_id="view-06",
                 role=ViewRole.LOADING_DETAIL,
                 position=(
-                    loading_human_shot[0]
-                    if loading_human_shot is not None
+                    golden_arrival_shot[0]
+                    if golden_arrival_shot is not None
                     else office_detail_shot[0]
                     if office_detail_shot is not None
+                    else loading_human_shot[0]
+                    if loading_human_shot is not None
                     else reverse_facade_shot[0]
                     if reverse_facade_shot is not None
                     else corridor_point(long_min + long_span * 0.10, minimum[2] + 1.65)
                 ),
                 target=(
-                    loading_human_shot[1]
-                    if loading_human_shot is not None
+                    golden_arrival_shot[1]
+                    if golden_arrival_shot is not None
                     else office_detail_shot[1]
                     if office_detail_shot is not None
+                    else loading_human_shot[1]
+                    if loading_human_shot is not None
                     else reverse_facade_shot[1]
                     if reverse_facade_shot is not None
                     else access_facade_point(
@@ -799,7 +826,7 @@ class PlanStandardCameras:
         if design is not None:
             design_revision = design.design_revision
         view_set = ViewSet(
-            view_set_id=f"{revision_key}-{design_revision}-standard-v32",
+            view_set_id=f"{revision_key}-{design_revision}-standard-v39",
             design_revision=design_revision,
             cameras=cameras,
         )

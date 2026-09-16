@@ -21,7 +21,7 @@ from v365_archviz.providers.contracts import (
     ViewConditioningInput,
 )
 
-PROMPT_VERSION = "layered-authority-v6-paving-semantics"
+PROMPT_VERSION = "layered-authority-v9-site-surface-fidelity"
 DEFAULT_PROMPT = """Create a photorealistic professional architectural visualization of this
 Vietnamese industrial project. Treat the base render and auxiliary passes as immutable spatial
 geometry: preserve the exact camera, site boundary, authored road and sidewalk centerlines and
@@ -233,6 +233,9 @@ class RefineView:
                 prompt=prompt,
                 structure_guide=inputs.get("structure_guide"),
                 reference_images=reference_images,
+                # Gemini Pro prices 1K and 2K in the same tier; single-view QA should exercise
+                # the same detail budget as the production view-set path.
+                image_size="2K",
             )
         )
         try:

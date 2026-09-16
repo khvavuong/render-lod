@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import logging
@@ -90,18 +91,23 @@ class RunGenerationJob:
                 )
                 stored_master_ids = review.get("master_view_ids", {})
                 stored_master_refs = review.get("master_image_refs", {})
+                approved_master_types = review.get("approved_master_types", [])
+                stored_site_ref = (
+                    stored_master_refs.get("site") if isinstance(stored_master_refs, dict) else None
+                )
                 preserve_site = (
-                    "site" in review.get("approved_master_types", [])
+                    isinstance(approved_master_types, list)
+                    and "site" in approved_master_types
                     and isinstance(stored_master_ids, dict)
                     and stored_master_ids.get("site") == site_master_id
-                    and isinstance(stored_master_refs, dict)
-                    and isinstance(stored_master_refs.get("site"), str)
-                    and Path(stored_master_refs["site"]).is_file()
+                    and isinstance(stored_site_ref, str)
+                    and Path(stored_site_ref).is_file()
                 )
                 generated_manifest_path = paths.generated_root / "viewset_generation_manifest.json"
                 with create_image_renderer(settings, job.image_provider) as renderer:
                     if preserve_site:
-                        site_master_path = Path(stored_master_refs["site"])
+                        assert isinstance(stored_site_ref, str)
+                        site_master_path = Path(stored_site_ref)
                     else:
                         site_references = tuple(
                             path
@@ -118,7 +124,7 @@ class RunGenerationJob:
                             prompt,
                             profile=job.profile,
                             view_ids=(site_master_id,),
-                            reference_images=site_references or references,
+                            reference_images=site_references,
                         )
                         generated_manifest_path = generated.manifest_path
                         site_master_path = self._refined_image(
@@ -143,7 +149,7 @@ class RunGenerationJob:
                             prompt,
                             profile=job.profile,
                             view_ids=(facade_master_id,),
-                            reference_images=facade_references or references,
+                            reference_images=facade_references,
                             approved_master_path=site_master_path,
                             approved_master_view_id=site_master_id,
                         )
@@ -152,6 +158,7 @@ class RunGenerationJob:
                     paths.render_root,
                     paths.generated_root,
                     restore_locked_pixels=False,
+                    composite_context_proxy=True,
                 )
                 master_paths = {
                     "site": self._refined_image(paths.generated_root / site_master_id),
@@ -307,7 +314,7 @@ class RunGenerationJob:
                             prompt,
                             profile=job.profile,
                             view_ids=group_view_ids,
-                            reference_images=references,
+                            reference_images=(),
                             reference_images_by_view=reference_images_by_view,
                             approved_master_path=master_refs.get(master_type, master_path),
                             approved_master_view_id=typed_master_ids.get(
@@ -321,6 +328,7 @@ class RunGenerationJob:
                     paths.render_root,
                     paths.generated_root,
                     restore_locked_pixels=False,
+                    composite_context_proxy=True,
                 )
                 job = self._advance(
                     repository,
@@ -329,6 +337,109 @@ class RunGenerationJob:
                     generated.manifest_path,
                     protected.manifest_path,
                 )
+
+        if job.state is WorkflowState.REPAIRING:
+            repair_path = paths.generated_root / "manual_repair_request.json"
+            try:
+                repair = json.loads(repair_path.read_text(encoding="utf-8"))
+                repair_view_id = str(repair["view_id"])
+                instruction = str(repair.get("instruction", "")).strip()
+            except (OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
+                raise V365Error("targeted repair request is missing or invalid") from exc
+            cameras = {camera.view_id: camera for camera in view_set.cameras}
+            if repair_view_id not in cameras:
+                raise V365Error("targeted repair view does not belong to this view set")
+            review = self._read_master_review(paths.generated_root / "design_master_review.json")
+            if not review.get("approved", False):
+                raise V365Error("Design Masters must be approved before targeted repair")
+            master_ids = review.get("master_view_ids", {})
+            repair_master_refs = review.get("master_image_refs", {})
+            if not isinstance(master_ids, dict) or not isinstance(repair_master_refs, dict):
+                raise V365Error("approved Design Master lineage is incomplete")
+            camera = cameras[repair_view_id]
+            preferred_type = (
+                "site" if camera.role in {ViewRole.OVERALL, ViewRole.DETAIL} else "facade"
+            )
+            alternate_type = "facade" if preferred_type == "site" else "site"
+            anchor_type = (
+                alternate_type
+                if str(master_ids.get(preferred_type)) == repair_view_id
+                else preferred_type
+            )
+            anchor_path = Path(str(repair_master_refs.get(anchor_type, "")))
+            if not anchor_path.is_file():
+                raise V365Error("targeted repair has no valid approved identity anchor")
+            quality = review.get("quality_standard", {})
+            quality_path = (
+                Path(str(quality.get("image_ref")))
+                if isinstance(quality, dict) and quality.get("image_ref")
+                else None
+            )
+            _, prompt = build_refinement_prompt(paths.design_dna)
+            correction = (
+                instruction
+                or "Correct only the QA issue visible in this view while improving "
+                "photographic realism."
+            )
+            prompt = (
+                f"{prompt}\n\nQA-DRIVEN TARGETED REPAIR\n{correction}\n"
+                "Preserve every camera, mass, roof, opening, gate, fence, road, landscape boundary "
+                "and all pixels outside the affected visual issue. Do not redesign the project."
+            )
+            source_image = self._refined_image(paths.generated_root / repair_view_id)
+            source_hash = hashlib.sha256(source_image.read_bytes()).hexdigest()
+            external_role = (
+                "context_realism_reference"
+                if preferred_type == "site"
+                else "factory_design_reference"
+            )
+            external_references = tuple(
+                Path(path)
+                for path, role in zip(job.reference_image_refs, job.reference_roles, strict=True)
+                if role == external_role
+            )
+            with create_image_renderer(settings, job.image_provider) as renderer:
+                generated = RefineViewSet().execute(
+                    renderer,
+                    paths.render_root,
+                    paths.generated_root,
+                    paths.view_set,
+                    paths.design_dna,
+                    job.model_revision,
+                    prompt,
+                    profile=job.profile,
+                    view_ids=(repair_view_id,),
+                    reference_images=external_references,
+                    approved_master_path=anchor_path,
+                    approved_master_view_id=str(master_ids.get(anchor_type, repair_view_id)),
+                    quality_standard_path=quality_path,
+                )
+            protected = ProtectRefinement().execute(
+                paths.render_root,
+                paths.generated_root,
+                restore_locked_pixels=False,
+                composite_context_proxy=True,
+            )
+            repaired_image = self._refined_image(paths.generated_root / repair_view_id)
+            self._append_repair_lineage(
+                paths.generated_root / "repair_history.json",
+                view_set_id=job.view_set_id,
+                view_id=repair_view_id,
+                attempt=job.attempt,
+                instruction=correction,
+                parent_sha256=source_hash,
+                output_sha256=hashlib.sha256(repaired_image.read_bytes()).hexdigest(),
+                generation_manifest=generated.manifest_path,
+            )
+            job = self._advance(
+                repository,
+                job,
+                WorkflowState.VALIDATING,
+                generated.manifest_path,
+                protected.manifest_path,
+                repair_path,
+                paths.generated_root / "repair_history.json",
+            )
 
         if job.state is WorkflowState.VALIDATING:
             validation = ValidateGeneratedViewSet().execute(
@@ -430,6 +541,42 @@ class RunGenerationJob:
         buffer = io.BytesIO()
         board.save(buffer, format="JPEG", quality=95, optimize=True)
         atomic_write(target, buffer.getvalue())
+
+    @staticmethod
+    def _append_repair_lineage(
+        path: Path,
+        *,
+        view_set_id: str,
+        view_id: str,
+        attempt: int,
+        instruction: str,
+        parent_sha256: str,
+        output_sha256: str,
+        generation_manifest: Path,
+    ) -> None:
+        try:
+            history = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            history = {"schema_version": "1.0.0", "repairs": []}
+        repairs = history.get("repairs", [])
+        if not isinstance(repairs, list):
+            repairs = []
+        repairs.append(
+            {
+                "view_set_id": view_set_id,
+                "view_id": view_id,
+                "attempt": attempt,
+                "instruction": instruction,
+                "parent_sha256": parent_sha256,
+                "output_sha256": output_sha256,
+                "generation_manifest": str(generation_manifest),
+            }
+        )
+        history["repairs"] = repairs
+        atomic_write(
+            path,
+            json.dumps(history, ensure_ascii=False, indent=2).encode("utf-8") + b"\n",
+        )
 
     def _ensure_conditioning(
         self,

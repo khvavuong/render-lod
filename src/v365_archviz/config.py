@@ -50,6 +50,7 @@ class Settings:
     video_budget_usd: float = 1.20
     veo_poll_interval_seconds: float = 10.0
     veo_timeout_seconds: float = 900.0
+    auto_appearance_baseline: bool = False
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -90,6 +91,9 @@ class Settings:
             openai_image_quality=os.getenv("OPENAI_IMAGE_QUALITY", "high"),
             openai_image_size=os.getenv("OPENAI_IMAGE_SIZE", "1536x1024"),
             local_worker_enabled=_as_bool(os.getenv("V365_ENABLE_LOCAL_WORKER"), default=True),
+            auto_appearance_baseline=_as_bool(
+                os.getenv("V365_AUTO_APPEARANCE_BASELINE"), default=False
+            ),
         )
 
     @property

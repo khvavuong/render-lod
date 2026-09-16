@@ -67,7 +67,6 @@ export function DesignPanel(props: DesignPanelProps) {
   const [factoryReferenceFiles, setFactoryReferenceFiles] = useState<UploadFile[]>([]);
   const [contextReferenceFiles, setContextReferenceFiles] = useState<UploadFile[]>([]);
   const [modelError, setModelError] = useState<string>();
-  const [referenceError, setReferenceError] = useState<string>();
   const capabilities = useMemo(
     () => new Map(preparedModel?.capabilities.components.map((item) => [item.key, item]) ?? []),
     [preparedModel],
@@ -101,16 +100,6 @@ export function DesignPanel(props: DesignPanelProps) {
       setModelError('Chọn một file Revit trước khi tiếp tục');
       return;
     }
-    if (
-      preparedModel
-      && designPreview
-      && values.deliveryQuality === 'tender'
-      && (!factoryReferenceFiles.length || !contextReferenceFiles.length)
-    ) {
-      setReferenceError('Chất lượng hồ sơ thầu cần đủ reference facade và bối cảnh khu công nghiệp.');
-      return;
-    }
-    setReferenceError(undefined);
     const completeValues = {
       ...DEFAULT_FORM_VALUES,
       ...values,
@@ -238,7 +227,14 @@ export function DesignPanel(props: DesignPanelProps) {
                 <Form.Item label="Hoạt động vận hành" name="operatingScene"><Select options={constrainedOptions(designOptions.operating_scenes)} /></Form.Item>
                 <Form.Item label="Thời điểm" name="time"><Input type="time" /></Form.Item>
                 <Form.Item label="Mục tiêu hình ảnh" name="realismPreset"><Select options={designOptions.realism_presets} /></Form.Item>
-                <Form.Item label="Reference thiết kế nhà xưởng" tooltip="Chỉ ảnh hưởng độ chi tiết, vật liệu và tỷ lệ vận hành; không sao chép hình khối hoặc màu.">
+                <Alert
+                  type="info"
+                  showIcon
+                  className="reference-policy-alert"
+                  message="Ảnh tham khảo là tùy chọn"
+                  description="Mặc định hệ thống dùng geometry render và Design Master của chính dự án. Chỉ tải reference ngang, rõ nét khi cần bổ sung ngôn ngữ vật liệu hoặc không khí; reference không điều khiển hình khối hay camera."
+                />
+                <Form.Item label="Reference thiết kế nhà xưởng · Tùy chọn" tooltip="Chỉ ảnh hưởng độ chi tiết, vật liệu và tỷ lệ vận hành; không sao chép hình khối hoặc màu.">
                   <Upload
                     accept="image/png,image/jpeg,image/webp"
                     beforeUpload={() => false}
@@ -246,14 +242,13 @@ export function DesignPanel(props: DesignPanelProps) {
                     maxCount={1}
                     onChange={({ fileList }) => {
                       setFactoryReferenceFiles(fileList.slice(-1));
-                      setReferenceError(undefined);
                       onIntentChange();
                     }}
                   >
                     <Button icon={<CloudUploadOutlined />}>Chọn ảnh facade thực tế</Button>
                   </Upload>
                 </Form.Item>
-                <Form.Item label="Reference bối cảnh khu công nghiệp" tooltip="Chỉ ảnh hưởng đường, cây xanh, atmosphere và cảm giác khu công nghiệp.">
+                <Form.Item label="Reference bối cảnh khu công nghiệp · Tùy chọn" tooltip="Chỉ ảnh hưởng đường, cây xanh, atmosphere và cảm giác khu công nghiệp.">
                   <Upload
                     accept="image/png,image/jpeg,image/webp"
                     beforeUpload={() => false}
@@ -261,7 +256,6 @@ export function DesignPanel(props: DesignPanelProps) {
                     maxCount={1}
                     onChange={({ fileList }) => {
                       setContextReferenceFiles(fileList.slice(-1));
-                      setReferenceError(undefined);
                       onIntentChange();
                     }}
                   >
@@ -289,7 +283,6 @@ export function DesignPanel(props: DesignPanelProps) {
                 : `Các lựa chọn phù hợp với semantic evidence của model. Bối cảnh quy hoạch gồm ${designPreview.industrialContext.proxy_buildings.length} khối xưởng lân cận trong suốt và ${designPreview.industrialContext.roads.length} tuyến đường; đây là dữ liệu conceptual, không phải hiện trạng BIM.`}
             />
           )}
-          {referenceError && <Alert type="error" showIcon message={referenceError} />}
         </Flex>
 
         <Flex vertical gap={8} className="form-actions">

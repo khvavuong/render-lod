@@ -294,6 +294,12 @@ def build_materials(
             for item in asset.get("files", [])
             if asset_root is not None
         }
+        if role == "site_road":
+            # The bundled asphalt scan has useful normal/roughness maps, but its brown, pale
+            # albedo reads as concrete in aerial views and overrides the authoritative charcoal
+            # road colour. Retain surface response while letting the explicit asphalt colour drive
+            # the base channel. Parking is intentionally allowed to keep the lighter scan.
+            texture_files.pop("albedo", None)
         result = material(
             role,
             (*color[:3], opacity),
@@ -311,6 +317,9 @@ def build_materials(
         "main_shed": resolved("main_shed", _hex_color(palette["primary_hex"]), 0.35, 0.3),
         "office_block": resolved("office_block", _hex_color(palette["primary_hex"]), 0.18, 0.38),
         "service_yard": resolved("service_yard", _hex_color(palette["paving_hex"]), 0.0, 0.72),
+        # This is the model's continuous substrate, not a semantic concrete apron.
+        # Keep it neutral and subordinate so the overlaid authored site surfaces remain legible.
+        "site_ground": material("site_ground", (0.29, 0.31, 0.29, 1.0), 0.0, 0.94),
         "site_road": resolved("site_road", (0.12, 0.135, 0.14, 1), 0.0, 0.82),
         "sidewalk": resolved("sidewalk", (0.48, 0.49, 0.48, 1), 0.0, 0.76),
         "parking": resolved("parking", (0.28, 0.30, 0.31, 1), 0.0, 0.8),
@@ -1484,9 +1493,10 @@ def create_design_details(
                 detail_index,
                 semantic_role=entrance["semantic_role"],
             )
-        # A sliding leaf is shown parked clear of the authored traffic opening. This makes the
-        # entrance legible without inventing a ceremonial portal or blocking the approach road.
-        leaf_center = center + span_axis * opening_width if is_sliding_gate else center
+        # The semantic rectangle is a traffic opening, not a closed leaf. Park the restrained
+        # metal leaf beside that opening so every kit remains visibly truck-capable. Its location,
+        # width and connection to the fence remain derived from the authored entrance geometry.
+        leaf_center = center + span_axis * opening_width
         for rail_name, rail_height in (("bottom", 0.32), ("middle", 1.08), ("top", 2.02)):
             detail_index += 1
             _oriented_box(
@@ -1586,6 +1596,67 @@ def create_design_details(
                         0.045 if envelope_kit == "sandwich_panel_flat" else 0.06,
                         detail_materials["seam"],
                         detail_index,
+                    )
+            # Long eave facades receive a continuous gutter and regularly spaced downpipes.
+            # These are dimensioned construction details, not decorative motifs, and materially
+            # reduce the featureless-CGI appearance of long LOD100 industrial elevations.
+            assembly_bounds = assembly["bounding_box"] if assembly else None
+            assembly_long_span = (
+                max(
+                    assembly_bounds["maximum"][0] - assembly_bounds["minimum"][0],
+                    assembly_bounds["maximum"][1] - assembly_bounds["minimum"][1],
+                )
+                if assembly_bounds
+                else width
+            )
+            if width >= 24.0 and width >= assembly_long_span * 0.70:
+                protected_openings = [
+                    (
+                        dock["u"] * width - dock["width_m"] / 2 - 0.8,
+                        dock["u"] * width + dock["width_m"] / 2 + 0.8,
+                    )
+                    for dock in facade["loading_docks"]
+                ]
+                facade_entrance = facade.get("office_entrance")
+                if facade_entrance:
+                    protected_openings.append(
+                        (
+                            facade_entrance["u"] * width - facade_entrance["width_m"] - 0.8,
+                            facade_entrance["u"] * width + facade_entrance["width_m"] + 0.8,
+                        )
+                    )
+                detail_index += 1
+                _detail_box(
+                    f"{facade['surface_id']}:eave-gutter",
+                    surface,
+                    width / 2,
+                    max(0.35, height - 0.16),
+                    width * 0.99,
+                    0.22,
+                    0.24,
+                    detail_materials["secondary"],
+                    detail_index,
+                    semantic_role="design_detail",
+                )
+                downpipe_count = max(2, int(np.ceil(width / 24.0)))
+                for pipe_number in range(downpipe_count + 1):
+                    pipe_u = width * pipe_number / downpipe_count
+                    if pipe_u <= 0.25 or pipe_u >= width - 0.25:
+                        continue
+                    if any(start <= pipe_u <= end for start, end in protected_openings):
+                        continue
+                    detail_index += 1
+                    _detail_box(
+                        f"{facade['surface_id']}:downpipe-{pipe_number:02d}",
+                        surface,
+                        pipe_u,
+                        plinth_height + (height - plinth_height) / 2,
+                        0.14,
+                        max(0.5, height - plinth_height),
+                        0.18,
+                        detail_materials["secondary"],
+                        detail_index,
+                        semantic_role="design_detail",
                     )
             clerestory_height = min(
                 float(articulation.get("clerestory_band_height_m", 0.0)), height * 0.16
@@ -2051,6 +2122,7 @@ def configure_world(
     world_tree = scene.world.node_tree
     world_tree.nodes.clear()
     sky = world_tree.nodes.new("ShaderNodeTexSky")
+    sky.name = "V365 Physical Sky"
     sky.sky_type = "NISHITA"
     sky.sun_rotation = sun_azimuth
     sky.sun_elevation = sun_elevation
@@ -2058,10 +2130,12 @@ def configure_world(
     sky.dust_density = 1.4
     sky.ozone_density = 1.0
     sky_background = world_tree.nodes.new("ShaderNodeBackground")
+    sky_background.name = "V365 Sky Background"
     # Keep skylight as fill rather than flattening all facade/ground values. Direct sun then
     # creates readable contact shadows while AgX protects the light metal roof highlights.
     sky_background.inputs["Strength"].default_value = 0.45
     camera_background = world_tree.nodes.new("ShaderNodeBackground")
+    camera_background.name = "V365 Camera Background"
     # Headless EGL can return a black camera background for Nishita even while its lighting is
     # valid.  A neutral daylight plate keeps Base RGB useful as image-generation authority.
     camera_background.inputs["Color"].default_value = (0.32, 0.52, 0.78, 1.0)
@@ -2072,6 +2146,7 @@ def configure_world(
     if profile == "premium_cycles":
         light_path = world_tree.nodes.new("ShaderNodeLightPath")
         camera_mix = world_tree.nodes.new("ShaderNodeMixShader")
+        camera_mix.name = "V365 Camera Mix"
         world_tree.links.new(light_path.outputs["Is Camera Ray"], camera_mix.inputs[0])
         world_tree.links.new(camera_background.outputs["Background"], camera_mix.inputs[2])
 
@@ -2095,6 +2170,7 @@ def configure_world(
         environment = world_tree.nodes.new("ShaderNodeTexEnvironment")
         environment.image = bpy.data.images.load(str(environment_file), check_existing=True)
         environment_background = world_tree.nodes.new("ShaderNodeBackground")
+        environment_background.name = "V365 Environment Background"
         environment_background.inputs["Strength"].default_value = 0.7
         world_tree.links.new(environment.outputs["Color"], environment_background.inputs["Color"])
         if camera_mix:
@@ -2129,6 +2205,64 @@ def configure_world(
     sun = bpy.data.objects.new("Sun", sun_data)
     sun.rotation_euler = (math.pi / 2 - sun_elevation, 0.0, sun_azimuth)
     bpy.context.collection.objects.link(sun)
+
+
+def configure_view_lighting(spec: dict, design_data: dict | None = None) -> None:
+    """Give photography-specific cameras matching pixel evidence without changing geometry."""
+
+    scene = bpy.context.scene
+    environment = design_data.get("environment", {}) if design_data else {}
+    base_azimuth = math.radians(float(environment.get("sun_azimuth_deg", 135.0)))
+    base_elevation = math.radians(float(environment.get("sun_elevation_deg", 42.0)))
+    golden_hour = spec.get("role") == "loading_detail"
+    sun_azimuth = base_azimuth + (math.radians(18.0) if golden_hour else 0.0)
+    sun_elevation = math.radians(17.0) if golden_hour else base_elevation
+
+    sun = bpy.data.objects.get("Sun")
+    if sun is not None and sun.type == "LIGHT":
+        sun.rotation_euler = (math.pi / 2 - sun_elevation, 0.0, sun_azimuth)
+        sun.data.energy = 2.35 if golden_hour else 2.8
+        sun.data.color = (1.0, 0.68, 0.42) if golden_hour else (1.0, 1.0, 1.0)
+
+    if scene.world and scene.world.use_nodes and scene.world.node_tree:
+        world_tree = scene.world.node_tree
+        sky = world_tree.nodes.get("V365 Physical Sky")
+        if sky is not None:
+            sky.sun_rotation = sun_azimuth
+            sky.sun_elevation = sun_elevation
+            sky.dust_density = 2.2 if golden_hour else 1.4
+        camera_background = world_tree.nodes.get("V365 Camera Background")
+        if camera_background is not None:
+            camera_background.inputs["Color"].default_value = (
+                (0.48, 0.55, 0.72, 1.0) if golden_hour else (0.32, 0.52, 0.78, 1.0)
+            )
+            camera_background.inputs["Strength"].default_value = 0.65 if golden_hour else 0.55
+        scene.view_settings.exposure = 0.7 if golden_hour else 0.0
+        # The Eevee daylight HDRI otherwise remains a strong morning pixel cue and routinely
+        # overrides a text-only golden-hour instruction. For this one photography role, use the
+        # deterministic sky plate plus warm low sun as conditioning evidence. Restore the normal
+        # world source for every other role so rendering a selected subset remains deterministic.
+        output = next(
+            (node for node in world_tree.nodes if node.bl_idname == "ShaderNodeOutputWorld"),
+            None,
+        )
+        if output is not None:
+            camera_mix = world_tree.nodes.get("V365 Camera Mix")
+            environment_background = world_tree.nodes.get("V365 Environment Background")
+            sky_background = world_tree.nodes.get("V365 Sky Background")
+            normal_source = (
+                camera_mix or environment_background or sky_background or camera_background
+            )
+            source = camera_background if golden_hour else normal_source
+            if source is not None:
+                for link in tuple(output.inputs["Surface"].links):
+                    world_tree.links.remove(link)
+                output_socket = (
+                    source.outputs["Shader"]
+                    if source.bl_idname == "ShaderNodeMixShader"
+                    else source.outputs["Background"]
+                )
+                world_tree.links.new(output_socket, output.inputs["Surface"])
 
 
 def configure_camera(spec: dict):
@@ -2277,6 +2411,7 @@ def render_masks(view_dir: Path) -> None:
         "main_shed": (0.85, 0.15, 0.10, 1.0),
         "office_block": (0.10, 0.35, 0.90, 1.0),
         "service_yard": (0.20, 0.70, 0.25, 1.0),
+        "site_ground": (0.42, 0.30, 0.16, 1.0),
         "site_road": (0.18, 0.18, 0.18, 1.0),
         "sidewalk": (0.55, 0.52, 0.48, 1.0),
         "parking": (0.35, 0.35, 0.35, 1.0),
@@ -2554,8 +2689,12 @@ def main() -> None:
         (view_dir / "camera.json").write_text(
             json.dumps(camera_spec, indent=2) + "\n", encoding="utf-8"
         )
+        configure_view_lighting(camera_spec, design_data)
         camera = configure_camera(camera_spec)
         render_pbr(view_dir)
+        # Photographic exposure belongs only to Base RGB. Semantic/material/control passes rely
+        # on exact encoded colours and must never inherit the golden-hour exposure transform.
+        bpy.context.scene.view_settings.exposure = 0.0
         render_context_proxy_overlay(view_dir)
         if not args.pbr_only:
             render_masks(view_dir)

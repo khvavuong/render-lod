@@ -121,6 +121,10 @@ tham khảo độ chân thật ảnh chụp, phản ứng vật liệu và mật
 palette, hình mái, facade, massing, camera, bố cục giao thông/cảnh quan hay vật thể riêng của
 dự án mẫu. Canonical Scene và Design DNA luôn có quyền ưu tiên cao hơn:
 
+Mặc định production không tự gắn quality baseline từ dự án cũ. Chỉ bật
+`V365_AUTO_APPEARANCE_BASELINE=true` cho một benchmark có chủ đích; ảnh người dùng tải lên phải là
+ảnh ngang từ 768×432 trở lên, tỷ lệ 1,30–2,20 và mỗi vai trò chỉ nhận tối đa một ảnh.
+
 ```bash
 make refine-view \
   MODEL=/path/to/project.rvt \

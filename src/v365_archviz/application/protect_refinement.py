@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -47,6 +48,7 @@ class ProtectRefinement:
         minimum_edge_f1: float = 0.80,
         maximum_edge_chamfer_px: float = 3.0,
         restore_locked_pixels: bool = True,
+        composite_context_proxy: bool = False,
     ) -> ProtectedRefinementArtifacts:
         if not 0.0 <= minimum_edge_alignment <= 1.0:
             raise ValueError("minimum_edge_alignment must be between zero and one")
@@ -74,6 +76,23 @@ class ProtectRefinement:
             with Image.open(refined) as generated_image:
                 target_size = generated_image.size
                 generated_rgb = generated_image.convert("RGB")
+            context_overlay = render_root / view_dir.name / "context_proxy_rgba.png"
+            context_composited = False
+            if composite_context_proxy and context_overlay.is_file():
+                with Image.open(context_overlay) as overlay_image:
+                    overlay = overlay_image.convert("RGBA").resize(
+                        target_size, Image.Resampling.LANCZOS
+                    )
+                generated_rgb = Image.alpha_composite(
+                    generated_rgb.convert("RGBA"), overlay
+                ).convert("RGB")
+                buffer = io.BytesIO()
+                if refined.suffix.lower() in {".jpg", ".jpeg"}:
+                    generated_rgb.save(buffer, format="JPEG", quality=95, optimize=True)
+                else:
+                    generated_rgb.save(buffer, format="PNG", optimize=True)
+                atomic_write(refined, buffer.getvalue())
+                context_composited = True
             with Image.open(base) as base_image:
                 authoritative = base_image.convert("RGB").resize(
                     target_size, Image.Resampling.LANCZOS
@@ -113,6 +132,10 @@ class ProtectRefinement:
                         "locked_mask_ref": str(mask),
                         "locked_mask_sha256": _sha256(mask),
                         "base_rgb_sha256": _sha256(base),
+                        "context_proxy_composited": context_composited,
+                        "context_proxy_sha256": (
+                            _sha256(context_overlay) if context_composited else None
+                        ),
                     }
                 )
                 atomic_write(
@@ -149,6 +172,10 @@ class ProtectRefinement:
                         "locked_mask_sha256": _sha256(mask),
                         "base_rgb_sha256": _sha256(base),
                         "sha256": _sha256(refined),
+                        "context_proxy_composited": context_composited,
+                        "context_proxy_sha256": (
+                            _sha256(context_overlay) if context_composited else None
+                        ),
                     }
                 )
                 atomic_write(
@@ -169,9 +196,7 @@ class ProtectRefinement:
                 )
                 continue
             protected = Image.composite(authoritative, generated_rgb, locked)
-            from io import BytesIO
-
-            buffer = BytesIO()
+            buffer = io.BytesIO()
             protected.save(buffer, format="PNG", optimize=True)
             protected_path = view_dir / "refined.png"
             atomic_write(protected_path, buffer.getvalue())
@@ -189,6 +214,10 @@ class ProtectRefinement:
                     "locked_mask_sha256": _sha256(mask),
                     "base_rgb_sha256": _sha256(base),
                     "geometry_protection_status": "promoted",
+                    "context_proxy_composited": context_composited,
+                    "context_proxy_sha256": (
+                        _sha256(context_overlay) if context_composited else None
+                    ),
                     **self._metrics_document(edge_metrics),
                     "edge_alignment_threshold": minimum_edge_alignment,
                     "edge_f1_threshold": minimum_edge_f1,

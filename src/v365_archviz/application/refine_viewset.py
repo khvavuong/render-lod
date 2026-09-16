@@ -67,8 +67,10 @@ VIEW_DIRECTIVES = {
     ),
     ViewRole.LOADING_DETAIL: (
         "VIEW PURPOSE — HUMAN-SCALE / GOLDEN-HOUR HERO: preserve the low human-scale oblique "
-        "camera and all daytime design geometry, changing only photography DNA. Use credible late-"
-        "afternoon golden light or early blue hour, restrained warm interior/entrance lighting and "
+        "camera and all design geometry, changing only photography DNA. This view explicitly "
+        "overrides the shared daylight environment: use credible late-afternoon golden light, a "
+        "low warm "
+        "sun, long physically plausible shadows, restrained warm loading/entrance lights and "
         "a modest number of people and vehicles. Keep facade materials neutral and technically "
         "legible; no cinematic fantasy colours, wet-road spectacle or night-time darkness."
     ),
@@ -164,6 +166,7 @@ def _identity_contract(design: DesignDNA) -> tuple[dict[str, object], str]:
         "continuous_fence_and_gate": palette["boundary_hex"],
         "external_and_perimeter_site_roads": "dark charcoal asphalt, never pale concrete",
         "internal_service_yards_and_loading_aprons": palette["paving_hex"],
+        "site_ground_underlay": "non-finish neutral substrate; never infer road or concrete apron",
     }
     site_boundary_contract = {
         "geometry": "authored boundary and gate openings only",
@@ -267,6 +270,14 @@ def _select_master_view_id(render_root: Path, cameras: tuple[Camera, ...]) -> st
             }
         except (OSError, json.JSONDecodeError, KeyError, TypeError):
             evidence = {}
+
+    # For a complete view set, the overview is the only single image that carries roof, site,
+    # access, boundary and context identity together. Close views can score highly from occupancy
+    # while being a poor project-wide appearance anchor. The staged worker excludes this camera
+    # when it independently chooses its complementary facade master.
+    overall = next((camera for camera in cameras if camera.role is ViewRole.OVERALL), None)
+    if overall is not None and evidence.get(overall.view_id, {}).get("status", "pass") == "pass":
+        return overall.view_id
 
     fallback_priority = {
         ViewRole.OVERALL: 6.0,

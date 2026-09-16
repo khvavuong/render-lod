@@ -156,7 +156,7 @@ def test_photoreal_balanced_uses_only_clean_authority_inputs(tmp_path: Path) -> 
             "image_size": "1K",
         }
         assert body["generation_config"] == {"thinking_level": "high"}
-        assert len(body["input"]) == 9
+        assert len(body["input"]) == 11
         labels = [block["text"] for block in body["input"] if block["type"] == "text"]
         prompt = labels[0]
         assert "AUTHORITY" in prompt
@@ -166,6 +166,7 @@ def test_photoreal_balanced_uses_only_clean_authority_inputs(tmp_path: Path) -> 
         assert any("BASE RGB" in label for label in labels)
         assert any("REALISM REFERENCE" in label for label in labels)
         assert any("MONOCHROME STRUCTURE AUTHORITY" in label for label in labels)
+        assert any("AERIAL SITE-PLAN AUTHORITY" in label for label in labels)
         assert not any("DEPTH" in label for label in labels)
         assert not any("INSTANCE ID" in label for label in labels)
         assert not any("SEMANTIC ID" in label for label in labels)

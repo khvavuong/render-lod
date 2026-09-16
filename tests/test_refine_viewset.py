@@ -47,7 +47,7 @@ class FakeViewSetRenderer:
         )
 
 
-def test_selects_a_design_readable_master_instead_of_a_distant_overall(tmp_path: Path) -> None:
+def test_selects_overall_as_complete_viewset_master(tmp_path: Path) -> None:
     cameras = tuple(
         Camera(
             view_id=f"view-{index:02d}",
@@ -84,7 +84,7 @@ def test_selects_a_design_readable_master_instead_of_a_distant_overall(tmp_path:
         encoding="utf-8",
     )
 
-    assert _select_master_view_id(tmp_path, cameras) == "view-02"
+    assert _select_master_view_id(tmp_path, cameras) == "view-01"
     assert select_master_view_ids(tmp_path, cameras) == ("view-01", "view-02")
 
 

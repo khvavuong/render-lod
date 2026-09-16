@@ -20,11 +20,33 @@ explicit context-ground region may receive realistic industrial
 estate continuity. Do not create neighbouring buildings: deterministic translucent context proxies
 are composited after this step.
 
+SITE-SURFACE AUTHORITY
+The site-ground region is only the continuous model substrate beneath the authored site plan; it is
+not a service yard and must never be expanded into a concrete apron. Preserve the exact visible
+boundaries and hierarchy of dark asphalt site roads, concrete loading/service yards, parking,
+sidewalks and planted landscape masks. Specific authored surface regions always override the
+site-ground underlay. Do not merge, widen, reroute, recolour or invent any road, yard or planting
+island. External and perimeter roads remain dark asphalt, never pale concrete.
+
 ALLOWED CHANGES
-Improve only material response, small construction detail, contact shadows, glazing reflections,
-vegetation realism, asphalt/concrete micro-texture, restrained operational wear and atmospheric
-depth. Keep planting inside its visible zones and traffic routes unobstructed. Use sparse correctly
-scaled vehicles and people only where they do not hide architecture or access.
+Turn every approved proposal already visible in Base RGB into fully resolved, buildable industrial
+architecture—not merely a texture transfer over CGI. Add photographic-scale construction finish
+within those existing regions: corrugation and panel joints, flashings, gutters and downpipes,
+recessed loading-door jambs, canopy edge thickness, bollards, drainage channels, kerbs, expansion
+joints, glazing reflectance, material micro-roughness, contact shadows and restrained operational
+wear. These details may add surface depth but may not create, remove or relocate an opening, facade
+bay, road, building or roof assembly. Keep planting inside its visible zones and traffic routes
+unobstructed. Use sparse correctly scaled vehicles and people only where they do not hide
+architecture or access.
+
+DESIGN RESOLUTION
+The result must read as deliberately designed architecture, not a plain box with a colour stripe.
+Resolve the already approved facade grammar into a clear hierarchy: a calm primary cladding field,
+a durable recessed plinth, precise eave and corner flashings, dimensional structural bay rhythm,
+and restrained accent only at the existing emphasized bays and doors. Give every existing loading
+door a complete buildable ensemble of recessed jambs, head flashing, weather canopy, threshold,
+bollards and ground drainage. Vary roughness and joint shadow at construction scale, not facade
+colour or topology. Do not apply accents, fins, glazing or canopies indiscriminately to every bay.
 
 PHOTOGRAPHIC DIRECTION
 Natural full-frame architectural photography, physically plausible daylight, neutral white
@@ -43,7 +65,8 @@ PROHIBITED
 No camera or topology drift; no roof subdivision; no relocated/duplicate gate; no missing fence or
 road; no invented opening; no saturated fantasy colour; no copied reference layout, facade or
 palette; no text or logos. Keep one material, lighting and colour-grade identity across all six
-views."""
+views, except that VIEW-06 preserves those materials under its explicitly required late-afternoon
+golden-hour photography."""
 
 
 def build_refinement_prompt(
@@ -74,7 +97,8 @@ restrained
 accent={palette.accent_hex} at no more than {preferences.accent_coverage_percent}% of facade;
 fence/gate={palette.boundary_hex}; internal service yards/loading aprons={palette.paving_hex};
 external approach and perimeter roads=dark charcoal asphalt. External roads must never render as
-white/light concrete. Never swap these roles.
+white/light concrete. The site-ground underlay is not a finish or circulation surface and must not
+be interpreted as a service yard. Never swap, merge or extend these roles.
 Roof: {", ".join(roofs)}; {len(design.roof_assemblies)} continuous assemblies, long-axis ridges.
 Facade system: {preferences.envelope_kit}, {preferences.facade_rhythm_kit}; approved proposed
 entrances={proposal_entrances}, approved proposed loading doors={proposal_docks}. Do not add more.
@@ -85,7 +109,7 @@ buildings={auxiliary_count};
 keep them secondary but real.
 Context: {context.mode if context else design.site_design.surrounding_context_mode};
 deterministic proxy count={len(context.proxy_buildings) if context else 0}; proxies are excluded
-from AI authority and restored later. Environment: {design.environment.time},
+from AI authority and restored later. Shared daylight environment: {design.environment.time},
 {design.environment.weather}, {design.environment.white_balance_k}K. Landscape:
 {design.presentation.landscape_character}. User preference:
 {preferences.creative_prompt or "none"}; this is soft and cannot override authority or palette."""

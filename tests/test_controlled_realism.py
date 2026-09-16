@@ -168,6 +168,38 @@ def test_validation_only_protection_keeps_photoreal_provider_pixels(tmp_path: Pa
     assert result.promoted_count == 1
 
 
+def test_validation_only_can_composite_registered_context_after_generation(tmp_path: Path) -> None:
+    render = tmp_path / "renders" / "view-01"
+    generated = tmp_path / "generated" / "view-01"
+    _save_rgb(render / "base_rgb.png", (255, 255, 255), (4, 2))
+    Image.new("L", (4, 2), 255).save(render / "locked_mask.png")
+    Image.new("L", (4, 2), 0).save(render / "edges.png")
+    Image.new("RGBA", (4, 2), (190, 190, 190, 96)).save(render / "context_proxy_rgba.png")
+    (render / "control_pack_manifest.json").write_text("{}", encoding="utf-8")
+    generated.mkdir(parents=True)
+    (generated / "refined.png").write_bytes(_png_bytes((20, 40, 60), (4, 2)))
+    (generated / "generation_manifest.json").write_text(
+        json.dumps({"output": {"media_type": "image/png", "sha256": "old"}}),
+        encoding="utf-8",
+    )
+
+    ProtectRefinement().execute(
+        tmp_path / "renders",
+        tmp_path / "generated",
+        restore_locked_pixels=False,
+        composite_context_proxy=True,
+    )
+
+    with Image.open(generated / "refined.png") as image:
+        assert image.convert("RGB").getpixel((0, 0)) != (20, 40, 60)
+    document = json.loads((generated / "generation_manifest.json").read_text())
+    assert document["output"]["context_proxy_composited"] is True
+    assert (
+        document["output"]["context_proxy_sha256"]
+        == hashlib.sha256((render / "context_proxy_rgba.png").read_bytes()).hexdigest()
+    )
+
+
 def test_geometry_v2_penalizes_invented_locked_edges(tmp_path: Path) -> None:
     size = (12, 8)
     generated = Image.new("L", size, 0)
@@ -323,6 +355,8 @@ def test_conditioning_camera_preflight_measures_semantic_coverage(tmp_path: Path
     report = json.loads(result.report_path.read_text(encoding="utf-8"))
     assert report["views"][0]["focus_coverage"] == pytest.approx(0.3)
     assert report["views"][0]["circulation_coverage"] == pytest.approx(0.2)
+    assert report["views"][0]["role_target_coverage"] == pytest.approx(0.2)
+    assert report["views"][0]["available_role_targets"] == ["site_road"]
 
 
 def test_conditioning_camera_preflight_measures_central_occluder_crop(

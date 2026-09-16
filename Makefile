@@ -1,4 +1,4 @@
-PYTHON ?= .venv/bin/python
+PYTHON ?= .venv\Scripts\python.exe
 MODEL ?=
 BRIEF ?=
 REFERENCES ?=

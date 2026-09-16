@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from v365_archviz.domain.design import DesignDNA
+from v365_archviz.domain.style_pack import ContextPolicy, StylePack
 
 LAYERED_BASE_PROMPT = """TASK
 Photorealistically refine this exact camera render into a bid-quality photograph of a buildable
@@ -69,14 +70,111 @@ views, except that VIEW-06 preserves those materials under its explicitly requir
 golden-hour photography."""
 
 
+GEOMETRY_CONTRACT = """AUTHORITY
+The current Base RGB fixes camera, project massing, roof geometry, footprint, authored roads,
+yards, landscape zones, gate openings and fence runs. Preserve all of them exactly: same camera
+position and framing, same silhouette, and the same number and placement of openings, docks and
+bays. Facade articulation already present in Base RGB is approved design and must stay in its
+authored locations as one consistent kit across every camera. Geometry is not negotiable.
+
+Authored landscape zones stay planted. Every area the Base RGB shows as landscape must read as
+living planting — grass, groundcover, shrubs or trees — across most of its area. Do not pave,
+gravel, dry out or build over a landscape zone, and do not shrink one to a thin edge strip.
+
+This authority covers the project and its site only. Flat, blank or translucent massing beyond
+the site boundary is placeholder context, not authored geometry: it carries position and scale
+but no appearance, and the CONTEXT section below governs what happens to it. Never preserve a
+placeholder slab as a finished surface.
+
+PROHIBITED
+No camera movement, reframing, zoom or crop. No change to massing or roof topology. No relocated
+or duplicated gate, no missing fence or road, no invented or removed opening. No text, logos,
+watermarks or signage. Do not copy the layout, massing, facade or composition of any reference
+image; references inform photographic quality only. Keep one material, lighting and colour-grade
+identity across all views in the set."""
+
+_CONTEXT_INSTRUCTION = {
+    ContextPolicy.AUTHORED_ONLY: (
+        "Render only what the model authored. Do not add neighbouring buildings, roads or "
+        "infrastructure beyond the site boundary; leave the surroundings open and plain."
+    ),
+    ContextPolicy.RESOLVE_PROXIES: (
+        "Treat flat or translucent context massing in the conditioning images as a placement "
+        "hint for where neighbouring built form belongs, and resolve it into believable real "
+        "buildings. Never let placeholder grey slabs survive into the final image. Do not invent "
+        "built form where the conditioning images show open ground."
+    ),
+    ContextPolicy.GENERATED_SURROUNDINGS: (
+        "Resolve the empty sky and the ground beyond the site boundary into a believable "
+        "surrounding estate consistent with the environment description, and resolve any flat or "
+        "translucent context massing into real buildings. Never let placeholder grey slabs "
+        "survive into the final image. Context must read as real and stay clearly secondary to "
+        "the project."
+    ),
+}
+
+
+def massing_contract(design: DesignDNA) -> str:
+    """State the authored building count explicitly and protect authored open ground.
+
+    A provider that is only told to "preserve massing" will still fill a large empty yard with
+    extra sheds, and the screen cannot see it: the invented volumes sit far from every
+    authoritative edge, so they are never scored. The count therefore has to be stated as a
+    hard number, and the open ground has to be named as something to leave empty.
+    """
+
+    volumes = len(design.roof_assemblies)
+    return (
+        "MASSING\n"
+        f"The project contains exactly {volumes} roofed building volume"
+        f"{'' if volumes == 1 else 's'}, and no others. Do not add, remove, split, merge or "
+        "duplicate a building volume, and do not extend a roof into a new bay or wing. Yards, "
+        "aprons, service areas, car parks and circulation shown as open paving in Base RGB are "
+        "authored open ground: they stay open. Do not place buildings, sheds, canopies, awnings "
+        "or roofed structures on them. If an open area looks large or empty, that is the "
+        "authored design, not a gap to fill."
+    )
+
+
+def compose_style_prompt(pack: StylePack, design: DesignDNA | None = None) -> str:
+    """Render one authored style pack into the aesthetic layers of the instruction."""
+
+    sections = [
+        f"TASK\n{pack.intent}",
+        GEOMETRY_CONTRACT,
+        f"ALLOWED CHANGES\n{pack.allowed_changes}",
+        f"PHOTOGRAPHIC DIRECTION\n{pack.photography}",
+    ]
+    if design is not None:
+        sections.insert(2, massing_contract(design))
+    context = _CONTEXT_INSTRUCTION[pack.context_policy]
+    if pack.context_direction:
+        context = f"{context} {pack.context_direction}"
+    sections.append(f"CONTEXT\n{context}")
+    if pack.prohibited:
+        sections.append(f"ADDITIONAL LIMITS\n{pack.prohibited}")
+    return "\n\n".join(sections)
+
+
 def build_refinement_prompt(
     design_dna_path: Path,
     prompt_file: Path | None = None,
+    style_pack: StylePack | None = None,
 ) -> tuple[DesignDNA, str]:
-    """Keep provider instructions short; geometry, masks and QA carry detailed constraints."""
+    """Keep provider instructions short; geometry, masks and QA carry detailed constraints.
+
+    Precedence is explicit: an authored style pack composes the aesthetic layers above the
+    system-owned geometry contract, a raw prompt file replaces the whole base for benchmarking,
+    and the built-in base is the fallback.
+    """
 
     design = DesignDNA.model_validate_json(design_dna_path.read_text(encoding="utf-8"))
-    base = prompt_file.read_text(encoding="utf-8") if prompt_file else LAYERED_BASE_PROMPT
+    if prompt_file is not None:
+        base = prompt_file.read_text(encoding="utf-8")
+    elif style_pack is not None:
+        base = compose_style_prompt(style_pack, design)
+    else:
+        base = LAYERED_BASE_PROMPT
     palette = design.material_palette
     preferences = design.design_preferences
     roofs = sorted({building.roof.roof_type for building in design.buildings})

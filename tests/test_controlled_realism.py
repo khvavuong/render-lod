@@ -165,6 +165,51 @@ def test_validation_only_protection_keeps_photoreal_provider_pixels(tmp_path: Pa
     document = json.loads((generated / "generation_manifest.json").read_text())
     assert document["output"]["protected_composite"] is False
     assert document["output"]["geometry_protection_mode"] == "validation_only"
+    # This fixture has no authoritative edge under LOCKED, so the structural screen measured
+    # nothing. Validation-only ships the provider pixels unchanged, so an unmeasurable screen
+    # must be reported as unverifiable instead of being promoted on an invented perfect score.
+    assert document["output"]["geometry_protection_status"] == "edge_alignment_unverifiable"
+    assert document["output"]["edge_alignment_verifiable"] is False
+    assert result.promoted_count == 0
+    assert result.rejected_count == 1
+
+
+def test_validation_only_screen_promotes_when_locked_edges_align(tmp_path: Path) -> None:
+    """A measurable, aligned screen still promotes in validation-only mode."""
+
+    size = (48, 48)
+    render = tmp_path / "renders" / "view-01"
+    generated = tmp_path / "generated" / "view-01"
+    base = Image.new("RGB", size, (255, 255, 255))
+    edges = Image.new("L", size, 0)
+    refined = Image.new("RGB", size, (255, 255, 255))
+    for y in range(size[1]):
+        # A detected edge occupies the transition band either side of the drawn line, so the
+        # authoritative band is written at the same width the screen will measure.
+        for x in (23, 24, 25):
+            edges.putpixel((x, y), 255)
+        refined.putpixel((24, y), (0, 0, 0))
+    render.mkdir(parents=True)
+    base.save(render / "base_rgb.png")
+    edges.save(render / "edges.png")
+    Image.new("L", size, 255).save(render / "locked_mask.png")
+    (render / "control_pack_manifest.json").write_text("{}", encoding="utf-8")
+    generated.mkdir(parents=True)
+    refined.save(generated / "refined.png")
+    (generated / "generation_manifest.json").write_text(
+        json.dumps({"output": {"media_type": "image/png", "sha256": "old"}}),
+        encoding="utf-8",
+    )
+
+    result = ProtectRefinement().execute(
+        tmp_path / "renders",
+        tmp_path / "generated",
+        restore_locked_pixels=False,
+    )
+
+    document = json.loads((generated / "generation_manifest.json").read_text())
+    assert document["output"]["edge_alignment_verifiable"] is True
+    assert document["output"]["geometry_protection_status"] == "edge_alignment_screen_passed"
     assert result.promoted_count == 1
 
 

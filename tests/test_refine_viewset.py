@@ -6,6 +6,7 @@ from PIL import Image
 
 from v365_archviz.application.refine_viewset import (
     RefineViewSet,
+    _failed_conditioning_view_ids,
     _select_master_view_id,
     select_master_view_ids,
 )
@@ -203,3 +204,26 @@ def test_refines_an_ordered_view_set_as_one_unit(tmp_path: Path) -> None:
     )
     assert first_view_manifest["input_roles"]["reference_01"] == "context_composition_guide"
     assert "reference_02" not in first_view_manifest["input_roles"]
+
+
+def test_refuses_views_the_conditioning_gate_rejected(tmp_path: Path) -> None:
+    """The gate runs before generation so rejected cameras never reach a paid provider."""
+
+    (tmp_path / "conditioning_qa.json").write_text(
+        json.dumps(
+            {
+                "views": [
+                    {"view_id": "view-01", "status": "pass"},
+                    {"view_id": "view-02", "status": "fail"},
+                    {"view_id": "view-03", "status": "fail"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert _failed_conditioning_view_ids(tmp_path) == frozenset({"view-02", "view-03"})
+
+
+def test_absent_conditioning_report_is_not_treated_as_approval(tmp_path: Path) -> None:
+    assert _failed_conditioning_view_ids(tmp_path) == frozenset()

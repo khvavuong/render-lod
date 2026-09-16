@@ -255,6 +255,31 @@ def _identity_contract(design: DesignDNA) -> tuple[dict[str, object], str]:
     return contract, prompt
 
 
+def _failed_conditioning_view_ids(render_root: Path) -> frozenset[str]:
+    """Views the conditioning gate already rejected, read from its report if one exists.
+
+    The gate runs before generation precisely so unusable cameras never reach a paid provider.
+    Reading its verdict here closes the loop; an absent report means the gate has not run and
+    is not treated as approval.
+    """
+
+    report_path = render_root / "conditioning_qa.json"
+    if not report_path.is_file():
+        return frozenset()
+    try:
+        document = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return frozenset()
+    views = document.get("views")
+    if not isinstance(views, list):
+        return frozenset()
+    return frozenset(
+        str(item["view_id"])
+        for item in views
+        if isinstance(item, dict) and item.get("view_id") and item.get("status") == "fail"
+    )
+
+
 def _select_master_view_id(render_root: Path, cameras: tuple[Camera, ...]) -> str:
     """Choose the strongest visible design-identity view, falling back to an overview."""
 
@@ -464,6 +489,7 @@ class RefineViewSet:
         approved_master_view_id: str | None = None,
         reference_images_by_view: dict[str, tuple[Path, ...]] | None = None,
         quality_standard_path: Path | None = None,
+        allow_failed_conditioning: bool = False,
     ) -> RefinedViewSetArtifacts:
         view_set = ViewSet.model_validate_json(view_set_path.read_text(encoding="utf-8"))
         design = DesignDNA.model_validate_json(design_dna_path.read_text(encoding="utf-8"))
@@ -489,6 +515,17 @@ class RefineViewSet:
         )
         if not selected_cameras:
             raise InvalidModelError("view-set selection cannot be empty")
+        if not allow_failed_conditioning:
+            rejected = _failed_conditioning_view_ids(render_root)
+            blocked = sorted(
+                camera.view_id for camera in selected_cameras if camera.view_id in rejected
+            )
+            if blocked:
+                raise InvalidModelError(
+                    "conditioning QA rejected these views, so generating them would spend "
+                    f"provider budget on unusable cameras: {blocked}. Fix the framing and "
+                    "re-render, or pass allow_failed_conditioning to override deliberately."
+                )
         design_master: GeneratedImage | None = None
         if approved_master_path is not None:
             if not approved_master_path.is_file():

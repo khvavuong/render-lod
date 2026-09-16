@@ -244,6 +244,12 @@ def _arrival_shot(
     tangent = (-outward[1], outward[0])
     lateral_offset = min(26.0, max(18.0, site_span * 0.09))
     focus_height = focus_maximum[2] - focus_minimum[2]
+    # Stand back far enough to hold the gate and its approach, but no further: a setback driven
+    # by the whole site span puts the camera so far outside a large site that the building it is
+    # meant to introduce shrinks below the conditioning gate's minimum subject coverage.
+    setback = min(max(28.0, focus_height * 3.2), max(34.0, site_span * 0.14))
+    tangent = (-outward[1], outward[0])
+    lateral_offset = min(24.0, max(14.0, site_span * 0.07))
     position = (
         gate_center[0] + outward[0] * setback + tangent[0] * lateral_offset,
         gate_center[1] + outward[1] * setback + tangent[1] * lateral_offset,
@@ -410,12 +416,23 @@ class PlanStandardCameras:
             sensor_width_mm=36.0,
             frame_margin=1.18,
         )
+        # An eye-level approach must stand close enough that the building it introduces still
+        # reads. Used only by the fallback below, which runs when no gate is authored.
+        site_span_for_approach = max(
+            site_maximum[0] - site_minimum[0], site_maximum[1] - site_minimum[1]
+        )
+        approach_distance = min(max(45.0, height * 5.5), max(55.0, site_span_for_approach * 0.20))
+        # Place the approach camera relative to what it looks at, so approach_distance really is
+        # the stand-off from the subject. Adding it to half the site length instead pushes the
+        # camera past the far end of a long building and shrinks the subject out of range.
+        approach_target_long = -(long_span / 2) * 0.86
+        approach_target_cross = -(cross_span / 2) * 0.86
         arrival_shot = _arrival_shot(
             scene,
             minimum,
             maximum,
             site_center,
-            max(site_maximum[0] - site_minimum[0], site_maximum[1] - site_minimum[1]),
+            site_span_for_approach,
         )
         golden_arrival_shot = _golden_arrival_shot(arrival_shot)
 
@@ -468,7 +485,11 @@ class PlanStandardCameras:
                     )
                     side = -1.0 if office_entrance.u >= 0.5 else 1.0
                     lateral = min(22.0, max(14.0, office_surface.width_m * 0.16))
-                    outward = min(16.0, max(10.0, cross_span * 0.12))
+                    # Stand back far enough that the entrance bay and its ground plane both fit a
+                    # plausible architectural frame. A stand-off shorter than the building height
+                    # fills the frame with cladding, and the provider answers by pulling the
+                    # camera back itself, which is the drift the geometry screen then reports.
+                    outward = min(max(18.0, height * 1.8), max(12.0, cross_span * 0.20))
                     office_detail_shot = (
                         (
                             entrance[0]
@@ -597,15 +618,22 @@ class PlanStandardCameras:
                     )
                     lateral_distance = min(32.0, max(22.0, surface.width_m * 0.18))
                     outward_distance = min(8.0, max(5.5, cross_span * 0.08))
+                    # The logistics view has to prove the yard works, so it must stand back far
+                    # enough to show the apron and turning space in front of the dock. Standing
+                    # closer than the building is tall fills the frame with cladding and the
+                    # conditioning gate rejects it for hiding the authored circulation.
+                    logistics_outward_distance = min(
+                        max(26.0, height * 2.4), max(14.0, cross_span * 0.22)
+                    )
                     target = (door[0], door[1], minimum[2] + min(3.0, height * 0.28))
                     loading_detail_shot = (
                         (
                             door[0]
                             + frame.u_axis[0] * lateral_distance * side
-                            + frame.normal[0] * outward_distance,
+                            + frame.normal[0] * logistics_outward_distance,
                             door[1]
                             + frame.u_axis[1] * lateral_distance * side
-                            + frame.normal[1] * outward_distance,
+                            + frame.normal[1] * logistics_outward_distance,
                             # A narrow yard with auxiliary blocks needs the permitted low-drone
                             # variant so the operational facade is not hidden by foreground plant.
                             minimum[2] + min(12.0, max(8.0, height * 0.45)),
@@ -708,15 +736,22 @@ class PlanStandardCameras:
                     arrival_shot[0]
                     if arrival_shot is not None
                     else point(
-                        -(long_span / 2 + max(32.0, long_span * 0.16)),
-                        -(cross_span / 2 + max(16.0, cross_span * 0.18)),
+                        approach_target_long - approach_distance * 0.80,
+                        approach_target_cross - approach_distance * 0.60,
                         minimum[2] + 1.75,
                     )
                 ),
                 target=(
                     arrival_shot[1]
                     if arrival_shot is not None
-                    else point(-long_span * 0.18, -cross_span * 0.30, minimum[2] + 3.0)
+                    # Aim at the near corner of the authored mass, not deep into the site: a
+                    # distant target drags the whole composition away from the building this
+                    # view exists to introduce.
+                    else point(
+                        approach_target_long,
+                        approach_target_cross,
+                        minimum[2] + max(3.0, height * 0.28),
+                    )
                 ),
                 focal_length_mm=32,
                 sensor_width_mm=36,

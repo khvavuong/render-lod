@@ -190,7 +190,18 @@ class BuildControlPack:
         filtered_edges = (
             edges if edge_band_px == 1 else edges.filter(ImageFilter.MaxFilter(edge_band_px))
         )
-        edge_band = np.asarray(filtered_edges) >= edge_threshold
+        # The structural edge pass is a gradient render whose peak depends on scene contrast,
+        # lighting and resolution, and in practice it tops out well below 255. Comparing it to
+        # an absolute cutoff silently produces an empty LOCKED mask, which leaves the geometry
+        # screen with nothing to verify. Scale the cutoff to the strength actually rendered so
+        # it keeps selecting the strongest edges on any scene.
+        edge_array = np.asarray(filtered_edges, dtype=np.uint8)
+        edge_peak = int(edge_array.max())
+        edge_band = (
+            edge_array >= (edge_threshold * edge_peak / 255)
+            if edge_peak
+            else np.zeros(edge_array.shape, dtype=np.bool_)
+        )
         dominant = np.argmax(policy, axis=2)
         visible = np.max(policy, axis=2) >= 16
         free_source = (dominant == 2) & visible

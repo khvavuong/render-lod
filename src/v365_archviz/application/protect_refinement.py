@@ -34,6 +34,19 @@ class EdgeGeometryMetrics:
     precision: float
     f1: float
     bidirectional_chamfer_px: float
+    # False when the LOCKED mask carried no authoritative edge to compare against. The screen
+    # then proves nothing, so it must never be reported as a pass.
+    verifiable: bool = True
+
+
+# Screen thresholds calibrated against reviewed output rather than assumed. On the reference
+# view set a reviewer accepted an aerial at recall 0.47 / f1 0.64 / chamfer 2.7 as faithful to
+# the model, and rejected a facade view at recall 0.01 / f1 0.01 / chamfer 4.5 where the
+# provider had pulled the camera back. The defaults sit between those two observations. They
+# remain arguments so a deployment can retune them as more reviewed evidence accumulates.
+DEFAULT_MINIMUM_EDGE_RECALL = 0.40
+DEFAULT_MINIMUM_EDGE_F1 = 0.55
+DEFAULT_MAXIMUM_EDGE_CHAMFER_PX = 3.2
 
 
 class ProtectRefinement:
@@ -44,9 +57,9 @@ class ProtectRefinement:
         render_root: Path,
         generated_root: Path,
         *,
-        minimum_edge_alignment: float = 0.75,
-        minimum_edge_f1: float = 0.80,
-        maximum_edge_chamfer_px: float = 3.0,
+        minimum_edge_alignment: float = DEFAULT_MINIMUM_EDGE_RECALL,
+        minimum_edge_f1: float = DEFAULT_MINIMUM_EDGE_F1,
+        maximum_edge_chamfer_px: float = DEFAULT_MAXIMUM_EDGE_CHAMFER_PX,
         restore_locked_pixels: bool = True,
         composite_context_proxy: bool = False,
     ) -> ProtectedRefinementArtifacts:
@@ -105,10 +118,19 @@ class ProtectRefinement:
                 locked,
                 semantic_path=semantic if semantic.is_file() else None,
             )
-            accepted = (
+            alignment_within_thresholds = (
                 edge_metrics.recall >= minimum_edge_alignment
                 and edge_metrics.f1 >= minimum_edge_f1
                 and edge_metrics.bidirectional_chamfer_px <= maximum_edge_chamfer_px
+            )
+            # In pixel-restore mode the LOCKED pixels are composited back, so geometry is
+            # enforced rather than inferred and an unverifiable screen changes nothing. In
+            # validation-only mode the screen is the sole geometry evidence, so it may not be
+            # reported as a pass when it had nothing authoritative to measure against.
+            accepted = (
+                alignment_within_thresholds
+                if edge_metrics.verifiable
+                else restore_locked_pixels
             )
             generation_manifest = view_dir / "generation_manifest.json"
             document = json.loads(generation_manifest.read_text(encoding="utf-8"))
@@ -120,9 +142,13 @@ class ProtectRefinement:
                             "pixel_restore" if restore_locked_pixels else "validation_only"
                         ),
                         "geometry_protection_status": (
-                            "rejected_edge_misalignment"
-                            if restore_locked_pixels
-                            else "review_edge_misalignment"
+                            "edge_alignment_unverifiable"
+                            if not edge_metrics.verifiable
+                            else (
+                                "rejected_edge_misalignment"
+                                if restore_locked_pixels
+                                else "review_edge_misalignment"
+                            )
                         ),
                         **self._metrics_document(edge_metrics),
                         "edge_alignment_threshold": minimum_edge_alignment,
@@ -287,7 +313,9 @@ class ProtectRefinement:
         ) & locked
         authoritative_count = int(np.count_nonzero(authoritative))
         if not authoritative_count:
-            return EdgeGeometryMetrics(1.0, 1.0, 1.0, 0.0)
+            # Nothing authoritative is visible under LOCKED, so no claim about geometry can be
+            # made. Report it as unverifiable rather than inventing a perfect score.
+            return EdgeGeometryMetrics(0.0, 0.0, 0.0, 0.0, verifiable=False)
         # Ignore texture edges far from authored structural boundaries. They are allowed
         # photoreal detail and must not be counted as invented geometry.
         generated_edges &= ProtectRefinement._dilate(authoritative, 8)
@@ -376,12 +404,13 @@ class ProtectRefinement:
         return float(distances[source].mean())
 
     @staticmethod
-    def _metrics_document(metrics: EdgeGeometryMetrics) -> dict[str, float]:
+    def _metrics_document(metrics: EdgeGeometryMetrics) -> dict[str, float | bool]:
         return {
             "edge_alignment_recall": metrics.recall,
             "edge_alignment_precision": metrics.precision,
             "edge_alignment_f1": metrics.f1,
             "edge_bidirectional_chamfer_px": metrics.bidirectional_chamfer_px,
+            "edge_alignment_verifiable": metrics.verifiable,
         }
 
     @staticmethod

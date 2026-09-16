@@ -25,15 +25,21 @@ from v365_archviz.application.plan_video import PlanVideo
 from v365_archviz.application.protect_refinement import ProtectRefinement
 from v365_archviz.application.refine_view import DEFAULT_PROMPT, RefineView
 from v365_archviz.application.refine_viewset import RefineViewSet
-from v365_archviz.application.refinement_prompt import build_refinement_prompt
+from v365_archviz.application.refinement_prompt import (
+    build_refinement_prompt,
+    compose_style_prompt,
+)
 from v365_archviz.application.validate_conditioning import ValidateConditioningViewSet
 from v365_archviz.application.validate_viewset import ValidateGeneratedViewSet
+from v365_archviz.application.verify_massing import VerifyMassing
 from v365_archviz.config import Settings
 from v365_archviz.domain.design import DesignDNA
+from v365_archviz.domain.style_pack import StylePack
 from v365_archviz.domain.workflow import GenerationProfile, ViewSet
 from v365_archviz.errors import V365Error
 from v365_archviz.providers.aps import ApsModelDerivativeClient
 from v365_archviz.providers.gemini import GeminiConditioningMode
+from v365_archviz.providers.gemini_massing_judge import GeminiMassingJudge
 from v365_archviz.providers.image_factory import (
     SUPPORTED_IMAGE_PROVIDERS,
     ImageRenderer,
@@ -96,6 +102,7 @@ def _parser() -> argparse.ArgumentParser:
     refine.add_argument("view_id")
     refine.add_argument("--output", type=Path, help="generated artifact root")
     refine.add_argument("--prompt-file", type=Path)
+    refine.add_argument("--style-pack", type=Path)
     refine.add_argument("--reference-image", type=Path, action="append", default=[])
     refine.add_argument("--design-dna", type=Path)
     refine.add_argument(
@@ -123,6 +130,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     refine_set.add_argument("--output", type=Path, required=True)
     refine_set.add_argument("--prompt-file", type=Path)
+    refine_set.add_argument("--style-pack", type=Path)
     refine_set.add_argument("--reference-image", type=Path, action="append", default=[])
     refine_set.add_argument(
         "--approved-master",
@@ -144,6 +152,11 @@ def _parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         help="generate only this benchmark view; repeat as needed",
+    )
+    refine_set.add_argument(
+        "--allow-failed-conditioning",
+        action="store_true",
+        help="generate views the conditioning gate rejected; spends budget on unusable cameras",
     )
     refine_set.add_argument(
         "--profile",
@@ -177,6 +190,15 @@ def _parser() -> argparse.ArgumentParser:
     conditioning_qa.add_argument("render_root", type=Path)
     conditioning_qa.add_argument("--view-set", type=Path, required=True)
     conditioning_qa.add_argument("--output", type=Path)
+    massing = subcommands.add_parser(
+        "verify-massing",
+        help="audit generated views for invented or missing building volumes",
+    )
+    massing.add_argument("render_root", type=Path)
+    massing.add_argument("generated_root", type=Path)
+    massing.add_argument("--view-set", type=Path, required=True)
+    massing.add_argument("--design-dna", type=Path, required=True)
+    massing.add_argument("--output", type=Path)
     consistency = subcommands.add_parser(
         "evaluate-consistency", help="create a fail-closed cross-view QA report"
     )
@@ -236,12 +258,16 @@ def _inspect(source: Path, output: Path | None) -> int:
 
 
 def _refinement_prompt(
-    design_dna_path: Path | None, prompt_file: Path | None
+    design_dna_path: Path | None,
+    prompt_file: Path | None,
+    style_pack_path: Path | None = None,
 ) -> tuple[DesignDNA | None, str]:
+    pack = StylePack.load(style_pack_path) if style_pack_path else None
     if design_dna_path is None:
-        prompt = prompt_file.read_text(encoding="utf-8") if prompt_file else DEFAULT_PROMPT
-        return None, prompt
-    return build_refinement_prompt(design_dna_path, prompt_file)
+        if prompt_file:
+            return None, prompt_file.read_text(encoding="utf-8")
+        return None, compose_style_prompt(pack) if pack else DEFAULT_PROMPT
+    return build_refinement_prompt(design_dna_path, prompt_file, pack)
 
 
 def _image_renderer(
@@ -332,7 +358,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         if args.command == "refine-view":
             settings = Settings.from_env()
-            loaded_design, prompt = _refinement_prompt(args.design_dna, args.prompt_file)
+            loaded_design, prompt = _refinement_prompt(
+                args.design_dna, args.prompt_file, args.style_pack
+            )
             with _image_renderer(settings, args.provider, args.conditioning_mode) as renderer:
                 output_directory = args.output
                 if output_directory is None:
@@ -377,7 +405,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         if args.command == "refine-viewset":
             settings = Settings.from_env()
-            _, prompt = _refinement_prompt(args.design_dna, args.prompt_file)
+            _, prompt = _refinement_prompt(
+                args.design_dna, args.prompt_file, args.style_pack
+            )
             with _image_renderer(settings, args.provider, args.conditioning_mode) as renderer:
                 viewset_artifacts = RefineViewSet().execute(
                     renderer,
@@ -392,6 +422,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     view_ids=tuple(args.view),
                     approved_master_path=args.approved_master,
                     approved_master_view_id=args.approved_master_view_id,
+                    allow_failed_conditioning=args.allow_failed_conditioning,
                 )
             protected = ProtectRefinement().execute(
                 args.render_root,
@@ -468,6 +499,31 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
             )
             return 0 if result.passed else 3
+        if args.command == "verify-massing":
+            settings = Settings.from_env()
+            with GeminiMassingJudge(settings) as judge:
+                massing_result = VerifyMassing().execute(
+                    judge,
+                    args.render_root,
+                    args.generated_root,
+                    args.view_set,
+                    args.design_dna,
+                    args.output,
+                )
+            print(
+                json.dumps(
+                    {
+                        "passed": massing_result.passed,
+                        "view_count": massing_result.view_count,
+                        "failed_view_ids": massing_result.failed_view_ids,
+                        "unverified_view_ids": massing_result.unverified_view_ids,
+                        "report": str(massing_result.report_path),
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return 0 if massing_result.passed else 3
         if args.command == "evaluate-consistency":
             view_set = ViewSet.model_validate_json(args.view_set.read_text(encoding="utf-8"))
             consistency_result = EvaluateConsistency().execute(

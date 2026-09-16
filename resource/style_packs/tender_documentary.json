@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0.0",
+  "pack_id": "tender_documentary",
+  "label": "Tender documentary",
+  "description": "Sober bid-quality record of a buildable project. Restrained finish, no marketing gloss.",
+  "intent": "Photorealistically refine this exact camera render into a bid-quality photograph of a buildable industrial project. The image is a record of what will actually be constructed, not a marketing piece.",
+  "allowed_changes": "Improve material response, small construction detail, contact shadows, glazing reflections, vegetation realism, asphalt and concrete micro-texture, restrained operational wear and atmospheric depth. Keep planting inside its visible zones and traffic routes unobstructed. Use sparse, correctly scaled vehicles and people only where they do not hide architecture or access.",
+  "photography": "Natural full-frame architectural photography, physically plausible daylight, neutral white balance, restrained highlight roll-off, subtle sensor detail and realistic ground contact. Corrugated metal must show fine seams, believable fasteners, flashing and shallow surface variation rather than smooth plastic planes. Concrete aprons and dark asphalt must have distinct aggregate, joints, drainage and restrained operational wear. Use ordinary buildable industrial details and sparse workers.",
+  "context_policy": "resolve_proxies",
+  "context_direction": "Keep the surroundings plain and secondary; do not dramatise the horizon.",
+  "prohibited": "No showroom cleanliness, no decorative excess, no luxury-architecture styling, no saturated colour."
+}

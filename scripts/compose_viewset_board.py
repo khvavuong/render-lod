@@ -17,6 +17,12 @@ def _image_for(view_directory: Path, image_name: str | None = None) -> Path:
         if not image.is_file():
             raise ValueError(f"expected {image_name} in {view_directory}")
         return image
+    # The board is branded as a whole, so build it from the unbranded per-view artifact when one
+    # exists. Composing branded views and then branding the sheet stacks two logos on the first
+    # cell and leaves the "unbranded" board carrying per-view logos.
+    unbranded = sorted(view_directory.glob("unbranded_refined.*"))
+    if len(unbranded) == 1:
+        return unbranded[0]
     candidates = sorted(view_directory.glob("refined.*"))
     if len(candidates) == 1:
         return candidates[0]

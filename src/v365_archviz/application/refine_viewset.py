@@ -454,12 +454,19 @@ def _provider_references(
     render_root: Path,
     camera: Camera,
     references: tuple[Path, ...],
+    attach_context_guide: bool = True,
 ) -> tuple[Path, ...]:
-    """Attach the camera-registered context guide before the paid provider request."""
+    """Attach the camera-registered context guide before the paid provider request.
+
+    The guide is a placement hint only where placeholder massing is meant to survive as
+    positioned context. Measured against reviewed output, sending it while the prompt asks for
+    generated surroundings makes the provider reproduce the translucent slabs literally: the
+    image wins over the instruction. Callers that want invented context therefore withhold it.
+    """
 
     view_root = render_root / camera.view_id
     proxy = view_root / "context_proxy_rgba.png"
-    if not proxy.is_file():
+    if not attach_context_guide or not proxy.is_file():
         return references
     guide = build_context_composition_guide(
         view_root / "base_rgb.png",
@@ -490,6 +497,7 @@ class RefineViewSet:
         reference_images_by_view: dict[str, tuple[Path, ...]] | None = None,
         quality_standard_path: Path | None = None,
         allow_failed_conditioning: bool = False,
+        attach_context_guide: bool = True,
     ) -> RefinedViewSetArtifacts:
         view_set = ViewSet.model_validate_json(view_set_path.read_text(encoding="utf-8"))
         design = DesignDNA.model_validate_json(design_dna_path.read_text(encoding="utf-8"))
@@ -561,6 +569,7 @@ class RefineViewSet:
                     render_root,
                     camera,
                     (reference_images_by_view or {}).get(camera.view_id, reference_images),
+                    attach_context_guide,
                 ),
                 aspect_ratio=camera.aspect_ratio,
                 # Pro prices 1K and 2K outputs in the same tier. Keep the full-detail 2K source

@@ -18,14 +18,39 @@ from v365_archviz.domain.common import DomainModel
 
 
 class ContextPolicy(str, Enum):
-    """How much surrounding built form the provider may resolve."""
+    """How much surrounding built form the provider may resolve.
+
+    Each policy also decides how the deterministic context proxies are handled, because the two
+    mechanisms are mutually exclusive: compositing a proxy over an image whose prompt asked the
+    provider to build real neighbours pastes placeholder massing back over finished context, and
+    sending the composition guide makes the provider draw the placeholder itself.
+    """
 
     #: Render nothing beyond what the model authored. Empty surroundings stay empty.
     AUTHORED_ONLY = "authored_only"
+    #: Photoreal ground, roads, planting and sky, but neighbouring buildings stay deterministic
+    #: translucent massing composited afterwards, so context reads as context.
+    TRANSLUCENT_MASSING = "translucent_massing"
     #: Resolve authored context proxies into believable neighbouring built form.
     RESOLVE_PROXIES = "resolve_proxies"
     #: Build a plausible surrounding estate wherever the horizon is empty.
     GENERATED_SURROUNDINGS = "generated_surroundings"
+
+    @property
+    def composites_proxies(self) -> bool:
+        """Whether authored context volumes are composited over the finished image."""
+
+        return self is ContextPolicy.TRANSLUCENT_MASSING
+
+    @property
+    def sends_composition_guide(self) -> bool:
+        """Whether the camera-registered proxy guide is sent to the provider.
+
+        Only the policy that wants placeholder massing turned into real buildings benefits from
+        it. Everywhere else the guide is reproduced literally as translucent slabs.
+        """
+
+        return self is ContextPolicy.RESOLVE_PROXIES
 
 
 class StylePack(DomainModel):

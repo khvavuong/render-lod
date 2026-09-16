@@ -98,6 +98,19 @@ _CONTEXT_INSTRUCTION = {
         "Render only what the model authored. Do not add neighbouring buildings, roads or "
         "infrastructure beyond the site boundary; leave the surroundings open and plain."
     ),
+    ContextPolicy.TRANSLUCENT_MASSING: (
+        "This project sits on one serviced lot inside an established industrial estate, and the "
+        "photograph must read that way. Build the estate around it: sealed access roads with "
+        "kerbs, line marking and street lighting, neighbouring lots with their own hardstanding, "
+        "boundary fences, verges, service infrastructure and mature planting, all continuing to "
+        "a hazy industrial horizon. The ground must never read as farmland, wasteland or an "
+        "empty rural plot. One thing only is withheld: do not draw the neighbouring buildings "
+        "themselves. Every neighbouring lot keeps its yard, apron and fence but its shed is left "
+        "out, because those volumes are added afterwards as deterministic translucent massing so "
+        "that the project inside its own fence is the single building that reads as designed. "
+        "Any flat or translucent block visible in the conditioning images is that placeholder: "
+        "do not photograph it as a real building and do not keep it."
+    ),
     ContextPolicy.RESOLVE_PROXIES: (
         "Treat flat or translucent context massing in the conditioning images as a placement "
         "hint for where neighbouring built form belongs, and resolve it into believable real "
@@ -124,15 +137,20 @@ def massing_contract(design: DesignDNA) -> str:
     """
 
     volumes = len(design.roof_assemblies)
+    plural = "" if volumes == 1 else "s"
     return (
         "MASSING\n"
-        f"The project contains exactly {volumes} roofed building volume"
-        f"{'' if volumes == 1 else 's'}, and no others. Do not add, remove, split, merge or "
-        "duplicate a building volume, and do not extend a roof into a new bay or wing. Yards, "
-        "aprons, service areas, car parks and circulation shown as open paving in Base RGB are "
-        "authored open ground: they stay open. Do not place buildings, sheds, canopies, awnings "
-        "or roofed structures on them. If an open area looks large or empty, that is the "
-        "authored design, not a gap to fill."
+        f"The project has exactly {volumes} continuous roof{plural}, so exactly {volumes} main "
+        f"building volume{plural}. Before you draw anything, count the long roof ridges in Base "
+        f"RGB: there are {volumes}. The finished image must show the same {volumes} and no more. "
+        "Counting is the check that matters here, because a single long shed under one "
+        "continuous roof stays one volume however many bays, doors or dock canopies it carries. "
+        "Do not add, remove, split, merge or duplicate a roof, do not extend one into a new wing, "
+        "and do not turn one long roof into two parallel roofs. Yards, aprons, service areas, car "
+        "parks and circulation shown as open paving in Base RGB are authored open ground: they "
+        "stay open. Do not place buildings, sheds, canopies, awnings or roofed structures on "
+        "them. If an open area looks large or empty, that is the authored design, not a gap to "
+        "fill, and it is not a reason to recompose or crop the frame."
     )
 
 

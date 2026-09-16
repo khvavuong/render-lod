@@ -270,6 +270,15 @@ def _refinement_prompt(
     return build_refinement_prompt(design_dna_path, prompt_file, pack)
 
 
+def _context_handling(style_pack_path: Path | None) -> tuple[bool, bool]:
+    """Return (composite proxies, send composition guide) for the authored context policy."""
+
+    if style_pack_path is None:
+        return True, True
+    policy = StylePack.load(style_pack_path).context_policy
+    return policy.composites_proxies, policy.sends_composition_guide
+
+
 def _image_renderer(
     settings: Settings,
     provider: str | None,
@@ -408,6 +417,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             _, prompt = _refinement_prompt(
                 args.design_dna, args.prompt_file, args.style_pack
             )
+            # The two context mechanisms are mutually exclusive. Compositing deterministic
+            # proxies over an image whose prompt asked the provider to build real surroundings
+            # pastes placeholder slabs back over finished context, so the composite follows the
+            # authored policy instead of being switched on unconditionally.
+            composite_context_proxy, attach_context_guide = _context_handling(args.style_pack)
             with _image_renderer(settings, args.provider, args.conditioning_mode) as renderer:
                 viewset_artifacts = RefineViewSet().execute(
                     renderer,
@@ -423,12 +437,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                     approved_master_path=args.approved_master,
                     approved_master_view_id=args.approved_master_view_id,
                     allow_failed_conditioning=args.allow_failed_conditioning,
+                    attach_context_guide=attach_context_guide,
                 )
             protected = ProtectRefinement().execute(
                 args.render_root,
                 args.output,
                 restore_locked_pixels=False,
-                composite_context_proxy=True,
+                composite_context_proxy=composite_context_proxy,
             )
             BrandDeliverables().execute(BrandWatermark(), args.output)
             print(

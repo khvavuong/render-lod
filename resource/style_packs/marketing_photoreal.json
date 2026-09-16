@@ -2,11 +2,11 @@
   "schema_version": "1.0.0",
   "pack_id": "marketing_photoreal",
   "label": "Marketing photoreal",
-  "description": "Publication-grade marketing photograph. Maximum realism and finish while the authored geometry stays fixed.",
+  "description": "Publication-grade marketing photograph of the project. Surroundings stay deterministic translucent massing so the project is the only designed building.",
   "intent": "Photorealistically finish this exact camera render into a publication-grade architectural photograph of the project. The result must read as a real photograph taken on site, not a render: real optics, real light transport, real material age.",
   "allowed_changes": "Bring the scene to full photographic quality. Resolve material identity, surface finish, micro-texture, panel joints, fasteners, flashings, sealant lines, weathering and dirt gradients. Build believable light: directional sun, real bounce, ambient occlusion in recesses, soft contact shadows, and glazing that reflects sky and surroundings with correct fresnel. Add depth through atmospheric perspective. Populate the site plausibly for its operating scene with correctly scaled vehicles, equipment and people that never hide architecture or block access. Landscape may be resolved into real species with real growth habit inside its authored zones.",
   "photography": "Full-frame architectural photography with a perspective-corrected lens. Physically plausible daylight for the stated time of day, neutral white balance, highlight roll-off that holds detail in bright metal roofing, and shadows that retain colour rather than crushing to black. Sharp across the subject with natural lens falloff. Corrugated and profiled metal must show fine seams, real fixings and shallow surface waviness, never smooth plastic planes. Concrete and asphalt must show aggregate, joints, drainage falls, tyre marks and restrained operational wear. The image should be good enough to publish as the project's lead marketing photograph.",
-  "context_policy": "generated_surroundings",
+  "context_policy": "translucent_massing",
   "context_direction": "",
   "prohibited": "No fantasy colour, no surreal lighting, no impossible structure."
 }

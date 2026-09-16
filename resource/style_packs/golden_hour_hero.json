@@ -6,7 +6,7 @@
   "intent": "Photorealistically finish this exact camera render into a late-afternoon hero photograph of the project, carrying warm directional light and long shadows while the authored design stays untouched.",
   "allowed_changes": "Resolve material identity, finish, micro-texture, joints, fixings and honest weathering. Rebuild the lighting for low-angle sun: long raking shadows, warm highlights on metal cladding, cool shadow fill from the sky, visible light falloff across long facades, and glazing that catches the low sun with correct fresnel and interior glow where rooms would be lit. Populate the site plausibly for end-of-shift activity with correctly scaled vehicles and people that never hide architecture.",
   "photography": "Full-frame architectural photography at golden hour with a perspective-corrected lens. Warm white balance, strong but controlled contrast, highlight roll-off that keeps texture in sunlit metal, and shadows that stay open and coloured. Haze and light scatter near the sun are welcome where they read as real atmosphere rather than a filter.",
-  "context_policy": "generated_surroundings",
-  "context_direction": "Let the surrounding estate fall into shadow so the project reads as the lit subject.",
+  "context_policy": "translucent_massing",
+  "context_direction": "Let the translucent context volumes catch the same low sun as the project.",
   "prohibited": "No night scene, no artificial lens flare overlays, no colour grading that shifts the authored material palette."
 }

@@ -83,6 +83,27 @@ def test_massing_contract_states_the_authored_volume_count(tmp_path: Path) -> No
 
     contract = massing_contract(_Design())  # type: ignore[arg-type]
 
-    assert "exactly 2 roofed building volumes" in contract
+    assert "exactly 2 continuous roofs" in contract
+    assert "exactly 2 main building volumes" in contract
     assert "Do not add" in contract
     assert "stay open" in contract
+
+
+def test_context_policies_never_enable_both_context_mechanisms() -> None:
+    """Compositing a proxy over generated context, or guiding a policy that wants none, conflict."""
+
+    for policy in ContextPolicy:
+        assert not (policy.composites_proxies and policy.sends_composition_guide)
+
+    assert ContextPolicy.TRANSLUCENT_MASSING.composites_proxies
+    assert not ContextPolicy.TRANSLUCENT_MASSING.sends_composition_guide
+    assert ContextPolicy.RESOLVE_PROXIES.sends_composition_guide
+    assert not ContextPolicy.GENERATED_SURROUNDINGS.composites_proxies
+
+
+def test_translucent_massing_keeps_the_environment_but_not_the_neighbours() -> None:
+    prompt = compose_style_prompt(_pack(context_policy=ContextPolicy.TRANSLUCENT_MASSING))
+
+    assert "established industrial estate" in prompt
+    assert "do not draw the neighbouring buildings" in prompt
+    assert "never read as farmland" in prompt

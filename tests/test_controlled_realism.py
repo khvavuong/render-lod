@@ -544,3 +544,40 @@ def test_certification_labels_missing_visual_evidence_as_review(tmp_path: Path) 
     assert report.state is CertificationState.MARKETING_GENERATIVE_REVIEW
     integrity = next(item for item in report.evidence if item.gate is QAGate.ARTIFACT_INTEGRITY)
     assert integrity.status is QAStatus.PASS
+
+
+def test_context_composite_reaches_the_unbranded_deliverable(tmp_path: Path) -> None:
+    """Generation writes unbranded_refined first, and branding reuses it rather than the
+    composited file, so the composite has to update it too or it never ships."""
+
+    size = (16, 16)
+    render = tmp_path / "renders" / "view-01"
+    generated = tmp_path / "generated" / "view-01"
+    render.mkdir(parents=True)
+    generated.mkdir(parents=True)
+    _save_rgb(render / "base_rgb.png", (255, 255, 255), size)
+    Image.new("L", size, 0).save(render / "edges.png")
+    Image.new("L", size, 255).save(render / "locked_mask.png")
+    (render / "control_pack_manifest.json").write_text("{}", encoding="utf-8")
+    overlay = Image.new("RGBA", size, (0, 0, 0, 0))
+    for x in range(size[0]):
+        for y in range(4):
+            overlay.putpixel((x, y), (10, 20, 30, 255))
+    overlay.save(render / "context_proxy_rgba.png")
+    Image.new("RGB", size, (255, 255, 255)).save(generated / "refined.png")
+    Image.new("RGB", size, (255, 255, 255)).save(generated / "unbranded_refined.png")
+    (generated / "generation_manifest.json").write_text(
+        json.dumps({"output": {"media_type": "image/png", "sha256": "old"}}), encoding="utf-8"
+    )
+
+    ProtectRefinement().execute(
+        tmp_path / "renders",
+        tmp_path / "generated",
+        restore_locked_pixels=False,
+        composite_context_proxy=True,
+    )
+
+    with Image.open(generated / "unbranded_refined.png") as unbranded:
+        assert unbranded.getpixel((0, 0)) == (10, 20, 30)
+    document = json.loads((generated / "generation_manifest.json").read_text())
+    assert document["output"]["context_proxy_composited"] is True

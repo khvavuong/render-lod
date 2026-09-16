@@ -822,11 +822,12 @@ class PlanStandardCameras:
             Camera(
                 view_id="view-06",
                 role=ViewRole.LOADING_DETAIL,
+                # VIEW-05 already owns office_detail_shot. Falling back to it here collapses two
+                # of the six deliverable angles onto one identical camera whenever the model has
+                # no authored gate, which is what makes golden_arrival_shot unavailable.
                 position=(
                     golden_arrival_shot[0]
                     if golden_arrival_shot is not None
-                    else office_detail_shot[0]
-                    if office_detail_shot is not None
                     else loading_human_shot[0]
                     if loading_human_shot is not None
                     else reverse_facade_shot[0]
@@ -836,8 +837,6 @@ class PlanStandardCameras:
                 target=(
                     golden_arrival_shot[1]
                     if golden_arrival_shot is not None
-                    else office_detail_shot[1]
-                    if office_detail_shot is not None
                     else loading_human_shot[1]
                     if loading_human_shot is not None
                     else reverse_facade_shot[1]

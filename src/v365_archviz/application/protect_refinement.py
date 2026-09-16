@@ -104,7 +104,14 @@ class ProtectRefinement:
                     generated_rgb.save(buffer, format="JPEG", quality=95, optimize=True)
                 else:
                     generated_rgb.save(buffer, format="PNG", optimize=True)
-                atomic_write(refined, buffer.getvalue())
+                composited_bytes = buffer.getvalue()
+                atomic_write(refined, composited_bytes)
+                # Generation already wrote the unbranded deliverable, and branding reuses that
+                # copy rather than the composited file. Without this the context composite is
+                # computed, recorded as done, and then silently dropped from every artifact.
+                unbranded = view_dir / f"unbranded_refined{refined.suffix.lower()}"
+                if unbranded.is_file():
+                    atomic_write(unbranded, composited_bytes)
                 context_composited = True
             with Image.open(base) as base_image:
                 authoritative = base_image.convert("RGB").resize(

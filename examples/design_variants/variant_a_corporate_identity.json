@@ -55,7 +55,7 @@
     "context_render_mode": "translucent_massing",
     "context_opacity": 0.24,
     "surrounding_context_mode": "procedural_perimeter",
-    "surrounding_context_count": 6,
+    "surrounding_context_count": 12,
     "surrounding_landscape_buffer": true
   },
   "grammar_version": "industrial-grammar-v3-continuous-roof",

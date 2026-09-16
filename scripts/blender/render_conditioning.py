@@ -793,13 +793,19 @@ def create_context_environment(
     long_size = max(52.0, min(96.0, span_x * 0.22))
     short_size = max(24.0, min(42.0, span_y * 0.18))
     height = max(7.0, min(11.0, (maximum[2] - minimum[2]) * 0.85))
-    slots = (
-        (center_x - span_x * 0.28, maximum[1] + buffer * 2.8, long_size, short_size),
-        (center_x + span_x * 0.28, maximum[1] + buffer * 2.8, long_size, short_size),
-        (maximum[0] + buffer * 2.8, center_y - span_y * 0.25, short_size, long_size),
-        (maximum[0] + buffer * 2.8, center_y + span_y * 0.25, short_size, long_size),
-        (minimum[0] - buffer * 2.8, center_y - span_y * 0.25, short_size, long_size),
-        (minimum[0] - buffer * 2.8, center_y + span_y * 0.25, short_size, long_size),
+    # Neighbouring plots are laid out as an estate, not as a single ring of slabs. A ring at one
+    # standoff reads from the air as isolated blocks in empty land; two rows on every side, each
+    # offset along the frontage, reads as the project sitting on one lot among many.
+    slots = tuple(
+        slot
+        for standoff in (2.6, 5.6)
+        for along in (-0.34, 0.0, 0.34)
+        for slot in (
+            (center_x + along * span_x, maximum[1] + buffer * standoff, long_size, short_size),
+            (center_x + along * span_x, minimum[1] - buffer * standoff, long_size, short_size),
+            (maximum[0] + buffer * standoff, center_y + along * span_y, short_size, long_size),
+            (minimum[0] - buffer * standoff, center_y + along * span_y, short_size, long_size),
+        )
     )
     count = min(site.get("surrounding_context_count", 0), len(slots))
     for massing_number, (x, y, width, depth) in enumerate(slots[:count], start=1):

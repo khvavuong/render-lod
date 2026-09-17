@@ -2397,11 +2397,62 @@ def _replace_materials(materials_by_object: dict) -> None:
         obj.data.materials.append(replacement)
 
 
+def _linear_to_srgb8(value: float) -> int:
+    """Byte a linear channel becomes after the sRGB transfer the PNG writer applies."""
+
+    if value <= 0.0031308:
+        encoded = value * 12.92
+    else:
+        encoded = 1.055 * (value ** (1.0 / 2.4)) - 0.055
+    return max(0, min(255, int(round(encoded * 255.0))))
+
+
+def _write_instance_manifest(view_dir: Path, mesh_objects: list) -> None:
+    """Record what every instance-pass colour means.
+
+    instance_id.png already encodes each object's pass index as a 24-bit colour, so individual
+    facade details are separable in the pixels. Without this table nothing can say which index
+    is which door, so downstream selection can only resolve the handful of canonical scene
+    elements. Writing the mapping here costs nothing: the renderer holds both values already.
+    """
+
+    entries = {}
+    for obj in mesh_objects:
+        index = int(obj.pass_index)
+        if index <= 0 or index in entries:
+            continue
+        entries[index] = {
+            "instance_index": index,
+            "object_name": obj.name,
+            "semantic_role": obj.get("semantic_role", "unknown"),
+            "scene_element_id": obj.get("scene_element_id"),
+            "asset_instance_id": obj.get("asset_instance_id"),
+            "asset_id": obj.get("asset_id"),
+            # The index is emitted as a linear colour and the PNG is written through an sRGB
+            # transfer, so the bytes on disk are not the index bytes. Recording what actually
+            # lands in the file is the only way a consumer can match a pixel back to an object.
+            "encoded_rgb8": [
+                _linear_to_srgb8((index >> shift & 255) / 255.0) for shift in (0, 8, 16)
+            ],
+        }
+    document = {
+        "schema_version": "1.0.0",
+        "view_id": view_dir.name,
+        "encoding": "instance_index little-endian across RGB, then sRGB-encoded; match on encoded_rgb8",
+        "instances": [entries[key] for key in sorted(entries)],
+    }
+    (view_dir / "instance_id_manifest.json").write_text(
+        json.dumps(document, ensure_ascii=False, indent=2) + chr(10),
+        encoding="utf-8",
+    )
+
+
 def render_masks(view_dir: Path) -> None:
     scene = bpy.context.scene
     previous_engine = scene.render.engine
     _configure_engine("preview_fast")
     mesh_objects = [obj for obj in scene.objects if obj.type == "MESH"]
+    _write_instance_manifest(view_dir, mesh_objects)
     original = {obj: obj.data.materials[0] for obj in mesh_objects}
     instance_materials = {}
     for obj in mesh_objects:

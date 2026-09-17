@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from v365_archviz.domain.design import DesignDNA
-from v365_archviz.domain.style_pack import ContextPolicy, StylePack
+from v365_archviz.domain.style_pack import ContextPolicy, DesignFreedom, StylePack
 
 LAYERED_BASE_PROMPT = """TASK
 Photorealistically refine this exact camera render into a bid-quality photograph of a buildable
@@ -70,13 +70,7 @@ views, except that VIEW-06 preserves those materials under its explicitly requir
 golden-hour photography."""
 
 
-GEOMETRY_CONTRACT = """AUTHORITY
-The current Base RGB fixes camera, project massing, roof geometry, footprint, authored roads,
-yards, landscape zones, gate openings and fence runs. Preserve all of them exactly: same camera
-position and framing, same silhouette, and the same number and placement of openings, docks and
-bays. Facade articulation already present in Base RGB is approved design and must stay in its
-authored locations as one consistent kit across every camera. Geometry is not negotiable.
-
+_SITE_AUTHORITY = """\
 Authored landscape zones stay planted. Every area the Base RGB shows as landscape must read as
 living planting — grass, groundcover, shrubs or trees — across most of its area. Do not pave,
 gravel, dry out or build over a landscape zone, and do not shrink one to a thin edge strip.
@@ -84,14 +78,94 @@ gravel, dry out or build over a landscape zone, and do not shrink one to a thin 
 This authority covers the project and its site only. Flat, blank or translucent massing beyond
 the site boundary is placeholder context, not authored geometry: it carries position and scale
 but no appearance, and the CONTEXT section below governs what happens to it. Never preserve a
-placeholder slab as a finished surface.
+placeholder slab as a finished surface."""
 
-PROHIBITED
+_AUTHORITY_BY_FREEDOM = {
+    DesignFreedom.PHOTOREAL_ONLY: """\
+The current Base RGB fixes camera, project massing, roof geometry, footprint, authored roads,
+yards, landscape zones, gate openings and fence runs. Preserve all of them exactly: same camera
+position and framing, same silhouette, and the same number and placement of openings, docks and
+bays. Facade articulation already present in Base RGB is approved design and must stay in its
+authored locations as one consistent kit across every camera. Geometry is not negotiable.""",
+    DesignFreedom.DETAIL_WITHIN_ENVELOPE: """\
+The current Base RGB fixes camera, project massing, roof geometry, footprint, authored roads,
+yards, landscape zones, gate openings and fence runs. Preserve all of them exactly: same camera
+position and framing, same silhouette, same roof line, and the same number and placement of
+loading docks, gates and vehicular openings.
+
+Inside that fixed envelope the facade is yours to develop. The articulation in Base RGB is a
+placed schematic, not a finished design: it marks where emphasis belongs, at what rhythm, and
+nothing more. Resolve it into architecture a real practice would detail — proportion the cladding
+fields, give the plinth and eave real depth, set glazing where a working building would want
+daylight, and carry canopies, louvres and shading where they do their job. Keep every authored
+opening, but you may refine how it is framed, headed and shaded. Whatever you author must hold
+across every camera in the set as one coherent building.""",
+    DesignFreedom.DESIGN_WITHIN_ENVELOPE: """\
+The current Base RGB fixes four things and only four: the camera, the building footprints, the
+number of separate buildings, and the height envelope each one occupies. The silhouette against
+the sky, the footprint on the ground and the frame you are standing in are not negotiable.
+
+Everything on the skin is yours to design. Treat the Base RGB facade as a massing study that has
+not been designed yet — its colours, stripes, fins and panel divisions are placeholders, and
+reproducing them faithfully is a worse outcome than replacing them. Design the envelope as a
+practice would: compose the cladding, choose where the building wants to be solid and where it
+wants to be glazed, give the entrance and office volume the presence they deserve, set structural
+rhythm and depth, and detail canopies, brise-soleil, recessed reveals and a durable plinth where
+the building calls for them. Corporate identity signage on the office volume or the gatehouse is
+expected on a building of this kind and is welcome, as long as it is generic and not a real brand.
+
+Two limits hold the design to the envelope: the outline the building cuts against the sky must
+still match Base RGB, and every vehicular opening the Base RGB shows must remain, at truck scale,
+in the same place — trucks have to reach the same docks. Whatever you design has to hold across
+every camera in the set as one coherent building.""",
+}
+
+_PROHIBITED_BY_FREEDOM = {
+    DesignFreedom.PHOTOREAL_ONLY: """\
 No camera movement, reframing, zoom or crop. No change to massing or roof topology. No relocated
 or duplicated gate, no missing fence or road, no invented or removed opening. No text, logos,
 watermarks or signage. Do not copy the layout, massing, facade or composition of any reference
 image; references inform photographic quality only. Keep one material, lighting and colour-grade
-identity across all views in the set."""
+identity across all views in the set.""",
+    DesignFreedom.DETAIL_WITHIN_ENVELOPE: """\
+No camera movement, reframing, zoom or crop. No change to massing or roof topology. No relocated
+or duplicated gate, no missing fence or road, no added or removed loading dock. No real brand
+names, logos or watermarks. Do not copy the layout, massing, facade or composition of any
+reference image; references inform photographic quality only. Keep one material, lighting and
+colour-grade identity across all views in the set.""",
+    DesignFreedom.DESIGN_WITHIN_ENVELOPE: """\
+No camera movement, reframing, zoom or crop — the frame is fixed even when a different angle
+would flatter the design more. No change to the silhouette, the footprint or the number of
+buildings. No relocated or removed vehicular opening, no missing fence or road. No real brand
+names, logos or watermarks. Do not copy the layout, massing or composition of any reference
+image; references inform photographic quality and detail vocabulary only. Keep one material,
+lighting and colour-grade identity across all views in the set."""
+}
+
+
+def geometry_contract(freedom: DesignFreedom = DesignFreedom.PHOTOREAL_ONLY) -> str:
+    """The system-owned contract, stated at the freedom level the style pack asked for.
+
+    What the system owns never moves: the camera, the footprint, the building count and the
+    height envelope are measured downstream and a provider that changes them fails the gates.
+    What varies is whether the authored facade is treated as finished design or as a schematic
+    the provider is expected to develop. The strictest level yields a faithful photograph of the
+    model; the loosest trades facade fidelity for architecture worth photographing.
+    """
+
+    blocks = (
+        "AUTHORITY",
+        _AUTHORITY_BY_FREEDOM[freedom],
+        "",
+        _SITE_AUTHORITY,
+        "",
+        "PROHIBITED",
+        _PROHIBITED_BY_FREEDOM[freedom],
+    )
+    return chr(10).join(blocks)
+
+
+GEOMETRY_CONTRACT = geometry_contract(DesignFreedom.PHOTOREAL_ONLY)
 
 _CONTEXT_INSTRUCTION = {
     ContextPolicy.AUTHORED_ONLY: (
@@ -159,7 +233,7 @@ def compose_style_prompt(pack: StylePack, design: DesignDNA | None = None) -> st
 
     sections = [
         f"TASK\n{pack.intent}",
-        GEOMETRY_CONTRACT,
+        geometry_contract(pack.design_freedom),
         f"ALLOWED CHANGES\n{pack.allowed_changes}",
         f"PHOTOGRAPHIC DIRECTION\n{pack.photography}",
     ]
@@ -205,23 +279,54 @@ def build_refinement_prompt(
         facade.office_entrance is not None for building in focus for facade in building.facades
     )
     context = design.industrial_context
+    freedom = style_pack.design_freedom if style_pack else DesignFreedom.PHOTOREAL_ONLY
+    if freedom is DesignFreedom.DESIGN_WITHIN_ENVELOPE:
+        palette_rule = (
+            f"Palette direction: roof={palette.roof_hex}; dominant wall={palette.primary_hex}; "
+            f"secondary={palette.secondary_hex}; glazing={palette.glass_hex}; "
+            f"accent={palette.accent_hex}; fence/gate={palette.boundary_hex}; "
+            f"yards and aprons={palette.paving_hex}. This is the client colour direction, not a "
+            "paint schedule: keep the image recognisably this palette and keep the accent "
+            "restrained, but you may extend it with neutrals of the same family where the "
+            "design needs them."
+        )
+        facade_rule = (
+            f"Facade starting point: {preferences.envelope_kit}, "
+            f"{preferences.facade_rhythm_kit}. Treat this as the brief, not the design. "
+            f"The office entrances ({proposal_entrances}) and loading doors ({proposal_docks}) "
+            "in Base RGB are programme and must all appear, but how they are framed, headed, "
+            "shaded and composed is yours."
+        )
+    else:
+        palette_rule = (
+            f"Material roles: roof={palette.roof_hex}; dominant wall={palette.primary_hex}; "
+            f"secondary structure, plinth, doors and flashings={palette.secondary_hex}; "
+            f"authored glazing={palette.glass_hex}; restrained accent={palette.accent_hex} at "
+            f"no more than {preferences.accent_coverage_percent}% of facade; "
+            f"fence/gate={palette.boundary_hex}; internal service yards and loading "
+            f"aprons={palette.paving_hex}. Never swap, merge or extend these roles."
+        )
+        facade_rule = (
+            f"Facade system: {preferences.envelope_kit}, {preferences.facade_rhythm_kit}; "
+            f"approved proposed entrances={proposal_entrances}, approved proposed loading "
+            f"doors={proposal_docks}. Do not add more."
+        )
     project_contract = f"""IDENTITY
 Style: {design.design_language.style}.
-Material roles: roof={palette.roof_hex}; dominant wall={palette.primary_hex}; secondary structure,
-plinth, doors and flashings={palette.secondary_hex}; authored glazing={palette.glass_hex};
-restrained
-accent={palette.accent_hex} at no more than {preferences.accent_coverage_percent}% of facade;
-fence/gate={palette.boundary_hex}; internal service yards/loading aprons={palette.paving_hex};
-external approach and perimeter roads=dark charcoal asphalt. External roads must never render as
-white/light concrete. The site-ground underlay is not a finish or circulation surface and must not
-be interpreted as a service yard. Never swap, merge or extend these roles.
+{palette_rule}
+External approach and perimeter roads are dark charcoal asphalt and must never render as
+white/light concrete. The site-ground underlay is not a finish or circulation surface and must
+not be interpreted as a service yard.
 Roof: {", ".join(roofs)}; {len(design.roof_assemblies)} continuous assemblies, long-axis ridges.
-Facade system: {preferences.envelope_kit}, {preferences.facade_rhythm_kit}; approved proposed
-entrances={proposal_entrances}, approved proposed loading doors={proposal_docks}. Do not add more.
-Boundary/gate: {preferences.boundary_kit}, {preferences.gate_kit}. Preserve every visible run and
-opening. Keep the moderate-height low wall plus open steel infill, and make the unobstructed
-authored vehicular opening read at its real truck-capable scale. Opaque auxiliary
-buildings={auxiliary_count};
+{facade_rule}
+Boundary/gate: {preferences.boundary_kit}, {preferences.gate_kit}. Whatever boundary wall, fence
+or gate the Base RGB shows must survive exactly, at its authored position and opening width, as a
+moderate-height low wall with open steel infill whose vehicular opening reads at truck-capable
+scale. Where the Base RGB shows no boundary at all, the site edge is simply not modelled rather
+than deliberately open: draw the ordinary secured perimeter a serviced industrial plot has, with
+one truck-capable vehicular gate on the access road, and draw the same perimeter and the same gate
+in every view of this set. This adds nothing to the building: no wall, roof, opening or dock
+changes because of it. Opaque auxiliary buildings={auxiliary_count};
 keep them secondary but real.
 Context: {context.mode if context else design.site_design.surrounding_context_mode};
 deterministic proxy count={len(context.proxy_buildings) if context else 0}; proxies are excluded

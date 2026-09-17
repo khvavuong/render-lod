@@ -53,6 +53,23 @@ class ContextPolicy(str, Enum):
         return self is ContextPolicy.RESOLVE_PROXIES
 
 
+class DesignFreedom(str, Enum):
+    """How much of the architecture the provider is allowed to author.
+
+    The system always owns what the model measures — how many buildings, where their footprints
+    sit, how tall the envelope is. What varies is whether the provider may only photograph the
+    authored design or may develop it. Locking everything produces a faithful photograph of a
+    mediocre massing; the looser levels trade some fidelity for architecture worth showing.
+    """
+
+    #: Materials and light only. Every authored surface stays exactly as rendered.
+    PHOTOREAL_ONLY = "photoreal_only"
+    #: Massing, footprint and camera stay; the provider may add buildable architectural detail.
+    DETAIL_WITHIN_ENVELOPE = "detail_within_envelope"
+    #: Footprint, building count and height envelope stay; facade architecture is the provider's.
+    DESIGN_WITHIN_ENVELOPE = "design_within_envelope"
+
+
 class StylePack(DomainModel):
     """One authored aesthetic direction, layered above the immutable geometry contract."""
 
@@ -67,6 +84,8 @@ class StylePack(DomainModel):
     allowed_changes: str = Field(min_length=1, max_length=2000)
     #: Lens, light, exposure and post-processing direction.
     photography: str = Field(min_length=1, max_length=2000)
+    #: How much of the architecture the provider may author.
+    design_freedom: DesignFreedom = DesignFreedom.PHOTOREAL_ONLY
     #: How far the surroundings may be resolved.
     context_policy: ContextPolicy = ContextPolicy.RESOLVE_PROXIES
     #: Free-form note appended to the context instruction for this pack.

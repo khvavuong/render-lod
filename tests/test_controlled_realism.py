@@ -581,3 +581,52 @@ def test_context_composite_reaches_the_unbranded_deliverable(tmp_path: Path) -> 
         assert unbranded.getpixel((0, 0)) == (10, 20, 30)
     document = json.loads((generated / "generation_manifest.json").read_text())
     assert document["output"]["context_proxy_composited"] is True
+
+
+def test_context_composite_never_copies_branding_into_the_unbranded_deliverable(
+    tmp_path: Path,
+) -> None:
+    """Branding runs at the end of every invocation, so on a re-run `refined` already carries
+    the logo. Compositing from it and writing the result back to `unbranded_refined` burns the
+    logo into the one file that must not have it, and each further run stacks another copy.
+    Measured on the reference boards this left the logo in four of six unbranded deliverables.
+    """
+
+    size = (16, 16)
+    render = tmp_path / "renders" / "view-01"
+    generated = tmp_path / "generated" / "view-01"
+    render.mkdir(parents=True)
+    generated.mkdir(parents=True)
+    _save_rgb(render / "base_rgb.png", (255, 255, 255), size)
+    Image.new("L", size, 0).save(render / "edges.png")
+    Image.new("L", size, 255).save(render / "locked_mask.png")
+    (render / "control_pack_manifest.json").write_text("{}", encoding="utf-8")
+    overlay = Image.new("RGBA", size, (0, 0, 0, 0))
+    for x in range(size[0]):
+        for y in range(4):
+            overlay.putpixel((x, y), (10, 20, 30, 255))
+    overlay.save(render / "context_proxy_rgba.png")
+
+    # A previously branded run: `refined` carries a mark that `unbranded_refined` does not.
+    # The mark sits below the overlay band so the composite cannot hide it either way.
+    branded = Image.new("RGB", size, (255, 255, 255))
+    for x in range(3):
+        for y in range(5, 8):
+            branded.putpixel((x, y), (200, 0, 0))
+    branded.save(generated / "refined.png")
+    Image.new("RGB", size, (255, 255, 255)).save(generated / "unbranded_refined.png")
+    (generated / "generation_manifest.json").write_text(
+        json.dumps({"output": {"media_type": "image/png", "sha256": "old"}}), encoding="utf-8"
+    )
+
+    ProtectRefinement().execute(
+        tmp_path / "renders",
+        tmp_path / "generated",
+        restore_locked_pixels=False,
+        composite_context_proxy=True,
+    )
+
+    with Image.open(generated / "unbranded_refined.png") as unbranded:
+        # The overlay applied, and the logo pixel did not travel with it.
+        assert unbranded.getpixel((0, 0)) == (10, 20, 30)
+        assert unbranded.getpixel((1, 6)) == (255, 255, 255)

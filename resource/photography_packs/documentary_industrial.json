@@ -1,0 +1,48 @@
+{
+  "schema_version": "1.0.0",
+  "pack_id": "documentary_industrial",
+  "label": "Documentary industrial",
+  "description": "Sober survey framing: generous aerials, eye-level approach, full elevations.",
+  "roles": {
+    "overall": {
+      "elevation_deg": 28.0,
+      "focal_length_mm": 28.0,
+      "target_width_coverage": 0.78,
+      "roofline_margin": 0.88
+    },
+    "detail": {
+      "elevation_deg": 24.0,
+      "focal_length_mm": 28.0,
+      "target_width_coverage": 0.74,
+      "roofline_margin": 0.88
+    },
+    "context": {
+      "elevation_deg": 0.0,
+      "eye_height_m": 1.75,
+      "focal_length_mm": 32.0,
+      "target_width_coverage": 0.72,
+      "max_foreground_share": 0.28
+    },
+    "hero": {
+      "elevation_deg": 8.0,
+      "eye_height_m": 2.6,
+      "focal_length_mm": 35.0,
+      "target_width_coverage": 0.66,
+      "max_foreground_share": 0.32
+    },
+    "office_hero": {
+      "elevation_deg": 0.0,
+      "eye_height_m": 1.85,
+      "focal_length_mm": 35.0,
+      "target_width_coverage": 0.58,
+      "max_foreground_share": 0.3
+    },
+    "loading_detail": {
+      "elevation_deg": 0.0,
+      "eye_height_m": 1.65,
+      "focal_length_mm": 35.0,
+      "target_width_coverage": 0.62,
+      "max_foreground_share": 0.3
+    }
+  }
+}

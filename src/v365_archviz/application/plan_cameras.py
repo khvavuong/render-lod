@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from itertools import pairwise
 from pathlib import Path
 
+from v365_archviz.application.camera_framing import elevation_direction, framed_distance
 from v365_archviz.artifacts import atomic_write
 from v365_archviz.domain.design import BuildingTreatment, DesignDNA, FacadeDesign, LoadingDock
+from v365_archviz.domain.photography_pack import PhotographyPack, RoleFraming
 from v365_archviz.domain.scene import CanonicalScene, SceneElement, SceneSurface, SemanticRole
 from v365_archviz.domain.workflow import Camera, ViewRole, ViewSet
 
@@ -106,6 +109,128 @@ def _fit_camera_to_bounds(
         target[1] + from_target[1] * distance,
         target[2] + from_target[2] * distance,
     )
+
+
+DEFAULT_PHOTOGRAPHY_PACK_PATH = Path("resource/photography_packs/documentary_industrial.json")
+
+
+def _default_photography_pack() -> PhotographyPack:
+    """Fall back to the checked-in documentary pack when a caller supplies none."""
+
+    return PhotographyPack.load(DEFAULT_PHOTOGRAPHY_PACK_PATH)
+
+
+@dataclass(frozen=True, slots=True)
+class ElevationShot:
+    """Where a ground-level camera stands, and the lens it uses from there.
+
+    The two travel together so that a frame fitted with one lens is never rendered with another;
+    every earlier framing bug in this module was a version of that.
+    """
+
+    distance_m: float
+    focal_length_mm: float
+
+
+def _elevation_stand_off(
+    subject_height_m: float,
+    framing: RoleFraming,
+    available_clearance_m: float,
+) -> ElevationShot:
+    """Stand-off for a ground-level camera looking at one elevation.
+
+    A detail elevation is framed on the building height: stand back far enough to hold the wall
+    from plinth to parapet, and the width follows. The subject is therefore treated as roughly
+    as wide as the building is tall — neither the opening alone, which is a few metres, nor the
+    whole elevation, which can be hundreds. Solving it this way keeps the same intent on an 11 m
+    shed and a 15 m unit, where a tuned metre value put the camera against the cladding.
+    """
+
+    eye_height = framing.eye_height_m or 1.7
+    wanted = framed_distance(
+        ((0.0, 0.0, 0.0), (subject_height_m, subject_height_m, subject_height_m)),
+        camera_height_m=eye_height,
+        tilt_deg=framing.elevation_deg,
+        focal_length_mm=framing.focal_length_mm,
+        target_width_coverage=framing.target_width_coverage,
+        roofline_margin=framing.roofline_margin,
+    )
+    # The site may not have room for the framing the pack asks for. A yard only so deep cannot
+    # be backed out of, and a stand-off that ignores it puts the camera inside the shed on the
+    # far side, which renders as a blank wall. Clamping keeps the camera on the apron; the
+    # conditioning gate then reports the framing it could not reach.
+    #
+    # When the clamp binds, the pack's lens no longer holds the roofline from where the camera
+    # can stand, and the frame the provider receives has its parapet cut off. `framed_focal_length`
+    # and `tilt_for_roofline` solve that exactly, but widening to hold an 11 m roofline from 23.6 m
+    # needs 18 mm, and at 18 mm the subject falls to 8% of the frame: measured on this model the
+    # conditioning gate then rejects the view for `focus_subject_too_small_or_missing`, where the
+    # unwidened frame passed at 21%. Holding the roofline and holding the subject share are not
+    # both reachable from that distance, so widening here only moves the failure from the provider
+    # to the gate. The distance is what is wrong — `_corridor_gap_m` hands an office-entrance shot
+    # the clearance between two sheds, when that camera stands in the arrival yard — and until the
+    # clearance model is right, guessing a lens on top of a wrong distance is not an improvement.
+    return ElevationShot(min(wanted, max(2.0, available_clearance_m)), framing.focal_length_mm)
+
+
+def _axis_bearing(long_axis: int, long_offset: float, cross_offset: float) -> tuple[float, float]:
+    """Map a project-relative horizontal bearing to world XY."""
+
+    if long_axis == 0:
+        return long_offset, cross_offset
+    return cross_offset, long_offset
+
+
+def _aerial_camera(
+    bounds: tuple[tuple[float, float, float], tuple[float, float, float]],
+    target: tuple[float, float, float],
+    horizontal_bearing: tuple[float, float],
+    framing: RoleFraming,
+) -> tuple[float, float, float]:
+    """Place an aerial camera from photographic intent rather than a tuned stand-off.
+
+    Elevation, lens and subject share come from the photography pack; the distance that delivers
+    them is solved from this model's own bounds, so the same intent holds whatever the site
+    measures.
+    """
+
+    direction = elevation_direction(horizontal_bearing, framing.elevation_deg)
+    minimum, maximum = bounds
+    apex = maximum[2] - target[2]
+    distance = framed_distance(
+        ((minimum[0], minimum[1], 0.0), (maximum[0], maximum[1], apex)),
+        camera_height_m=0.0,
+        tilt_deg=framing.elevation_deg,
+        focal_length_mm=framing.focal_length_mm,
+        target_width_coverage=framing.target_width_coverage,
+        roofline_margin=framing.roofline_margin,
+    )
+    return (
+        target[0] + direction[0] * distance,
+        target[1] + direction[1] * distance,
+        target[2] + direction[2] * distance,
+    )
+
+
+def _corridor_gap_m(design: DesignDNA | None, long_axis: int) -> float | None:
+    """Width of the widest gap between parallel roof assemblies, in metres."""
+
+    if design is None or len(design.roof_assemblies) < 2:
+        return None
+    cross_axis = 1 - long_axis
+    ordered = sorted(
+        design.roof_assemblies,
+        key=lambda assembly: (
+            (assembly.bounding_box.minimum[cross_axis] + assembly.bounding_box.maximum[cross_axis])
+            / 2
+        ),
+    )
+    gaps = [
+        upper.bounding_box.minimum[cross_axis] - lower.bounding_box.maximum[cross_axis]
+        for lower, upper in pairwise(ordered)
+    ]
+    positive = [gap for gap in gaps if gap > 0]
+    return max(positive) if positive else None
 
 
 def _corridor_cross_coordinate(design: DesignDNA | None, long_axis: int) -> float | None:
@@ -305,7 +430,17 @@ def _golden_arrival_shot(
 
 
 class PlanStandardCameras:
-    def execute(self, scene_path: Path, design_dna_path: Path | None = None) -> ViewSet:
+    def execute(
+        self,
+        scene_path: Path,
+        design_dna_path: Path | None = None,
+        photography_pack_path: Path | None = None,
+    ) -> ViewSet:
+        photography = (
+            PhotographyPack.load(photography_pack_path)
+            if photography_pack_path is not None
+            else _default_photography_pack()
+        )
         scene = CanonicalScene.model_validate_json(scene_path.read_text(encoding="utf-8"))
         design = None
         focus_ids: set[str] = set()
@@ -337,6 +472,16 @@ class PlanStandardCameras:
         cross_span = (span_x, span_y)[cross_axis]
         long_min = minimum[long_axis]
         height = maximum[2] - minimum[2]
+        # How far a ground-level camera can back away from a facade before it leaves the apron
+        # and enters whatever stands opposite. Derived from the model's own yard, so a narrow
+        # site clamps harder than an open one.
+        corridor_gap = _corridor_gap_m(design, long_axis)
+        available_apron_clearance = (
+            # Stay on this side of the yard: half the gap, less the camera's own footprint.
+            max(6.0, corridor_gap / 2 - 2.0)
+            if corridor_gap is not None
+            else max(6.0, cross_span * 0.28)
+        )
         detected_corridor = _corridor_cross_coordinate(design, long_axis)
         authored_access = _authored_access_cross_coordinate(scene, long_axis, minimum, maximum)
         has_internal_corridor = detected_corridor is not None
@@ -381,47 +526,36 @@ class PlanStandardCameras:
         # implementation fitted the building, then clamped Z to 40 m; on wide campuses that
         # produced a 7-10 degree grazing view in which the site plan was largely hidden.
         overall_target = (site_center[0], site_center[1], minimum[2] + height * 0.12)
-        overall_direction = _axis_point(
-            (0.0, 0.0, 0.0),
-            long_axis,
-            -1.0,
-            -0.85,
-            0.72,
-        )
-        overall_position = _fit_camera_to_bounds(
-            site_minimum,
-            site_maximum,
+        overall_position = _aerial_camera(
+            (site_minimum, site_maximum),
             overall_target,
-            overall_direction,
-            focal_length_mm=28.0,
-            sensor_width_mm=36.0,
-            # A controlled crop gives the project presentation weight while retaining roughly
-            # 70-80% of the authored site, matching a commercial hero aerial rather than GIS.
-            frame_margin=1.18,
-        )
-        reverse_overall_direction = _axis_point(
-            (0.0, 0.0, 0.0),
-            long_axis,
-            1.0,
-            0.74,
-            0.72,
+            _axis_bearing(long_axis, -1.0, -0.85),
+            photography.framing_for(ViewRole.OVERALL),
         )
         reverse_overall_target = (site_center[0], site_center[1], minimum[2] + height * 0.18)
-        reverse_overall_position = _fit_camera_to_bounds(
-            site_minimum,
-            site_maximum,
+        reverse_overall_position = _aerial_camera(
+            (site_minimum, site_maximum),
             reverse_overall_target,
-            reverse_overall_direction,
-            focal_length_mm=28.0,
-            sensor_width_mm=36.0,
-            frame_margin=1.18,
+            _axis_bearing(long_axis, 1.0, 0.74),
+            photography.framing_for(ViewRole.DETAIL),
         )
         # An eye-level approach must stand close enough that the building it introduces still
         # reads. Used only by the fallback below, which runs when no gate is authored.
         site_span_for_approach = max(
             site_maximum[0] - site_minimum[0], site_maximum[1] - site_minimum[1]
         )
-        approach_distance = min(max(45.0, height * 5.5), max(55.0, site_span_for_approach * 0.20))
+        # Two failure modes bracket this distance. Too far and an eye-level camera leaves the
+        # lower half of the frame as featureless apron; too close and the long facade fills the
+        # frame as a flat wall with no gate, depth or approach. Both are framing statements, so
+        # the pack states the intent and the stand-off is solved from this model's own height.
+        approach_shot = _elevation_stand_off(
+            height,
+            photography.framing_for(ViewRole.CONTEXT),
+            # The approach stands outside the fence, so the yard does not constrain it; the site
+            # itself is the only limit worth keeping.
+            max(12.0, site_span_for_approach * 0.5),
+        )
+        approach_distance = approach_shot.distance_m
         # Place the approach camera relative to what it looks at, so approach_distance really is
         # the stand-off from the subject. Adding it to half the site length instead pushes the
         # camera past the far end of a long building and shrinks the subject out of range.
@@ -462,6 +596,12 @@ class PlanStandardCameras:
         facade_detail_shot: tuple[tuple[float, float, float], tuple[float, float, float]] | None = (
             None
         )
+        # The lens each ground-level role ends up with. It is the pack's focal length unless the
+        # site clamped the stand-off, in which case the solver widened it to hold the framing
+        # from where the camera can actually stand.
+        office_focal_mm = photography.framing_for(ViewRole.OFFICE_HERO).focal_length_mm
+        logistics_focal_mm = photography.framing_for(ViewRole.HERO).focal_length_mm
+        human_focal_mm = photography.framing_for(ViewRole.LOADING_DETAIL).focal_length_mm
         if design is not None:
             surfaces_by_id = {surface.surface_id: surface for surface in scene.surfaces}
             office_candidates = [
@@ -485,11 +625,18 @@ class PlanStandardCameras:
                     )
                     side = -1.0 if office_entrance.u >= 0.5 else 1.0
                     lateral = min(22.0, max(14.0, office_surface.width_m * 0.16))
-                    # Stand back far enough that the entrance bay and its ground plane both fit a
-                    # plausible architectural frame. A stand-off shorter than the building height
-                    # fills the frame with cladding, and the provider answers by pulling the
-                    # camera back itself, which is the drift the geometry screen then reports.
-                    outward = min(max(18.0, height * 1.8), max(12.0, cross_span * 0.20))
+                    # Stand back far enough that the whole elevation, parapet included, fits the
+                    # frame. Measured on the reference model the roofline sat about half a degree
+                    # outside the field of view, and a clipped parapet is not a frame a
+                    # photographer would keep, so the provider pulls the camera back itself and
+                    # the geometry screen then reports that as drift.
+                    office_shot = _elevation_stand_off(
+                        height,
+                        photography.framing_for(ViewRole.OFFICE_HERO),
+                        available_apron_clearance,
+                    )
+                    outward = office_shot.distance_m
+                    office_focal_mm = office_shot.focal_length_mm
                     office_detail_shot = (
                         (
                             entrance[0]
@@ -622,9 +769,13 @@ class PlanStandardCameras:
                     # enough to show the apron and turning space in front of the dock. Standing
                     # closer than the building is tall fills the frame with cladding and the
                     # conditioning gate rejects it for hiding the authored circulation.
-                    logistics_outward_distance = min(
-                        max(26.0, height * 2.4), max(14.0, cross_span * 0.22)
+                    logistics_shot = _elevation_stand_off(
+                        height,
+                        photography.framing_for(ViewRole.HERO),
+                        available_apron_clearance,
                     )
+                    logistics_outward_distance = logistics_shot.distance_m
+                    logistics_focal_mm = logistics_shot.focal_length_mm
                     target = (door[0], door[1], minimum[2] + min(3.0, height * 0.28))
                     loading_detail_shot = (
                         (
@@ -661,7 +812,13 @@ class PlanStandardCameras:
                     # farther out places a human camera in perimeter planting or behind utilities.
                     human_side = -1.0 if dock.u >= 0.5 else 1.0
                     human_lateral = min(32.0, max(25.0, surface.width_m * 0.18))
-                    human_outward = min(6.0, max(4.8, cross_span * 0.065))
+                    human_shot = _elevation_stand_off(
+                        height,
+                        photography.framing_for(ViewRole.LOADING_DETAIL),
+                        available_apron_clearance,
+                    )
+                    human_outward = human_shot.distance_m
+                    human_focal_mm = human_shot.focal_length_mm
                     human_target_shift = min(10.0, max(6.0, surface.width_m * 0.05))
                     loading_human_shot = (
                         (
@@ -725,7 +882,7 @@ class PlanStandardCameras:
                 role=ViewRole.OVERALL,
                 position=overall_position,
                 target=overall_target,
-                focal_length_mm=28,
+                focal_length_mm=photography.framing_for(ViewRole.OVERALL).focal_length_mm,
                 sensor_width_mm=36,
                 aspect_ratio="16:9",
             ),
@@ -750,10 +907,12 @@ class PlanStandardCameras:
                     else point(
                         approach_target_long,
                         approach_target_cross,
-                        minimum[2] + max(3.0, height * 0.28),
+                        # Aim at mid-height so the camera tilts up off the apron rather than
+                        # holding the horizon across the middle of the frame.
+                        minimum[2] + max(4.0, height * 0.55),
                     )
                 ),
-                focal_length_mm=32,
+                focal_length_mm=approach_shot.focal_length_mm,
                 sensor_width_mm=36,
                 aspect_ratio="16:9",
             ),
@@ -779,7 +938,7 @@ class PlanStandardCameras:
                         minimum[2] + height * 0.25,
                     )
                 ),
-                focal_length_mm=35,
+                focal_length_mm=logistics_focal_mm,
                 sensor_width_mm=36,
                 aspect_ratio="16:9",
             ),
@@ -788,7 +947,7 @@ class PlanStandardCameras:
                 role=ViewRole.DETAIL,
                 position=reverse_overall_position,
                 target=reverse_overall_target,
-                focal_length_mm=28,
+                focal_length_mm=photography.framing_for(ViewRole.DETAIL).focal_length_mm,
                 sensor_width_mm=36,
                 aspect_ratio="16:9",
             ),
@@ -815,7 +974,7 @@ class PlanStandardCameras:
                         long_min + long_span * 0.24, minimum[2] + min(3.6, height * 0.32)
                     )
                 ),
-                focal_length_mm=35,
+                focal_length_mm=office_focal_mm,
                 sensor_width_mm=36,
                 aspect_ratio="16:9",
             ),
@@ -846,7 +1005,7 @@ class PlanStandardCameras:
                         minimum[2] + min(3.2, height * 0.3),
                     )
                 ),
-                focal_length_mm=35,
+                focal_length_mm=human_focal_mm,
                 sensor_width_mm=36,
                 aspect_ratio="16:9",
             ),

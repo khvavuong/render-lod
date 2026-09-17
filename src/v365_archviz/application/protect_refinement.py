@@ -83,10 +83,21 @@ class ProtectRefinement:
             if not all(path.is_file() for path in (base, mask, critical_edges, control_manifest)):
                 raise InvalidModelError(f"{view_dir.name} has no complete protected control pack")
 
+            # `refined` carries the logo once branding has run, and branding runs at the end of
+            # every pipeline invocation. Reading it here and writing the result back to the
+            # unbranded deliverable burns the logo into the file whose whole purpose is not to
+            # have one, and a second invocation stacks another copy on top. Measured on the
+            # reference boards, re-running the pipeline over an already-branded directory left
+            # the logo in four of six `unbranded_refined.jpg` files, one of them twice. The
+            # unbranded deliverable is the canonical un-watermarked pixel state, so it is what
+            # this stage reads and writes; branding derives from it afterwards and stays
+            # idempotent however often the pipeline is re-run.
+            unbranded = view_dir / f"unbranded_refined{refined.suffix.lower()}"
+            pixel_source = unbranded if unbranded.is_file() else refined
             provider_source = view_dir / f"provider_source{refined.suffix.lower()}"
-            if provider_source != refined:
-                atomic_write(provider_source, refined.read_bytes())
-            with Image.open(refined) as generated_image:
+            if provider_source != pixel_source:
+                atomic_write(provider_source, pixel_source.read_bytes())
+            with Image.open(pixel_source) as generated_image:
                 target_size = generated_image.size
                 generated_rgb = generated_image.convert("RGB")
             context_overlay = render_root / view_dir.name / "context_proxy_rgba.png"
@@ -106,10 +117,10 @@ class ProtectRefinement:
                     generated_rgb.save(buffer, format="PNG", optimize=True)
                 composited_bytes = buffer.getvalue()
                 atomic_write(refined, composited_bytes)
-                # Generation already wrote the unbranded deliverable, and branding reuses that
-                # copy rather than the composited file. Without this the context composite is
-                # computed, recorded as done, and then silently dropped from every artifact.
-                unbranded = view_dir / f"unbranded_refined{refined.suffix.lower()}"
+                # Branding reuses the unbranded deliverable rather than the composited file, so
+                # without this the context composite is computed, recorded as done, and then
+                # silently dropped from every artifact. The bytes written here are unbranded
+                # because `pixel_source` above is.
                 if unbranded.is_file():
                     atomic_write(unbranded, composited_bytes)
                 context_composited = True

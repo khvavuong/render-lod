@@ -38,6 +38,16 @@ class ViewConditioningInput:
     reference_images: tuple[Path, ...] = ()
     aspect_ratio: str = "16:9"
     image_size: str = "1K"
+    #: The camera's authored role. Adapters that need to treat an aerial differently from a
+    #: facade shot must key on this, never on a view id: camera selection assigns slots by what
+    #: a site can actually offer, so "view-01" is not always the overview.
+    role: str = ""
+    #: How much of the architecture the provider may author, from the style pack. Without it an
+    #: adapter cannot tell whether its structure-authority block should demand the authored
+    #: facade back, and a request can carry a prompt granting design freedom alongside a
+    #: conditioning block forbidding it.
+    design_freedom: str = "photoreal_only"
+    context_policy: str = "translucent_massing"
 
 
 @dataclass(frozen=True)

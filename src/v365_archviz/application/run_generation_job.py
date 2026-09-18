@@ -26,6 +26,7 @@ from v365_archviz.application.validate_viewset import ValidateGeneratedViewSet
 from v365_archviz.artifacts import atomic_write
 from v365_archviz.config import Settings
 from v365_archviz.domain.jobs import GenerationJob
+from v365_archviz.domain.style_pack import StylePack
 from v365_archviz.domain.workflow import Camera, ViewRole, ViewSet, WorkflowState
 from v365_archviz.errors import V365Error
 from v365_archviz.providers.docker_conditioning import DockerConditioningRenderer
@@ -33,6 +34,29 @@ from v365_archviz.providers.image_factory import create_image_renderer
 from v365_archviz.providers.local_jobs import LocalJobRepository
 
 logger = logging.getLogger(__name__)
+
+
+def _authored_style(job: GenerationJob) -> StylePack | None:
+    """Load the style pack this job was submitted with, if any.
+
+    Both prompt call sites used to omit it, so every job ran on the built-in strict base prompt
+    whatever the caller chose, and `composite_context_proxy` was hardcoded true at all three
+    protection call sites. The effect was that DesignFreedom and ContextPolicy — the whole
+    authored-customisation layer — were reachable only from the CLI and never from the API.
+    """
+
+    if getattr(job, "style_pack_snapshot", None):
+        return StylePack.model_validate_json(job.style_pack_snapshot)
+    if not job.style_pack_ref:
+        return None
+    return StylePack.load(Path(job.style_pack_ref))
+
+
+def _composites_proxies(job: GenerationJob) -> bool:
+    """Whether authored context volumes are composited for this job's context policy."""
+
+    pack = _authored_style(job)
+    return True if pack is None else pack.context_policy.composites_proxies
 
 
 class RunGenerationJob:
@@ -78,7 +102,8 @@ class RunGenerationJob:
             )
 
         if job.state is WorkflowState.GENERATING_VIEWSET:
-            _, prompt = build_refinement_prompt(paths.design_dna)
+            style_pack = _authored_style(job)
+            _, prompt = build_refinement_prompt(paths.design_dna, style_pack=style_pack)
             references = tuple(Path(value) for value in job.reference_image_refs)
             reference_pairs = tuple(zip(references, job.reference_roles, strict=True))
             review_path = paths.generated_root / "design_master_review.json"
@@ -125,6 +150,9 @@ class RunGenerationJob:
                             profile=job.profile,
                             view_ids=(site_master_id,),
                             reference_images=site_references,
+                            style_pack=style_pack,
+                            attach_context_guide=style_pack is None
+                            or style_pack.context_policy.sends_composition_guide,
                         )
                         generated_manifest_path = generated.manifest_path
                         site_master_path = self._refined_image(
@@ -150,6 +178,9 @@ class RunGenerationJob:
                             profile=job.profile,
                             view_ids=(facade_master_id,),
                             reference_images=facade_references,
+                            style_pack=style_pack,
+                            attach_context_guide=style_pack is None
+                            or style_pack.context_policy.sends_composition_guide,
                             approved_master_path=site_master_path,
                             approved_master_view_id=site_master_id,
                         )
@@ -158,7 +189,7 @@ class RunGenerationJob:
                     paths.render_root,
                     paths.generated_root,
                     restore_locked_pixels=False,
-                    composite_context_proxy=True,
+                    composite_context_proxy=_composites_proxies(job),
                 )
                 master_paths = {
                     "site": self._refined_image(paths.generated_root / site_master_id),
@@ -314,6 +345,9 @@ class RunGenerationJob:
                             prompt,
                             profile=job.profile,
                             view_ids=group_view_ids,
+                            style_pack=style_pack,
+                            attach_context_guide=style_pack is None
+                            or style_pack.context_policy.sends_composition_guide,
                             reference_images=(),
                             reference_images_by_view=reference_images_by_view,
                             approved_master_path=master_refs.get(master_type, master_path),
@@ -328,7 +362,7 @@ class RunGenerationJob:
                     paths.render_root,
                     paths.generated_root,
                     restore_locked_pixels=False,
-                    composite_context_proxy=True,
+                    composite_context_proxy=_composites_proxies(job),
                 )
                 job = self._advance(
                     repository,
@@ -375,7 +409,8 @@ class RunGenerationJob:
                 if isinstance(quality, dict) and quality.get("image_ref")
                 else None
             )
-            _, prompt = build_refinement_prompt(paths.design_dna)
+            style_pack = _authored_style(job)
+            _, prompt = build_refinement_prompt(paths.design_dna, style_pack=style_pack)
             correction = (
                 instruction
                 or "Correct only the QA issue visible in this view while improving "
@@ -409,6 +444,9 @@ class RunGenerationJob:
                     prompt,
                     profile=job.profile,
                     view_ids=(repair_view_id,),
+                    style_pack=style_pack,
+                    attach_context_guide=style_pack is None
+                    or style_pack.context_policy.sends_composition_guide,
                     reference_images=external_references,
                     approved_master_path=anchor_path,
                     approved_master_view_id=str(master_ids.get(anchor_type, repair_view_id)),
@@ -418,7 +456,7 @@ class RunGenerationJob:
                 paths.render_root,
                 paths.generated_root,
                 restore_locked_pixels=False,
-                composite_context_proxy=True,
+                composite_context_proxy=_composites_proxies(job),
             )
             repaired_image = self._refined_image(paths.generated_root / repair_view_id)
             self._append_repair_lineage(
@@ -584,13 +622,36 @@ class RunGenerationJob:
         view_set: ViewSet,
         job: GenerationJob,
     ) -> None:
-        if not self._conditioning_complete(paths.render_root, view_set):
+        pack = _authored_style(job)
+        facade_mode = (
+            "envelope_program"
+            if pack and pack.design_freedom.value == "design_within_envelope"
+            else "authored"
+        )
+        try:
+            render_manifest = json.loads(
+                (paths.render_root / "render_manifest.json").read_text(encoding="utf-8")
+            )
+        except (OSError, ValueError):
+            render_manifest = {}
+        mode_matches = render_manifest.get("facade_mode", "authored") == facade_mode
+        script_path = Path(__file__).resolve().parents[3] / "scripts/blender/render_conditioning.py"
+        script_matches = (
+            render_manifest.get("renderer_script_sha256")
+            == hashlib.sha256(script_path.read_bytes()).hexdigest()
+        )
+        if (
+            not script_matches
+            or not mode_matches
+            or not self._conditioning_complete(paths.render_root, view_set)
+        ):
             DockerConditioningRenderer().execute(
                 paths.scene,
                 paths.design_dna,
                 paths.view_set,
                 paths.render_root,
                 job.render_profile,
+                facade_mode=facade_mode,
             )
             for camera in view_set.cameras:
                 BuildControlPack().execute(paths.render_root / camera.view_id)
@@ -700,10 +761,19 @@ class _JobPaths:
     def from_job(cls, artifact_dir: Path, job: GenerationJob) -> _JobPaths:
         scene_root = artifact_dir / "scenes" / job.model_revision
         design_root = scene_root / "designs" / job.design_revision
+        view_set_path = design_root / "view_set.json"
+        if job.view_set_snapshot:
+            view_set_path = artifact_dir / "job_inputs" / job.job_id / "view_set.json"
+            atomic_write(view_set_path, job.view_set_snapshot.encode("utf-8") + b"\n")
+        render_root = artifact_dir / "renders" / job.model_revision / job.design_revision
+        generated_root = artifact_dir / "generated" / job.model_revision / job.design_revision
+        if job.output_namespace:
+            render_root = render_root / job.output_namespace
+            generated_root = generated_root / job.output_namespace
         return cls(
             scene=scene_root / "canonical_scene.json",
             design_dna=design_root / "design_dna.json",
-            view_set=design_root / "view_set.json",
-            render_root=artifact_dir / "renders" / job.model_revision / job.design_revision,
-            generated_root=artifact_dir / "generated" / job.model_revision / job.design_revision,
+            view_set=view_set_path,
+            render_root=render_root,
+            generated_root=generated_root,
         )

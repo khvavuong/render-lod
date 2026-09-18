@@ -30,6 +30,7 @@ from v365_archviz.application.inspect_model import InspectModel
 from v365_archviz.application.plan_cameras import PlanStandardCameras
 from v365_archviz.application.plan_design import PlanDesign
 from v365_archviz.application.plan_industrial_context import PlanIndustrialContext
+from v365_archviz.application.run_generation_job import _JobPaths
 from v365_archviz.artifacts import atomic_write
 from v365_archviz.config import Settings
 from v365_archviz.domain.controlled_realism import CertificationReport, CertificationState
@@ -164,6 +165,7 @@ class CreateViewSetRequest(BaseModel):
     profile: GenerationProfile = GenerationProfile.PREVIEW_FAST
     render_profile: RenderProfile = RenderProfile.STANDARD_EEVEE
     reference_ids: tuple[str, ...] = Field(default=(), max_length=2)
+    style_pack_id: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 
 class ReferenceUploadResponse(BaseModel):
@@ -351,14 +353,8 @@ def _with_active_quality_baseline(
 
 
 def _certification_state(job: GenerationJob, settings: Settings) -> CertificationState:
-    model_revision = job.model_revision
-    design_revision = job.design_revision
     path = (
-        settings.artifact_dir
-        / "generated"
-        / model_revision
-        / design_revision
-        / "certification_report.json"
+        _JobPaths.from_job(settings.artifact_dir, job).generated_root / "certification_report.json"
     )
     if not path.is_file():
         return CertificationState.BASE_PBR
@@ -392,7 +388,7 @@ def _output_files(view_set_id: str) -> dict[str, tuple[Path, OutputKind, str, st
     except OSError as exc:
         raise HTTPException(status_code=404, detail="view set not found") from exc
     settings = _settings()
-    generated = settings.artifact_dir / "generated" / job.model_revision / job.design_revision
+    generated = _JobPaths.from_job(settings.artifact_dir, job).generated_root
     files: dict[str, tuple[Path, OutputKind, str, str | None]] = {}
     for view_dir in sorted(generated.glob("view-*")):
         candidates = tuple(view_dir.glob("refined.*"))
@@ -748,6 +744,16 @@ def create_view_set(design_revision: str, request: CreateViewSetRequest) -> View
         reference_refs, reference_roles = _with_active_quality_baseline(
             settings.artifact_dir, reference_refs, reference_roles
         )
+    style_pack_ref = None
+    if request.style_pack_id is not None:
+        pack_path = (
+            Path(__file__).resolve().parents[2]
+            / "resource/style_packs"
+            / f"{request.style_pack_id}.json"
+        )
+        if not pack_path.is_file():
+            raise HTTPException(status_code=422, detail="unknown style pack")
+        style_pack_ref = str(pack_path)
     created = CreateGenerationJob().execute(
         _repository(settings),
         project_id=design.project_id,
@@ -759,12 +765,16 @@ def create_view_set(design_revision: str, request: CreateViewSetRequest) -> View
         image_provider=settings.image_provider,
         reference_image_refs=reference_refs,
         reference_roles=reference_roles,
+        style_pack_ref=style_pack_ref,
     )
     job = created.job
     if created.created:
         job = job.transition(
             WorkflowState.RENDERING_PASSES,
-            artifact_refs=(str(design_path), str(design_path.parent / "view_set.json")),
+            artifact_refs=(
+                str(design_path),
+                str(_JobPaths.from_job(settings.artifact_dir, job).view_set),
+            ),
         )
         _repository(settings).save(job)
     if settings.local_worker_enabled and job.state not in {
@@ -868,19 +878,11 @@ def create_video_job(view_set_id: str) -> VideoJobResponse:
             detail="the image view set must complete before video generation",
         )
 
-    generated_root = (
-        settings.artifact_dir / "generated" / image_job.model_revision / image_job.design_revision
-    )
+    image_paths = _JobPaths.from_job(settings.artifact_dir, image_job)
+    generated_root = image_paths.generated_root
     manifest = generated_root / "viewset_generation_manifest.json"
     board = generated_root / "viewset_board.jpg"
-    view_set_path = (
-        settings.artifact_dir
-        / "scenes"
-        / image_job.model_revision
-        / "designs"
-        / image_job.design_revision
-        / "view_set.json"
-    )
+    view_set_path = image_paths.view_set
     try:
         view_set = ViewSet.model_validate_json(view_set_path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
@@ -998,10 +1000,7 @@ def approve_view_set(view_set_id: str) -> ViewSetJobResponse:
         raise HTTPException(status_code=404, detail="view set not found") from exc
     if job.state is WorkflowState.DESIGN_MASTER_REVIEW:
         review_path = (
-            settings.artifact_dir
-            / "generated"
-            / job.model_revision
-            / job.design_revision
+            _JobPaths.from_job(settings.artifact_dir, job).generated_root
             / "design_master_review.json"
         )
         try:
@@ -1020,11 +1019,7 @@ def approve_view_set(view_set_id: str) -> ViewSetJobResponse:
         return _transition_view_set(view_set_id, WorkflowState.GENERATING_VIEWSET)
     if job.state is WorkflowState.HUMAN_REVIEW:
         qa_path = (
-            settings.artifact_dir
-            / "generated"
-            / job.model_revision
-            / job.design_revision
-            / "technical_qa.json"
+            _JobPaths.from_job(settings.artifact_dir, job).generated_root / "technical_qa.json"
         )
         try:
             qa = json.loads(qa_path.read_text(encoding="utf-8"))
@@ -1080,11 +1075,7 @@ def reject_design_master(
             detail="only a pending Design Master or final visual review can be rejected",
         )
     review_path = (
-        settings.artifact_dir
-        / "generated"
-        / job.model_revision
-        / job.design_revision
-        / "design_master_review.json"
+        _JobPaths.from_job(settings.artifact_dir, job).generated_root / "design_master_review.json"
     )
     try:
         review = json.loads(review_path.read_text(encoding="utf-8"))
@@ -1123,21 +1114,14 @@ def retry_view_set(view_set_id: str) -> ViewSetJobResponse:
         raise HTTPException(status_code=404, detail="view set not found") from exc
     if job.state is not WorkflowState.FAILED:
         raise HTTPException(status_code=409, detail="only failed jobs can be retried")
-    generated_root = settings.artifact_dir / "generated" / job.model_revision / job.design_revision
+    generated_root = _JobPaths.from_job(settings.artifact_dir, job).generated_root
     review_path = generated_root / "design_master_review.json"
     try:
         review = json.loads(review_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         review = {}
     if review.get("approved", False):
-        view_set_path = (
-            settings.artifact_dir
-            / "scenes"
-            / job.model_revision
-            / "designs"
-            / job.design_revision
-            / "view_set.json"
-        )
+        view_set_path = _JobPaths.from_job(settings.artifact_dir, job).view_set
         try:
             view_set = ViewSet.model_validate_json(view_set_path.read_text(encoding="utf-8"))
             complete_outputs = all(
@@ -1179,14 +1163,7 @@ def repair_view(view_id: str, request: ViewActionRequest) -> ViewSetJobResponse:
     settings = _settings()
     try:
         job = _repository(settings).get_by_view_set(request.view_set_id)
-        view_set_path = (
-            settings.artifact_dir
-            / "scenes"
-            / job.model_revision
-            / "designs"
-            / job.design_revision
-            / "view_set.json"
-        )
+        view_set_path = _JobPaths.from_job(settings.artifact_dir, job).view_set
         view_set = ViewSet.model_validate_json(view_set_path.read_text(encoding="utf-8"))
     except OSError as exc:
         raise HTTPException(status_code=404, detail="view set not found") from exc
@@ -1199,11 +1176,7 @@ def repair_view(view_id: str, request: ViewActionRequest) -> ViewSetJobResponse:
     if view_id not in {camera.view_id for camera in view_set.cameras}:
         raise HTTPException(status_code=404, detail="view not found in view set")
     request_path = (
-        settings.artifact_dir
-        / "generated"
-        / job.model_revision
-        / job.design_revision
-        / "manual_repair_request.json"
+        _JobPaths.from_job(settings.artifact_dir, job).generated_root / "manual_repair_request.json"
     )
     atomic_write(
         request_path,

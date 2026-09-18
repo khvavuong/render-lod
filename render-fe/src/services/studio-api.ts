@@ -226,7 +226,10 @@ export class HttpStudioGateway implements StudioGateway {
         method: 'POST',
         body: JSON.stringify({
           model_revision: model.modelRevision,
-          profile: values.deliveryQuality === 'preview' ? 'preview_fast' : 'tender_final',
+          profile: values.deliveryQuality === 'marketing'
+            ? 'marketing_hero'
+            : values.deliveryQuality === 'tender' ? 'tender_final' : 'preview_fast',
+          style_pack_id: values.deliveryQuality === 'tender' ? undefined : 'marketing_photoreal',
           render_profile: 'standard_eevee',
           reference_ids: referenceIds.filter((value): value is string => Boolean(value)),
         }),

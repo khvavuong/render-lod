@@ -21,7 +21,7 @@ from v365_archviz.providers.contracts import (
     ViewConditioningInput,
 )
 
-PROMPT_VERSION = "layered-authority-v9-site-surface-fidelity"
+PROMPT_VERSION = "layered-authority-v10-design-context-policy"
 DEFAULT_PROMPT = """Create a photorealistic professional architectural visualization of this
 Vietnamese industrial project. Treat the base render and auxiliary passes as immutable spatial
 geometry: preserve the exact camera, site boundary, authored road and sidewalk centerlines and
@@ -191,6 +191,8 @@ class RefineView:
         generated_image: GeneratedImage | None = None,
         watermark: BrandWatermark | None = None,
         effective_provider_model: str | None = None,
+        design_freedom: str = "photoreal_only",
+        context_policy: str = "translucent_massing",
     ) -> RefinedViewArtifacts:
         view_directory = render_root / view_id
         inputs = {
@@ -231,6 +233,8 @@ class RefineView:
                 semantic=inputs["semantic"],
                 edges=inputs["edges"],
                 prompt=prompt,
+                design_freedom=design_freedom,
+                context_policy=context_policy,
                 structure_guide=inputs.get("structure_guide"),
                 reference_images=reference_images,
                 # Gemini Pro prices 1K and 2K in the same tier; single-view QA should exercise
@@ -279,6 +283,8 @@ class RefineView:
             "effective_provider_model": effective_provider_model,
             "provider_request_id": generated.provider_request_id,
             "prompt_version": PROMPT_VERSION,
+            "effective_design_freedom": design_freedom,
+            "effective_context_policy": context_policy,
             "inputs": {
                 **{name: _sha256(path) for name, path in inputs.items()},
                 **{

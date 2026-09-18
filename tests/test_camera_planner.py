@@ -24,7 +24,7 @@ def test_plans_six_reproducible_cameras(tmp_path: Path, valid_scene: CanonicalSc
         ViewRole.OFFICE_HERO,
         ViewRole.LOADING_DETAIL,
     }
-    assert first.view_set_id.endswith("standard-v39")
+    assert first.view_set_id.endswith("standard-v40")
     hero_aerial = next(camera for camera in first.cameras if camera.role is ViewRole.OVERALL)
     arrival = next(camera for camera in first.cameras if camera.role is ViewRole.CONTEXT)
     logistics = next(camera for camera in first.cameras if camera.role is ViewRole.HERO)

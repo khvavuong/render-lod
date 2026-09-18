@@ -280,6 +280,13 @@ def build_refinement_prompt(
     )
     context = design.industrial_context
     freedom = style_pack.design_freedom if style_pack else DesignFreedom.PHOTOREAL_ONLY
+    context_authority = (
+        "Resolve proxies into opaque, grounded neighbouring buildings at the registered locations; "
+        "preserve count, envelope and separation. Never draw translucent placeholders."
+        if style_pack and style_pack.context_policy.value == "resolve_proxies"
+        else "Context is governed by the authored style policy; do not change the focus project."
+        if style_pack else "Proxies are excluded from AI authority and restored later."
+    )
     if freedom is DesignFreedom.DESIGN_WITHIN_ENVELOPE:
         palette_rule = (
             f"Palette direction: roof={palette.roof_hex}; dominant wall={palette.primary_hex}; "
@@ -329,8 +336,8 @@ in every view of this set. This adds nothing to the building: no wall, roof, ope
 changes because of it. Opaque auxiliary buildings={auxiliary_count};
 keep them secondary but real.
 Context: {context.mode if context else design.site_design.surrounding_context_mode};
-deterministic proxy count={len(context.proxy_buildings) if context else 0}; proxies are excluded
-from AI authority and restored later. Shared daylight environment: {design.environment.time},
+deterministic proxy count={len(context.proxy_buildings) if context else 0}; {context_authority}
+Shared daylight environment: {design.environment.time},
 {design.environment.weather}, {design.environment.white_balance_k}K. Landscape:
 {design.presentation.landscape_character}. User preference:
 {preferences.creative_prompt or "none"}; this is soft and cannot override authority or palette."""

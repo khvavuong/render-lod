@@ -2,11 +2,13 @@ from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from PIL import Image
 
 from v365_archviz.application.run_generation_job import RunGenerationJob
 from v365_archviz.config import Settings
 from v365_archviz.domain.jobs import GenerationJob
+from v365_archviz.domain.style_pack import DesignFreedom, StylePack
 from v365_archviz.domain.workflow import (
     Camera,
     GenerationProfile,
@@ -31,6 +33,12 @@ def test_generation_stops_after_site_and_facade_masters_until_approval(
         design_revision="design",
         view_set_id="view-set",
         profile=GenerationProfile.MARKETING_HERO,
+        style_pack_snapshot=(
+            StylePack.load(
+                Path(__file__).resolve().parents[1]
+                / "resource/style_packs/marketing_photoreal.json"
+            ).to_json()
+        ),
         reference_image_refs=(str(tmp_path / "factory-reference.jpg"),),
         reference_roles=("factory_design_reference",),
         initial_state=WorkflowState.GENERATING_VIEWSET,
@@ -73,6 +81,8 @@ def test_generation_stops_after_site_and_facade_masters_until_approval(
             return None
 
     def refine(_self, _renderer, _render_root, generated_root, *_args, **kwargs):  # type: ignore[no-untyped-def]
+        assert kwargs["style_pack"].design_freedom is DesignFreedom.DESIGN_WITHIN_ENVELOPE
+        assert kwargs["attach_context_guide"] is True
         view_ids = kwargs["view_ids"]
         selected.append(view_ids)
         approved_masters.append(kwargs.get("approved_master_path"))
@@ -88,7 +98,7 @@ def test_generation_stops_after_site_and_facade_masters_until_approval(
     monkeypatch.setattr(RunGenerationJob, "_ensure_conditioning", lambda *_args: None)
     monkeypatch.setattr(
         "v365_archviz.application.run_generation_job.build_refinement_prompt",
-        lambda *_args: ({}, "prompt"),
+        lambda *_args, **kwargs: ({}, "prompt"),
     )
     monkeypatch.setattr(
         "v365_archviz.application.run_generation_job.select_master_view_ids",
@@ -265,7 +275,7 @@ def test_targeted_repair_regenerates_only_requested_view_and_records_lineage(
 
     monkeypatch.setattr(
         "v365_archviz.application.run_generation_job.build_refinement_prompt",
-        lambda *_args: ({}, "prompt"),
+        lambda *_args, **kwargs: ({}, "prompt"),
     )
     monkeypatch.setattr(
         "v365_archviz.application.run_generation_job.create_image_renderer",
@@ -296,3 +306,45 @@ def test_targeted_repair_regenerates_only_requested_view_and_records_lineage(
     history = __import__("json").loads((generated / "repair_history.json").read_text())
     assert history["repairs"][0]["view_id"] == "view-03"
     assert history["repairs"][0]["parent_sha256"] != history["repairs"][0]["output_sha256"]
+
+
+def test_the_job_forwards_its_authored_style_pack_to_the_prompt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Both prompt call sites used to omit the pack, so every job ran on the strict base prompt
+    whatever the caller chose. DesignFreedom and ContextPolicy were then reachable only from the
+    CLI, and the API path could not express a marketing brief at all.
+    """
+
+    pack_path = Path("resource/style_packs/marketing_brochure.json")
+    if not pack_path.is_file():
+        pytest.skip("style pack catalog is not present in this checkout")
+
+    seen: list[object] = []
+
+    def _capture(_design_dna: Path, *_args: object, **kwargs: object) -> tuple[dict, str]:
+        seen.append(kwargs.get("style_pack"))
+        return {}, "prompt"
+
+    monkeypatch.setattr(
+        "v365_archviz.application.run_generation_job.build_refinement_prompt", _capture
+    )
+    job = SimpleNamespace(style_pack_ref=str(pack_path))
+    from v365_archviz.application.run_generation_job import _authored_style, _composites_proxies
+
+    pack = _authored_style(job)  # type: ignore[arg-type]
+
+    assert pack is not None
+    assert pack.design_freedom is DesignFreedom.DESIGN_WITHIN_ENVELOPE
+    # The context policy has to travel with it, or the proxies are composited over a prompt that
+    # asked the provider to build real neighbours.
+    assert _composites_proxies(job) is pack.context_policy.composites_proxies  # type: ignore[arg-type]
+
+
+def test_a_job_without_a_style_pack_keeps_the_strict_default() -> None:
+    from v365_archviz.application.run_generation_job import _authored_style, _composites_proxies
+
+    job = SimpleNamespace(style_pack_ref=None)
+
+    assert _authored_style(job) is None  # type: ignore[arg-type]
+    assert _composites_proxies(job) is True  # type: ignore[arg-type]

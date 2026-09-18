@@ -35,6 +35,39 @@ def _settings() -> Settings:
     )
 
 
+def test_marketing_adapter_does_not_reinstate_strict_facade_or_translucent_context(tmp_path):
+    image = tmp_path / "base.png"
+    guide = tmp_path / "context_composition_guide.png"
+    Image.new("RGB", (16, 9), "white").save(image)
+    Image.new("RGB", (16, 9), "gray").save(guide)
+    request = ViewConditioningInput(
+        view_id="any-camera-slot",
+        base_rgb=image,
+        depth=image,
+        instance_id=image,
+        semantic=image,
+        edges=image,
+        structure_guide=image,
+        prompt="Develop an industrial facade",
+        role="hero",
+        design_freedom="design_within_envelope",
+        context_policy="resolve_proxies",
+        reference_images=(guide,),
+    )
+    with httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(500))) as client:
+        renderer = GeminiImageRenderer(
+            _settings(), client=client, conditioning_mode=GeminiConditioningMode.PHOTOREAL_BALANCED
+        )
+        blocks = renderer._photoreal_balanced_input(
+            request, style_anchor=None, identity_prompt="Shared design"
+        )
+    labels = "\n".join(block["text"] for block in blocks if block["type"] == "text")
+    assert "surfaces is massing study, not design" in labels
+    assert "grounded, opaque, believable" in labels
+    assert "reserved for deterministic post-composite" not in labels
+    assert "neutral translucent mass" not in labels
+
+
 def test_generates_with_privacy_safe_request(tmp_path: Path) -> None:
     image = tmp_path / "pass.png"
     Image.new("RGB", (2, 2), "white").save(image)
@@ -192,6 +225,7 @@ def test_photoreal_balanced_uses_only_clean_authority_inputs(tmp_path: Path) -> 
         structure_guide=image,
         prompt=("COLOR ROLE CONTRACT — KEEP THE APPROVED PALETTE\n\nVIEW PURPOSE — TEST"),
         reference_images=(reference, image),
+        role="overall",
     )
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
         renderer = GeminiImageRenderer(
@@ -525,3 +559,166 @@ def test_viewset_reuses_an_external_approved_master(tmp_path: Path) -> None:
     assert len(calls) == 2
     expected_master = base64.b64encode(b"approved-master").decode()
     assert all(call["input"][-1]["data"] == expected_master for call in calls)  # type: ignore[index]
+
+
+def test_the_aerial_block_follows_the_role_not_the_view_id(tmp_path: Path) -> None:
+    """Camera selection assigns slots by what a site can offer, so "view-01" is not always the
+    overview. Keying the aerial site-plan block on the view id sent it to whatever happened to be
+    first and withheld it from a real aerial that landed in another slot.
+    """
+
+    image = tmp_path / "pass.png"
+    Image.new("RGB", (2, 2), "white").save(image)
+    seen: list[list[str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = __import__("json").loads(request.content)
+        seen.append([b["text"] for b in body["input"] if b["type"] == "text"])
+        return httpx.Response(
+            200,
+            json={
+                "id": "interaction",
+                "output": {
+                    "mime_type": "image/png",
+                    "data": base64.b64encode(b"out").decode(),
+                },
+            },
+        )
+
+    def _request(view_id: str, role: str) -> ViewConditioningInput:
+        return ViewConditioningInput(
+            view_id=view_id,
+            base_rgb=image,
+            depth=image,
+            instance_id=image,
+            semantic=image,
+            edges=image,
+            prompt="Refine.",
+            role=role,
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        renderer = GeminiImageRenderer(
+            _settings(),
+            client=client,
+            conditioning_mode=GeminiConditioningMode.PHOTOREAL_BALANCED,
+        )
+        renderer.generate(_request("view-04", "overall"))
+        renderer.generate(_request("view-01", "office_hero"))
+
+    aerial_in_slot_four, facade_in_slot_one = seen
+    assert any("AERIAL SITE-PLAN AUTHORITY" in label for label in aerial_in_slot_four)
+    assert not any("AERIAL SITE-PLAN AUTHORITY" in label for label in facade_in_slot_one)
+
+
+def test_the_structure_block_follows_the_granted_design_freedom(tmp_path: Path) -> None:
+    """A pack granting design freedom used to arrive with a prompt saying the facade was the
+    provider's to design and a conditioning block demanding the authored bay boundaries and exact
+    opening count back. Both instructions were in the same request and cannot both be followed.
+    """
+
+    image = tmp_path / "pass.png"
+    Image.new("RGB", (2, 2), "white").save(image)
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = __import__("json").loads(request.content)
+        labels = [b["text"] for b in body["input"] if b["type"] == "text"]
+        seen.append(next(label for label in labels if "STRUCTURE AUTHORITY" in label))
+        return httpx.Response(
+            200,
+            json={
+                "id": "interaction",
+                "output": {
+                    "mime_type": "image/png",
+                    "data": base64.b64encode(b"out").decode(),
+                },
+            },
+        )
+
+    def _request(freedom: str) -> ViewConditioningInput:
+        return ViewConditioningInput(
+            view_id="view-05",
+            base_rgb=image,
+            depth=image,
+            instance_id=image,
+            semantic=image,
+            edges=image,
+            prompt="Refine.",
+            structure_guide=image,
+            role="office_hero",
+            design_freedom=freedom,
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        renderer = GeminiImageRenderer(
+            _settings(),
+            client=client,
+            conditioning_mode=GeminiConditioningMode.PHOTOREAL_BALANCED,
+        )
+        for freedom in ("photoreal_only", "detail_within_envelope", "design_within_envelope"):
+            renderer.generate(_request(freedom))
+
+    strict, detail, free = seen
+    assert "exact authored/proposed opening count" in strict
+    assert "exact authored/proposed opening count" not in detail
+    assert "you may develop how each bay is" in detail
+    assert "massing study, not design" in free
+    # The envelope survives at every level, or the gates downstream have nothing to measure.
+    for text in seen:
+        assert "silhouette" in text
+
+
+def test_the_base_render_stops_being_the_geometry_authority_when_design_is_freed(
+    tmp_path: Path,
+) -> None:
+    """The structure-guide block was made freedom-aware, but three other places still labelled
+    the base render the sole geometry authority on every request. The image block is the more
+    concrete of the two instructions, so output kept reproducing the procedural fins even after
+    design freedom became the default.
+    """
+
+    image = tmp_path / "pass.png"
+    Image.new("RGB", (2, 2), "white").save(image)
+    seen: list[list[str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = __import__("json").loads(request.content)
+        seen.append([b["text"] for b in body["input"] if b["type"] == "text"])
+        return httpx.Response(
+            200,
+            json={
+                "id": "interaction",
+                "output": {"mime_type": "image/png", "data": base64.b64encode(b"o").decode()},
+            },
+        )
+
+    def _request(freedom: str) -> ViewConditioningInput:
+        return ViewConditioningInput(
+            view_id="view-01",
+            base_rgb=image,
+            depth=image,
+            instance_id=image,
+            semantic=image,
+            edges=image,
+            prompt="Refine.",
+            role="office_hero",
+            design_freedom=freedom,
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        renderer = GeminiImageRenderer(
+            _settings(),
+            client=client,
+            conditioning_mode=GeminiConditioningMode.PHOTOREAL_BALANCED,
+        )
+        renderer.generate(_request("photoreal_only"))
+        renderer.generate(_request("design_within_envelope"))
+
+    strict, free = ("\n".join(labels) for labels in seen)
+    assert "sole camera, geometry" in strict
+    assert "sole camera, geometry" not in free
+    assert "massing study, not design" in free
+    # The camera never stops being authoritative, whatever the facade is allowed to become.
+    for text in (strict, free):
+        assert "camera" in text

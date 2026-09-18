@@ -16,6 +16,7 @@ from v365_archviz.application.refine_view import (
 )
 from v365_archviz.artifacts import atomic_write
 from v365_archviz.domain.design import DesignDNA
+from v365_archviz.domain.style_pack import StylePack
 from v365_archviz.domain.workflow import Camera, GenerationProfile, ViewRole, ViewSet
 from v365_archviz.errors import InvalidModelError, ProviderError
 from v365_archviz.providers.contracts import (
@@ -498,6 +499,7 @@ class RefineViewSet:
         quality_standard_path: Path | None = None,
         allow_failed_conditioning: bool = False,
         attach_context_guide: bool = True,
+        style_pack: StylePack | None = None,
     ) -> RefinedViewSetArtifacts:
         view_set = ViewSet.model_validate_json(view_set_path.read_text(encoding="utf-8"))
         design = DesignDNA.model_validate_json(design_dna_path.read_text(encoding="utf-8"))
@@ -564,6 +566,13 @@ class RefineViewSet:
                     f"{prompt}\n\n{VIEW_DIRECTIVES[camera.role]}\n"
                     f"{_visible_facade_directive(design, camera)}"
                 ),
+                role=camera.role.value,
+                context_policy=(
+                    style_pack.context_policy.value if style_pack else "translucent_massing"
+                ),
+                design_freedom=(
+                    style_pack.design_freedom.value if style_pack is not None else "photoreal_only"
+                ),
                 structure_guide=render_root / camera.view_id / "structure_guide.png",
                 reference_images=_provider_references(
                     render_root,
@@ -621,6 +630,18 @@ class RefineViewSet:
             view_set.cameras if approved_master_path is not None else selected_cameras,
         )
         identity_contract, identity_prompt = _identity_contract(design)
+        if style_pack and style_pack.design_freedom.value != "photoreal_only":
+            identity_prompt = (
+                "SHARED DESIGN DEVELOPMENT: one buildable architectural identity "
+                "for the entire set. "
+                "Preserve measured footprints, building count, height envelope, continuous roof "
+                "assemblies, functional doors and site circulation. The procedural facade grammar "
+                "is a starting proposal, not an immutable design. Develop the first Design Master "
+                "according to the authored brief. Once approved, all later views must keep its "
+                "facade family, material hierarchy, entrance treatment and restrained accent. "
+                "Never copy a master's camera or relocate its architecture to fit another view.\n"
+                + prompt
+            )
         generated = renderer.generate_view_set(
             ViewSetGenerationInput(
                 request_id=request_id,
@@ -655,6 +676,10 @@ class RefineViewSet:
                 design_revision=design.design_revision,
                 generated_image=result.image,
                 watermark=watermark,
+                design_freedom=style_pack.design_freedom.value if style_pack else "photoreal_only",
+                context_policy=style_pack.context_policy.value
+                if style_pack
+                else "translucent_massing",
                 effective_provider_model=str(
                     getattr(renderer, "provenance", {}).get("master_model")
                     or getattr(renderer, "provenance", {}).get("model")
@@ -732,6 +757,13 @@ class RefineViewSet:
             "design_revision": design.design_revision,
             "view_set_id": view_set.view_set_id,
             "profile": profile.value,
+            "effective_design_freedom": style_pack.design_freedom.value
+            if style_pack
+            else "photoreal_only",
+            "effective_context_policy": style_pack.context_policy.value
+            if style_pack
+            else "translucent_massing",
+            "style_pack_snapshot": style_pack.model_dump(mode="json") if style_pack else None,
             "provider": renderer.name,
             "provider_configuration": getattr(renderer, "provenance", {}),
             "effective_view_model": (

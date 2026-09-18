@@ -84,6 +84,13 @@ class GenerationJob(DomainModel):
     image_provider: str = Field(default="gemini", min_length=1)
     reference_image_refs: tuple[str, ...] = ()
     reference_roles: tuple[str, ...] = ()
+    #: Authored style pack for this job. Absent means the built-in strict base prompt, which is
+    #: the correct default for a tender record but not for a marketing image: without this the
+    #: whole DesignFreedom and ContextPolicy layer is unreachable from the job path.
+    style_pack_ref: str | None = None
+    style_pack_snapshot: str | None = None
+    output_namespace: str | None = None
+    view_set_snapshot: str | None = None
     state: WorkflowState
     attempt: int = Field(default=0, ge=0)
     created_at: datetime
@@ -113,6 +120,10 @@ class GenerationJob(DomainModel):
         image_provider: str = "gemini",
         reference_image_refs: tuple[str, ...] = (),
         reference_roles: tuple[str, ...] = (),
+        style_pack_ref: str | None = None,
+        style_pack_snapshot: str | None = None,
+        output_namespace: str | None = None,
+        view_set_snapshot: str | None = None,
         initial_state: WorkflowState = WorkflowState.RESOLVING_MODEL,
     ) -> GenerationJob:
         now = utc_now()
@@ -129,6 +140,10 @@ class GenerationJob(DomainModel):
             image_provider=image_provider,
             reference_image_refs=reference_image_refs,
             reference_roles=reference_roles,
+            style_pack_ref=style_pack_ref,
+            style_pack_snapshot=style_pack_snapshot,
+            output_namespace=output_namespace,
+            view_set_snapshot=view_set_snapshot,
             state=initial_state,
             created_at=now,
             updated_at=now,

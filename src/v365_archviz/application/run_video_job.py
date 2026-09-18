@@ -9,8 +9,10 @@ from v365_archviz.application.assemble_video import AssembleVideo
 from v365_archviz.application.brand_watermark import BrandWatermark
 from v365_archviz.application.generate_video import GenerateVideoShots
 from v365_archviz.application.plan_video import PlanVideo
+from v365_archviz.application.run_generation_job import _JobPaths
 from v365_archviz.config import Settings
 from v365_archviz.domain.video_jobs import VideoJob, VideoJobState
+from v365_archviz.providers.local_jobs import LocalJobRepository
 from v365_archviz.providers.local_video_jobs import LocalVideoJobRepository
 from v365_archviz.providers.veo import VeoVideoRenderer
 
@@ -42,17 +44,10 @@ class RunVideoJob:
         job: VideoJob,
         settings: Settings,
     ) -> VideoJob:
-        generated_root = (
-            settings.artifact_dir / "generated" / job.model_revision / job.design_revision
-        )
-        view_set_path = (
-            settings.artifact_dir
-            / "scenes"
-            / job.model_revision
-            / "designs"
-            / job.design_revision
-            / "view_set.json"
-        )
+        image_job = LocalJobRepository(settings.artifact_dir / "metadata").get(job.image_job_id)
+        image_paths = _JobPaths.from_job(settings.artifact_dir, image_job)
+        generated_root = image_paths.generated_root
+        view_set_path = image_paths.view_set
 
         if job.state is VideoJobState.QUEUED:
             job = self._advance(repository, job, VideoJobState.PLANNING)

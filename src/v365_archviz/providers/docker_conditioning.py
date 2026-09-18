@@ -28,6 +28,8 @@ class DockerConditioningRenderer:
         view_set_path: Path,
         output_directory: Path,
         profile: RenderProfile = RenderProfile.STANDARD_EEVEE,
+        *,
+        facade_mode: str = "authored",
         asset_library_path: Path | None = None,
     ) -> None:
         for path in (scene_path, design_dna_path, view_set_path):
@@ -50,13 +52,14 @@ class DockerConditioningRenderer:
                 "Design DNA asset library version does not match renderer asset library"
             )
         output_directory.mkdir(parents=True, exist_ok=True)
+        uid_reader = getattr(os, "getuid", None)
+        gid_reader = getattr(os, "getgid", None)
         command = [
             "docker",
             "run",
             "--rm",
             *(["--gpus", "all"] if profile is RenderProfile.PREMIUM_CYCLES else []),
-            "--user",
-            f"{os.getuid()}:{os.getgid()}",
+            *(["--user", f"{uid_reader()}:{gid_reader()}"] if uid_reader and gid_reader else []),
             "-e",
             "HOME=/tmp",
             "-v",
@@ -75,6 +78,23 @@ class DockerConditioningRenderer:
             "--asset-library",
             self._container_path(asset_library),
         ]
+        if facade_mode not in {"authored", "envelope_program"}:
+            raise ConfigurationError(f"unknown facade mode: {facade_mode}")
+        # Execute the checked-out script, not an older COPY baked into an existing image tag.
+        command[command.index("--scene") : command.index("--scene")] = [
+            "--facade-mode",
+            facade_mode,
+        ]
+        command[command.index(self.image) : command.index(self.image)] = [
+            "--entrypoint",
+            "blender",
+        ]
+        command[command.index(self.image) + 1 : command.index(self.image) + 1] = [
+            "--background",
+            "--python",
+            "/workspace/scripts/blender/render_conditioning.py",
+            "--",
+        ]
         self._run(command, timeout=30 * 60, label="conditioning renderer")
         try:
             view_set = ViewSet.model_validate_json(view_set_path.read_text(encoding="utf-8"))
@@ -91,6 +111,10 @@ class DockerConditioningRenderer:
             "renderer_image": self.image,
             "renderer_image_id": self._image_id(),
             "render_profile": profile.value,
+            "facade_mode": facade_mode,
+            "renderer_script_sha256": hashlib.sha256(
+                (self._workspace / "scripts/blender/render_conditioning.py").read_bytes()
+            ).hexdigest(),
             "resolution": list(resolution),
             "scene_sha256": self._sha256(scene_path),
             "design_dna_sha256": self._sha256(design_dna_path),

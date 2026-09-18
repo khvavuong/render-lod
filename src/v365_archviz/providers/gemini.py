@@ -35,6 +35,99 @@ class GeminiConditioningMode(str, Enum):
     PHOTOREAL_BALANCED = "photoreal_balanced"
 
 
+#: Roles whose camera looks down on the whole site. The aerial site-plan conditioning block is
+#: keyed on these rather than on a view id, because camera selection assigns slots by what a site
+#: can actually offer and "view-01" is not always the overview.
+_AERIAL_ROLES = frozenset({"overall", "detail"})
+
+_STRUCTURE_AUTHORITY_BY_FREEDOM = {
+    "photoreal_only": (
+        "MONOCHROME STRUCTURE AUTHORITY — preserve its project silhouette, roof continuity, "
+        "facade bay boundaries and exact authored/proposed opening count. It is a constraint "
+        "image, not a material or style target. Any outlined off-site proxy is reserved for "
+        "deterministic post-composite; do not turn it into a detailed building:"
+    ),
+    "detail_within_envelope": (
+        "MONOCHROME STRUCTURE AUTHORITY — preserve its project silhouette, roof continuity and "
+        "the position and count of every vehicular opening and dock. The facade bay lines are "
+        "where emphasis belongs, not a finished design: you may develop how each bay is "
+        "composed, framed and shaded within them. It is a constraint image, not a material or "
+        "style target. Any outlined off-site proxy is reserved for deterministic post-composite; "
+        "do not turn it into a detailed building:"
+    ),
+    "design_within_envelope": (
+        "MONOCHROME STRUCTURE AUTHORITY — preserve its project silhouette, its footprint and the "
+        "position of every vehicular opening, so trucks still reach the same docks. Everything "
+        "drawn inside that outline is massing study, not design: bay lines, stripes and panel "
+        "divisions are placeholders you are expected to replace. It is a constraint image, not a "
+        "material or style target. Any outlined off-site proxy is reserved for deterministic "
+        "post-composite; do not turn it into a detailed building:"
+    ),
+}
+
+
+_BASE_RGB_LABEL_BY_FREEDOM = {
+    "photoreal_only": ("BASE RGB — sole camera, geometry, composition and spatial authority:"),
+    "detail_within_envelope": (
+        "BASE RGB — sole camera and composition authority, and the authority for massing, "
+        "roofline and the position of every opening. Its facade surfaces are a placed schematic "
+        "you may develop, not finished design:"
+    ),
+    "design_within_envelope": (
+        "BASE RGB — sole camera and composition authority, and the authority for the silhouette, "
+        "the footprint and where the vehicular openings are. Everything drawn on its surfaces is "
+        "an untextured massing study, not design: do not reproduce its colours, stripes, fins or "
+        "panel divisions:"
+    ),
+}
+
+_AUTHORITY_LINE_BY_FREEDOM = {
+    "photoreal_only": "The current BASE RGB is the sole spatial and camera authority.",
+    "detail_within_envelope": (
+        "The current BASE RGB is the sole camera authority and fixes massing, roofline and "
+        "opening positions; its facade surfaces are a schematic to develop."
+    ),
+    "design_within_envelope": (
+        "The current BASE RGB is the sole camera authority and fixes the silhouette, footprint "
+        "and opening positions; everything on its surfaces is massing study, not design."
+    ),
+}
+
+
+def _base_rgb_label(design_freedom: str) -> str:
+    """Describe what the base render is authoritative for at this freedom level.
+
+    Declaring it the "sole geometry authority" on every request contradicts a prompt that has just
+    granted facade freedom, and the image block is the more concrete of the two instructions. This
+    was the same defect as the structure-authority block, in the same file, and it survived that
+    fix: measured output kept reproducing the procedural fins after freedom was already default.
+    """
+
+    return _BASE_RGB_LABEL_BY_FREEDOM.get(
+        design_freedom, _BASE_RGB_LABEL_BY_FREEDOM["photoreal_only"]
+    )
+
+
+def _authority_line(design_freedom: str) -> str:
+    return _AUTHORITY_LINE_BY_FREEDOM.get(
+        design_freedom, _AUTHORITY_LINE_BY_FREEDOM["photoreal_only"]
+    )
+
+
+def _structure_authority_text(design_freedom: str) -> str:
+    """State the structure block at the freedom the style pack asked for.
+
+    One text was sent on every request regardless. A pack granting design freedom therefore
+    arrived with a prompt saying the facade was the provider's to design and a conditioning block
+    demanding the authored bay boundaries and exact opening count back — two instructions in the
+    same request that cannot both be followed.
+    """
+
+    return _STRUCTURE_AUTHORITY_BY_FREEDOM.get(
+        design_freedom, _STRUCTURE_AUTHORITY_BY_FREEDOM["photoreal_only"]
+    )
+
+
 def _image_block(path: Path) -> dict[str, str]:
     if not path.is_file():
         raise ProviderError(f"conditioning image does not exist: {path}")
@@ -240,7 +333,7 @@ class GeminiImageRenderer:
         refinement_specification = request.prompt.strip()
         design_authority = identity_prompt.strip() or "Use the approved project Design DNA."
         prompt = (
-            "AUTHORITY\nThe current BASE RGB is the sole spatial and camera authority.\n\n"
+            f"AUTHORITY\n{_authority_line(request.design_freedom)}\n\n"
             f"{refinement_specification}\n\n"
             "CROSS-VIEW IDENTITY\n"
             f"{design_authority}\n"
@@ -254,7 +347,7 @@ class GeminiImageRenderer:
             {"type": "text", "text": prompt},
             {
                 "type": "text",
-                "text": "BASE RGB — sole geometry, camera and composition authority:",
+                "text": _base_rgb_label(request.design_freedom),
             },
             _image_block(request.base_rgb),
         ]
@@ -263,18 +356,21 @@ class GeminiImageRenderer:
                 (
                     {
                         "type": "text",
-                        "text": (
-                            "MONOCHROME STRUCTURE AUTHORITY — preserve its project silhouette, "
-                            "roof continuity, facade bay boundaries and exact authored/proposed "
-                            "opening count. It is a constraint image, not a material or style "
-                            "target. Any outlined off-site proxy is reserved for deterministic "
-                            "post-composite; do not turn it into a detailed building:"
+                        "text": _structure_authority_text(request.design_freedom).split(
+                            "Any outlined off-site proxy"
+                        )[0]
+                        + (
+                            " Off-site proxies may become real neighbours at their registered "
+                            "locations; never extend the focus building."
+                            if request.context_policy == "resolve_proxies"
+                            else " Off-site context follows the context policy in the "
+                            "refinement specification."
                         ),
                     },
                     _image_block(request.structure_guide),
                 )
             )
-        if request.view_id in {"view-01", "view-04"}:
+        if request.role in _AERIAL_ROLES:
             blocks.extend(
                 (
                     {
@@ -297,9 +393,10 @@ class GeminiImageRenderer:
                         "type": "text",
                         "text": (
                             "APPROVED DESIGN MASTER — appearance identity only; never copy its "
-                            "camera, layout or object positions. If it conflicts with the explicit "
-                            "palette or current Base RGB material regions, the palette and current "
-                            "Base RGB win:"
+                            "camera, layout or object positions. Keep the approved master "
+                            "architecture "
+                            "and materials across views within the measured envelope. Base RGB "
+                            "procedural facade details are binding only in photoreal_only mode:"
                         ),
                     },
                     _generated_image_block(style_anchor),
@@ -313,7 +410,12 @@ class GeminiImageRenderer:
                         {
                             "type": "text",
                             "text": (
-                                "CAMERA-REGISTERED CONTEXT COMPOSITION GUIDE — preserve the "
+                                "CAMERA-REGISTERED CONTEXT GUIDE — resolve pale proxy volumes into "
+                                "grounded, opaque, believable neighbouring industrial buildings. "
+                                "Preserve their locations, count, envelope and separation from the "
+                                "focus project. Do not reproduce translucent placeholders:"
+                                if request.context_policy == "resolve_proxies"
+                                else "CAMERA-REGISTERED CONTEXT COMPOSITION GUIDE — preserve the "
                                 "focus project from Base RGB, but represent every pale proxy "
                                 "volume at this exact projected location as a simple grounded "
                                 "neutral translucent mass. Keep its count and spacing. Do not "
@@ -388,7 +490,7 @@ class GeminiImageRenderer:
             {"type": "text", "text": labeled_prompt},
             {
                 "type": "text",
-                "text": "BASE RGB — sole camera, geometry, composition and spatial authority:",
+                "text": _base_rgb_label(request.design_freedom),
             },
             _image_block(request.base_rgb),
         ]

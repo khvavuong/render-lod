@@ -31,10 +31,21 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--height", type=int)
     parser.add_argument(
         "--profile",
-        choices=("preview_fast", "standard_eevee", "premium_cycles"),
+        choices=("camera_scoring", "preview_fast", "standard_eevee", "premium_cycles"),
         default="standard_eevee",
     )
+    parser.add_argument(
+        "--neutral-massing",
+        action="store_true",
+        help=(
+            "render the source volumes without the procedurally proposed facade grammar. "
+            "On the reference model 116 of 116 facades, 42 docks and 15 entrances are generated "
+            "by plan-design rather than read from the source, so this is the only way to ask "
+            "whether sending that proposal to the provider helps or caps the result."
+        ),
+    )
     parser.add_argument("--view-id", action="append", dest="view_ids")
+    parser.add_argument("--facade-mode", choices=("authored", "envelope_program"), default="authored")
     parser.add_argument("--pbr-only", action="store_true")
     return parser.parse_args(argv)
 
@@ -2397,6 +2408,35 @@ def _replace_materials(materials_by_object: dict) -> None:
         obj.data.materials.append(replacement)
 
 
+#: Levels per channel on the instance-id lattice. 13**3 = 2197 slots, which covers every mesh the
+#: reference models emit, at a spacing of 255/12 ~ 21 bytes between neighbouring levels. The old
+#: scheme wrote the index straight into the low byte, so object 1 and object 2 differed by 1/255
+#: before the sRGB transfer and by nothing at all after it: measured on a rebuilt render, 305
+#: objects produced 4166 distinct colours, only 4.2% matched the manifest, and 60 manifest entries
+#: collided outright. Spacing the lattice is what makes the pass decodable at all.
+INSTANCE_LATTICE_LEVELS = 13
+
+
+def _instance_lattice_colour(index: int) -> tuple[float, float, float]:
+    """Linear colour for an instance index, spaced so neighbours are far apart after transfer.
+
+    The index is spread across the channels rather than packed into one, and the digits are
+    reversed so that consecutive indices move the most significant channel first. Two objects
+    created next to each other therefore land at opposite ends of the cube instead of adjacent
+    bytes, which is what survives compression and resampling.
+    """
+
+    levels = INSTANCE_LATTICE_LEVELS
+    remaining = max(0, index) % (levels ** 3)
+    digits = []
+    for _ in range(3):
+        digits.append(remaining % levels)
+        remaining //= levels
+    step = 1.0 / (levels - 1)
+    # Reversed so the first channel varies slowest; neighbouring indices differ in one full step.
+    return tuple(digit * step for digit in reversed(digits))  # type: ignore[return-value]
+
+
 def _linear_to_srgb8(value: float) -> int:
     """Byte a linear channel becomes after the sRGB transfer the PNG writer applies."""
 
@@ -2432,13 +2472,16 @@ def _write_instance_manifest(view_dir: Path, mesh_objects: list) -> None:
             # transfer, so the bytes on disk are not the index bytes. Recording what actually
             # lands in the file is the only way a consumer can match a pixel back to an object.
             "encoded_rgb8": [
-                _linear_to_srgb8((index >> shift & 255) / 255.0) for shift in (0, 8, 16)
+                _linear_to_srgb8(channel) for channel in _instance_lattice_colour(index)
             ],
         }
     document = {
         "schema_version": "1.0.0",
         "view_id": view_dir.name,
-        "encoding": "instance_index little-endian across RGB, then sRGB-encoded; match on encoded_rgb8",
+        "encoding": (
+            f"instance_index on a {INSTANCE_LATTICE_LEVELS}-level RGB lattice, "
+            "sRGB-encoded; match on encoded_rgb8 by nearest colour within 10 bytes"
+        ),
         "instances": [entries[key] for key in sorted(entries)],
     }
     (view_dir / "instance_id_manifest.json").write_text(
@@ -2450,6 +2493,12 @@ def _write_instance_manifest(view_dir: Path, mesh_objects: list) -> None:
 def render_masks(view_dir: Path) -> None:
     scene = bpy.context.scene
     previous_engine = scene.render.engine
+    # ID passes are lookup tables, not pictures. The reconstruction filter blends neighbouring
+    # objects at every silhouette, and each blend is a colour that belongs to no object: that is
+    # where 305 objects turned into 4166 distinct colours. Collapsing the filter keeps one colour
+    # per object, so a pixel either names an object or is rejected as an edge.
+    previous_filter = scene.render.filter_size
+    scene.render.filter_size = 0.0
     _configure_engine("preview_fast")
     mesh_objects = [obj for obj in scene.objects if obj.type == "MESH"]
     _write_instance_manifest(view_dir, mesh_objects)
@@ -2457,12 +2506,7 @@ def render_masks(view_dir: Path) -> None:
     instance_materials = {}
     for obj in mesh_objects:
         value = obj.pass_index
-        color = (
-            (value & 255) / 255.0,
-            ((value >> 8) & 255) / 255.0,
-            ((value >> 16) & 255) / 255.0,
-            1.0,
-        )
+        color = (*_instance_lattice_colour(int(value)), 1.0)
         instance_materials[obj] = emission_material(f"id_{value}", color)
     role_colors = {
         "main_shed": (0.85, 0.15, 0.10, 1.0),
@@ -2532,6 +2576,7 @@ def render_masks(view_dir: Path) -> None:
     scene.world.color = previous_world
     scene.view_settings.view_transform = previous_transform
     scene.view_settings.look = previous_look
+    scene.render.filter_size = previous_filter
     scene.render.engine = previous_engine
 
 
@@ -2699,7 +2744,21 @@ def main() -> None:
         detail_start = create_context_environment(
             scene_data, design_data, base_object_count, asset_data
         )
-        detail_end = create_design_details(scene_data, design_data, detail_start, asset_data)
+        detail_end = (
+            detail_start
+            if args.neutral_massing
+            else create_design_details(scene_data, design_data, detail_start, asset_data)
+        )
+        if args.facade_mode == "envelope_program":
+            # Remove only procedural facade styling, not roofs, gates or functional openings.
+            decorative_tokens = (
+                ":plinth", ":parapet-band", ":horizontal-joint-", ":seam-",
+                ":eave-gutter", ":downpipe-", ":clerestory-", ":accent-bay-",
+                ":biophilic-", ":feature-frame-", ":accent-fin-", ":entrance-canopy",
+            )
+            for obj in list(bpy.data.objects):
+                if any(token in obj.name for token in decorative_tokens):
+                    bpy.data.objects.remove(obj, do_unlink=True)
         _, entourage = create_deterministic_entourage(
             scene_data,
             scene_path.parent,
@@ -2722,6 +2781,11 @@ def main() -> None:
         )
         batch_noncanonical_details(base_object_count)
     default_size = {
+        # Camera scoring ranks candidates, it does not deliver anything. At this size a whole
+        # candidate pool costs about what one delivery view costs, and the quantities the ranking
+        # reads — subject share, occlusion, visible surface roles, horizon balance — are all
+        # area measurements that survive downsampling.
+        "camera_scoring": (512, 288),
         "preview_fast": (768, 432),
         "standard_eevee": (1024, 576),
         "premium_cycles": (2048, 1152),
@@ -2748,6 +2812,13 @@ def main() -> None:
         )
         configure_view_lighting(camera_spec, design_data)
         camera = configure_camera(camera_spec)
+        if args.profile == "camera_scoring":
+            # Rank on semantics only. The beauty, material and control passes exist to condition
+            # and audit a camera that has already been chosen; none of them changes which camera
+            # is worth choosing, and rendering them for every candidate is the whole cost.
+            render_masks(view_dir)
+            bpy.data.objects.remove(camera, do_unlink=True)
+            continue
         render_pbr(view_dir)
         # Photographic exposure belongs only to Base RGB. Semantic/material/control passes rely
         # on exact encoded colours and must never inherit the golden-hour exposure transform.
@@ -2759,7 +2830,8 @@ def main() -> None:
             render_clay_and_edges(view_dir)
             render_control_policy(view_dir)
         bpy.data.objects.remove(camera, do_unlink=True)
-    bpy.ops.wm.save_as_mainfile(filepath=str(output / "designed_scene.blend"))
+    if args.profile != "camera_scoring":
+        bpy.ops.wm.save_as_mainfile(filepath=str(output / "designed_scene.blend"))
 
 
 main()

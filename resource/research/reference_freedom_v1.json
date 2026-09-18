@@ -1,0 +1,27 @@
+{
+  "experiment_id": "reference-freedom-v1-model-B",
+  "output_root": ".artifacts/reference_freedom_v1",
+  "repetitions": 3,
+  "max_generation_calls": 24,
+  "image_size": "2K",
+  "aspect_ratio": "16:9",
+  "scene": ".artifacts/scenes/a7d22ba36b4fa342/canonical_scene.json",
+  "design": ".artifacts/scenes/a7d22ba36b4fa342/designs/R01-30c3e1709447/design_dna.json",
+  "references": [
+    {"path": "resource/sample_image_4.png", "role": "architecture_and_photography", "instruction": "Learn the quality target and architectural hierarchy from the image panels: coherent industrial cladding, well-proportioned office zones, canopy depth, glazing, logistics frontage, landscaping and credible photographs. Its navy-blue / white material family is the aesthetic direction for this experiment, not a paint schedule. Do not copy its exact buildings or site layout. Ignore all brochure captions, graphics, branding and page layout."},
+    {"path": "resource/sample_image_3.png", "role": "construction_and_material", "instruction": "Use for real industrial construction scale, corrugated metal, office-to-shed relationships, service apron and operational vehicles. Do not copy its camera or site layout."}
+  ],
+  "brief": "Create one publication-quality architectural photograph of a contemporary industrial park. Develop a disciplined, buildable architectural design: clearly distinguish the shed, human-scale office, entrance and logistics functions. Use the references as genuine architectural and photographic guidance, not merely texture samples. Choose facade rhythm, proportions, glazing, canopy, detailing and material combinations appropriate to the actual building. No arbitrary repeated decorative fins, no glass showroom, no fantasy forms. Integrate realistic tropical industrial landscaping and operational scale with believable metal, glass, asphalt and concrete, natural directional daylight and photographic depth. This is design development, not a certified construction document. Do not invent readable lettering, signs, logos, brands or captions; signage surfaces may stay blank. Generate ONE full-frame image, not a collage or brochure. Do not independently add buildings to the focus project merely to make the image attractive.",
+  "views": {
+    "aerial": {
+      "intent": "Explain the industrial park's complete layout, building hierarchy, service circulation and relationship to its surroundings from a compelling oblique aerial photograph. Unless a registered-camera block is supplied, choose the most informative and attractive camera for the project; no fixed azimuth, height, lens or corner is prescribed.",
+      "base": ".artifacts/quality_v4/envelope_B_preview/view-01/base_rgb.png",
+      "camera": ".artifacts/quality_v4/envelope_B_preview/view-01/camera.json"
+    },
+    "office": {
+      "intent": "Explain the office / entrance architecture and material quality in a compelling human-scale photograph. Show coherent glazing, canopy, facade depth, construction scale and restrained landscaping. This may be a partial view of the building. Unless a registered-camera block is supplied, choose the most attractive camera for this architectural purpose; no fixed azimuth, height, lens or corner is prescribed.",
+      "base": ".artifacts/quality_v4/office_B_v40/view-05/base_rgb.png",
+      "camera": ".artifacts/quality_v4/office_B_v40/view-05/camera.json"
+    }
+  }
+}

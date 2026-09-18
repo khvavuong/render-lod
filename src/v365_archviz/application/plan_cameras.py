@@ -7,7 +7,12 @@ from dataclasses import dataclass
 from itertools import pairwise
 from pathlib import Path
 
-from v365_archviz.application.camera_framing import elevation_direction, framed_distance
+from v365_archviz.application.camera_framing import (
+    elevation_direction,
+    focal_length_for_roofline,
+    framed_distance,
+    half_fov_deg,
+)
 from v365_archviz.artifacts import atomic_write
 from v365_archviz.domain.design import BuildingTreatment, DesignDNA, FacadeDesign, LoadingDock
 from v365_archviz.domain.photography_pack import PhotographyPack, RoleFraming
@@ -132,6 +137,32 @@ class ElevationShot:
     focal_length_mm: float
 
 
+def _outward_clearance(
+    origin: tuple[float, float, float],
+    direction: tuple[float, float, float],
+    blockers: list[SceneElement],
+) -> float:
+    """First building intersection on this camera's outward ray, not the campus corridor gap."""
+    nearest = float("inf")
+    for element in blockers:
+        bounds = element.bounding_box
+        if not bounds.minimum[2] <= origin[2] <= bounds.maximum[2]:
+            continue
+        entry, exit = -float("inf"), float("inf")
+        for axis in (0, 1):
+            if abs(direction[axis]) < 1e-8:
+                if not bounds.minimum[axis] <= origin[axis] <= bounds.maximum[axis]:
+                    entry, exit = 1.0, -1.0
+                    break
+            else:
+                first = (bounds.minimum[axis] - origin[axis]) / direction[axis]
+                last = (bounds.maximum[axis] - origin[axis]) / direction[axis]
+                entry, exit = max(entry, min(first, last)), min(exit, max(first, last))
+        if exit >= max(entry, 0.0):
+            nearest = min(nearest, max(0.0, entry) - 1.0)
+    return max(2.0, nearest)
+
+
 def _elevation_stand_off(
     subject_height_m: float,
     framing: RoleFraming,
@@ -173,12 +204,124 @@ def _elevation_stand_off(
     return ElevationShot(min(wanted, max(2.0, available_clearance_m)), framing.focal_length_mm)
 
 
+def _anchor_to_facade_end(
+    feature: tuple[float, float],
+    frame_origin: tuple[float, float, float],
+    u_axis: tuple[float, float, float],
+    facade_width_m: float,
+    stand_off_m: float,
+    focal_length_mm: float,
+) -> tuple[float, float]:
+    """Slide a target along its facade so the building's end stays inside the frame.
+
+    A dock or entrance in the middle of a long run gives a camera nothing to compose against: the
+    facade leaves both sides of the frame and the photograph is cladding. Measured on the 352 m
+    reference shed, every ground-level view aimed at a mid-facade feature came back as a wall.
+
+    Moving the aim point towards the nearer end brings the corner into the field of view, so the
+    building turns and reads as a volume. The shift is only as large as the frame requires: on a
+    facade already shorter than the view covers, the feature keeps its own position.
+    """
+
+    half_width_m = math.tan(math.radians(half_fov_deg(focal_length_mm)[0])) * stand_off_m
+    origin_to_feature = (feature[0] - frame_origin[0], feature[1] - frame_origin[1])
+    along = origin_to_feature[0] * u_axis[0] + origin_to_feature[1] * u_axis[1]
+    near_end = 0.0 if along <= facade_width_m / 2 else facade_width_m
+    # Keep the end within one frame half-width of the aim point, and never move past the end.
+    limit = half_width_m * 0.8
+    if abs(along - near_end) <= limit:
+        return feature
+    shifted = near_end + limit if near_end == 0.0 else near_end - limit
+    delta = shifted - along
+    # Never move so far that the feature this view exists to show leaves the frame. Measured on
+    # the compact reference model, an unbounded shift dropped the office entrance out of view and
+    # the conditioning gate reported the subject at 3% of frame: an end-on corner with nothing in
+    # it is no better than the wall this anchoring was added to avoid.
+    reach = half_width_m * 0.6
+    if abs(delta) > reach:
+        delta = math.copysign(reach, delta)
+    return feature[0] + u_axis[0] * delta, feature[1] + u_axis[1] * delta
+
+
 def _axis_bearing(long_axis: int, long_offset: float, cross_offset: float) -> tuple[float, float]:
     """Map a project-relative horizontal bearing to world XY."""
 
     if long_axis == 0:
         return long_offset, cross_offset
     return cross_offset, long_offset
+
+
+#: How much each kind of site evidence says "the building is approached from this side".
+#: An authored entrance is the strongest statement a model can make about its own front; roads
+#: and yards say where people and trucks actually arrive; an office block says where the address
+#: is. Nothing here is tuned to a project — these are the roles the canonicaliser emits, weighted
+#: by how directly each one answers the question.
+_ACCESS_EVIDENCE_WEIGHTS = {
+    SemanticRole.MAIN_ENTRANCE: 3.0,
+    SemanticRole.OFFICE_BLOCK: 2.0,
+    SemanticRole.PARKING: 1.5,
+    SemanticRole.LOADING_ZONE: 1.2,
+    SemanticRole.SITE_ROAD: 1.0,
+    SemanticRole.SIDEWALK: 0.8,
+}
+
+
+def _access_bearing(
+    scene: CanonicalScene,
+    long_axis: int,
+    site_centre: tuple[float, float],
+) -> tuple[float, float] | None:
+    """Project-relative direction of the site's own access evidence, or None when it has none.
+
+    The aerial bearings used to be two fixed quadrants relative to the building's long axis. That
+    rotates with the building but never changes which corner it chooses, so on a site whose
+    approach road, gatehouse and office all sit on one side, the overview could be orbited to the
+    blank rear yard and still be "correct" by the rule. Deriving the bearing from what the model
+    actually contains costs nothing — it is a weighted centroid of element positions — and is the
+    difference between a planner that adapts to a site and one that adapts only to its dimensions.
+
+    Returns a unit-ish (long, cross) offset suitable for `_axis_bearing`, or None when the scene
+    carries no access evidence at all and the caller must fall back to a geometric default.
+    """
+
+    cross_axis = 1 - long_axis
+    weight_total = 0.0
+    long_offset = 0.0
+    cross_offset = 0.0
+    for element in scene.elements:
+        weight = _ACCESS_EVIDENCE_WEIGHTS.get(element.semantic_role)
+        if weight is None:
+            continue
+        bounds = element.bounding_box
+        centre = (
+            (bounds.minimum[long_axis] + bounds.maximum[long_axis]) / 2,
+            (bounds.minimum[cross_axis] + bounds.maximum[cross_axis]) / 2,
+        )
+        # Footprint area scales the vote: one large apron says more about where the front is
+        # than a dozen kerb segments.
+        area = max(
+            1.0,
+            (bounds.maximum[long_axis] - bounds.minimum[long_axis])
+            * (bounds.maximum[cross_axis] - bounds.minimum[cross_axis]),
+        )
+        vote = weight * math.sqrt(area)
+        long_offset += vote * (centre[0] - site_centre[0])
+        cross_offset += vote * (centre[1] - site_centre[1])
+        weight_total += vote
+    if weight_total <= 0.0:
+        return None
+    long_offset /= weight_total
+    cross_offset /= weight_total
+    magnitude = math.hypot(long_offset, cross_offset)
+    if magnitude <= 1e-6:
+        return None
+    return long_offset / magnitude, cross_offset / magnitude
+
+
+def _complementary_bearing(bearing: tuple[float, float]) -> tuple[float, float]:
+    """The opposite corner, so the second aerial shows what the first one could not."""
+
+    return -bearing[0], -bearing[1]
 
 
 def _aerial_camera(
@@ -435,7 +578,19 @@ class PlanStandardCameras:
         scene_path: Path,
         design_dna_path: Path | None = None,
         photography_pack_path: Path | None = None,
+        bearing_offset_deg: float = 0.0,
+        *,
+        output_path: Path | None = None,
     ) -> ViewSet:
+        """Plan the standard set, optionally orbited off the site's own access bearing.
+
+        `bearing_offset_deg` exists for repair rather than for taste. The conditioning gate scores
+        the cameras against a real render, and when a slot fails there is no point re-rendering
+        the same camera: the planner is asked for the same intent from a different side, and only
+        the failed views are rendered again. Zero reproduces the plan a fresh import gets, so the
+        default path stays deterministic.
+        """
+
         photography = (
             PhotographyPack.load(photography_pack_path)
             if photography_pack_path is not None
@@ -526,17 +681,40 @@ class PlanStandardCameras:
         # implementation fitted the building, then clamped Z to 40 m; on wide campuses that
         # produced a 7-10 degree grazing view in which the site plan was largely hidden.
         overall_target = (site_center[0], site_center[1], minimum[2] + height * 0.12)
+        # Stand on the side the site says it is approached from, so the overview shows the
+        # address, the gate and the yard rather than whichever corner a constant happened to
+        # name. Falls back to the previous fixed quadrant only when the scene carries no access
+        # evidence at all, which the conditioning gate then reports as usual.
+        access_bearing = _access_bearing(
+            scene, long_axis, (site_center[long_axis], site_center[1 - long_axis])
+        )
+        if access_bearing is not None and bearing_offset_deg:
+            angle = math.radians(bearing_offset_deg)
+            access_bearing = (
+                access_bearing[0] * math.cos(angle) - access_bearing[1] * math.sin(angle),
+                access_bearing[0] * math.sin(angle) + access_bearing[1] * math.cos(angle),
+            )
+        primary_bearing = (
+            _axis_bearing(long_axis, access_bearing[0], access_bearing[1])
+            if access_bearing is not None
+            else _axis_bearing(long_axis, -1.0, -0.85)
+        )
         overall_position = _aerial_camera(
             (site_minimum, site_maximum),
             overall_target,
-            _axis_bearing(long_axis, -1.0, -0.85),
+            primary_bearing,
             photography.framing_for(ViewRole.OVERALL),
         )
         reverse_overall_target = (site_center[0], site_center[1], minimum[2] + height * 0.18)
+        reverse_bearing = (
+            _axis_bearing(long_axis, *_complementary_bearing(access_bearing))
+            if access_bearing is not None
+            else _axis_bearing(long_axis, 1.0, 0.74)
+        )
         reverse_overall_position = _aerial_camera(
             (site_minimum, site_maximum),
             reverse_overall_target,
-            _axis_bearing(long_axis, 1.0, 0.74),
+            reverse_bearing,
             photography.framing_for(ViewRole.DETAIL),
         )
         # An eye-level approach must stand close enough that the building it introduces still
@@ -559,8 +737,14 @@ class PlanStandardCameras:
         # Place the approach camera relative to what it looks at, so approach_distance really is
         # the stand-off from the subject. Adding it to half the site length instead pushes the
         # camera past the far end of a long building and shrinks the subject out of range.
-        approach_target_long = -(long_span / 2) * 0.86
-        approach_target_cross = -(cross_span / 2) * 0.86
+        # Aim at the outer corner of the mass, not a point inside it. Measured on the 352 m
+        # reference shed, the 0.86 factor put the target 25 m inside the footprint: the camera
+        # was then only 9 m off the facade plane even though the solver had asked for a 35 m
+        # stand-off, and at 9 m with a 32 mm lens the wall is the entire frame. The rendered
+        # approach was a blank elevation receding to a vanishing point, and the conditioning gate
+        # passed it because that wall is the focus building and fills 40% of the frame.
+        approach_target_long = -(long_span / 2)
+        approach_target_cross = -(cross_span / 2)
         arrival_shot = _arrival_shot(
             scene,
             minimum,
@@ -633,24 +817,75 @@ class PlanStandardCameras:
                     office_shot = _elevation_stand_off(
                         height,
                         photography.framing_for(ViewRole.OFFICE_HERO),
-                        available_apron_clearance,
+                        float("inf"),
                     )
                     outward = office_shot.distance_m
                     office_focal_mm = office_shot.focal_length_mm
+                    anchored_entrance = _anchor_to_facade_end(
+                        (entrance[0], entrance[1]),
+                        frame.origin,
+                        frame.u_axis,
+                        office_surface.width_m,
+                        outward,
+                        office_focal_mm,
+                    )
+                    own_assembly = next(
+                        (
+                            assembly
+                            for assembly in design.roof_assemblies
+                            if office_surface.element_id in assembly.building_ids
+                        ),
+                        None,
+                    )
+                    excluded = (
+                        set(own_assembly.building_ids)
+                        if own_assembly
+                        else {office_surface.element_id}
+                    )
+                    ray_origin = (
+                        anchored_entrance[0] + frame.u_axis[0] * lateral * side,
+                        anchored_entrance[1] + frame.u_axis[1] * lateral * side,
+                        minimum[2] + 1.85,
+                    )
+                    blockers = [
+                        element
+                        for element in scene.elements
+                        if element.scene_element_id not in excluded
+                        and element.semantic_role
+                        in {SemanticRole.MAIN_SHED, SemanticRole.OFFICE_BLOCK}
+                    ]
+                    outward = min(outward, _outward_clearance(ray_origin, frame.normal, blockers))
+                    office_framing = photography.framing_for(ViewRole.OFFICE_HERO)
+                    office_focal_mm = min(
+                        office_focal_mm,
+                        max(
+                            18.0,
+                            focal_length_for_roofline(
+                                height,
+                                1.85,
+                                office_framing.elevation_deg,
+                                math.hypot(outward, lateral),
+                                margin=office_framing.roofline_margin,
+                            ),
+                        ),
+                    )
                     office_detail_shot = (
                         (
-                            entrance[0]
+                            anchored_entrance[0]
                             + frame.u_axis[0] * lateral * side
                             + frame.normal[0] * outward,
-                            entrance[1]
+                            anchored_entrance[1]
                             + frame.u_axis[1] * lateral * side
                             + frame.normal[1] * outward,
                             minimum[2] + 1.85,
                         ),
                         (
-                            entrance[0],
-                            entrance[1],
-                            minimum[2] + min(3.6, height * 0.32),
+                            anchored_entrance[0],
+                            anchored_entrance[1],
+                            minimum[2]
+                            + 1.85
+                            + math.hypot(outward, lateral)
+                            * math.tan(math.radians(office_framing.elevation_deg)),
                         ),
                     )
             all_loading_candidates = [
@@ -776,13 +1011,25 @@ class PlanStandardCameras:
                     )
                     logistics_outward_distance = logistics_shot.distance_m
                     logistics_focal_mm = logistics_shot.focal_length_mm
-                    target = (door[0], door[1], minimum[2] + min(3.0, height * 0.28))
+                    anchored_door = _anchor_to_facade_end(
+                        (door[0], door[1]),
+                        surface.frame.origin,
+                        surface.frame.u_axis,
+                        surface.width_m,
+                        logistics_outward_distance,
+                        logistics_focal_mm,
+                    )
+                    target = (
+                        anchored_door[0],
+                        anchored_door[1],
+                        minimum[2] + min(3.0, height * 0.28),
+                    )
                     loading_detail_shot = (
                         (
-                            door[0]
+                            anchored_door[0]
                             + frame.u_axis[0] * lateral_distance * side
                             + frame.normal[0] * logistics_outward_distance,
-                            door[1]
+                            anchored_door[1]
                             + frame.u_axis[1] * lateral_distance * side
                             + frame.normal[1] * logistics_outward_distance,
                             # A narrow yard with auxiliary blocks needs the permitted low-drone
@@ -893,8 +1140,12 @@ class PlanStandardCameras:
                     arrival_shot[0]
                     if arrival_shot is not None
                     else point(
-                        approach_target_long - approach_distance * 0.80,
-                        approach_target_cross - approach_distance * 0.60,
+                        # Stand on the outward diagonal from that corner so both facades meeting
+                        # there stay in frame. A displacement weighted towards the long axis
+                        # points the camera down the length of the building instead of across
+                        # its corner, which is what makes a long shed photograph as a wall.
+                        approach_target_long - approach_distance * 0.60,
+                        approach_target_cross - approach_distance * 0.80,
                         minimum[2] + 1.75,
                     )
                 ),
@@ -1019,11 +1270,11 @@ class PlanStandardCameras:
         if design is not None:
             design_revision = design.design_revision
         view_set = ViewSet(
-            view_set_id=f"{revision_key}-{design_revision}-standard-v39",
+            view_set_id=f"{revision_key}-{design_revision}-standard-v40",
             design_revision=design_revision,
             cameras=cameras,
         )
-        output = (
+        output = output_path or (
             design_dna_path.parent / "view_set.json"
             if design_dna_path is not None
             else scene_path.parent / "view_set.json"

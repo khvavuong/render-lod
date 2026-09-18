@@ -39,6 +39,7 @@
     "DeliveryQuality": {
       "enum": [
         "preview",
+        "marketing",
         "tender"
       ],
       "title": "DeliveryQuality",

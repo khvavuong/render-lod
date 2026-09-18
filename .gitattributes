@@ -1,0 +1,4 @@
+# The schema check compares raw bytes against what export_schemas.py writes, and that writer
+# emits LF. Without this, a Windows checkout converts these files to CRLF and every schema
+# reports as drifted even when its content is identical.
+schemas/*.json text eol=lf

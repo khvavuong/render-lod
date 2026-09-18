@@ -194,6 +194,7 @@ def propose_candidates(
     distance_factors: tuple[float, ...] = (0.85, 1.0, 1.25),
     elevation_offsets: tuple[float, ...] = (-6.0, 0.0, 8.0),
     maximum_clearance_m: float | None = None,
+    respect_eye_height: bool = False,
 ) -> tuple[CameraCandidate, ...]:
     """Sweep bearing, distance and elevation around the analytic framing solution.
 
@@ -237,6 +238,10 @@ def propose_candidates(
                     continue
                 east, north = _bearing_to_offset(bearing, distance)
                 rise = distance * math.tan(math.radians(elevation))
+                if respect_eye_height and framing.eye_height_m is not None:
+                    # New source-only policy: ground roles keep their declared eye height.
+                    # Legacy searches retain their existing elevation-based placement.
+                    rise = 0.0
                 position = (
                     target[0] + east,
                     target[1] + north,

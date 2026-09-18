@@ -30,6 +30,7 @@ class DockerConditioningRenderer:
         profile: RenderProfile = RenderProfile.STANDARD_EEVEE,
         *,
         facade_mode: str = "authored",
+        camera_scoring: bool = False,
         asset_library_path: Path | None = None,
     ) -> None:
         for path in (scene_path, design_dna_path, view_set_path):
@@ -74,11 +75,11 @@ class DockerConditioningRenderer:
             "--output",
             self._container_path(output_directory),
             "--profile",
-            profile.value,
+            "camera_scoring" if camera_scoring else profile.value,
             "--asset-library",
             self._container_path(asset_library),
         ]
-        if facade_mode not in {"authored", "envelope_program"}:
+        if facade_mode not in {"authored", "envelope_program", "envelope_only"}:
             raise ConfigurationError(f"unknown facade mode: {facade_mode}")
         # Execute the checked-out script, not an older COPY baked into an existing image tag.
         command[command.index("--scene") : command.index("--scene")] = [
@@ -105,6 +106,8 @@ class DockerConditioningRenderer:
             RenderProfile.STANDARD_EEVEE: (1024, 576),
             RenderProfile.PREMIUM_CYCLES: (2048, 1152),
         }[profile]
+        if camera_scoring:
+            resolution = (512, 288)
         manifest = {
             "schema_version": "1.0.0",
             "view_set_id": view_set.view_set_id,

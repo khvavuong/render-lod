@@ -45,7 +45,7 @@ def arguments() -> argparse.Namespace:
         ),
     )
     parser.add_argument("--view-id", action="append", dest="view_ids")
-    parser.add_argument("--facade-mode", choices=("authored", "envelope_program"), default="authored")
+    parser.add_argument("--facade-mode", choices=("authored", "envelope_program", "envelope_only"), default="authored")
     parser.add_argument("--pbr-only", action="store_true")
     return parser.parse_args(argv)
 
@@ -2739,6 +2739,9 @@ def main() -> None:
             "asset_library_version"
         ):
             raise ValueError("asset library version does not match Design DNA")
+    if args.facade_mode == "envelope_only":
+        # Source geometry only: no procedural programme, facade, gates or entourage.
+        design_data = None
     base_object_count = create_objects(scene_data, scene_path.parent, design_data, asset_data)
     if design_data:
         detail_start = create_context_environment(
@@ -2813,6 +2816,9 @@ def main() -> None:
         configure_view_lighting(camera_spec, design_data)
         camera = configure_camera(camera_spec)
         if args.profile == "camera_scoring":
+            if args.facade_mode == "envelope_only":
+                render_pbr(view_dir)
+                bpy.context.scene.view_settings.exposure = 0.0
             # Rank on semantics only. The beauty, material and control passes exist to condition
             # and audit a camera that has already been chosen; none of them changes which camera
             # is worth choosing, and rendering them for every candidate is the whole cost.

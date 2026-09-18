@@ -91,6 +91,10 @@ class GenerationJob(DomainModel):
     style_pack_snapshot: str | None = None
     output_namespace: str | None = None
     view_set_snapshot: str | None = None
+    generation_policy: str = Field(
+        default="legacy", pattern=r"^(legacy|reference-led-proposal-v1)$"
+    )
+    proposal_snapshot: str | None = None
     state: WorkflowState
     attempt: int = Field(default=0, ge=0)
     created_at: datetime
@@ -103,6 +107,8 @@ class GenerationJob(DomainModel):
     def validate_reference_roles(self) -> GenerationJob:
         if len(self.reference_image_refs) != len(self.reference_roles):
             raise ValueError("reference image refs and roles must have equal length")
+        if self.generation_policy != "legacy" and not self.proposal_snapshot:
+            raise ValueError("Proposal policy requires an immutable snapshot")
         return self
 
     @classmethod

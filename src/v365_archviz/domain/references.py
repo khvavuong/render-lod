@@ -9,6 +9,7 @@ from enum import Enum
 class ReferenceRole(str, Enum):
     FACTORY_DESIGN = "factory_design_reference"
     CONTEXT_REALISM = "context_realism_reference"
+    CONSTRUCTION_MATERIAL = "construction_material_reference"
 
 
 @dataclass(frozen=True, slots=True)

@@ -89,6 +89,15 @@ class RunGenerationJob:
         paths = _JobPaths.from_job(settings.artifact_dir, job)
         view_set = ViewSet.model_validate_json(paths.view_set.read_text(encoding="utf-8"))
 
+        if job.generation_policy == "reference-led-proposal-v1":
+            if (paths.generated_root / "selected_shots.json").is_file():
+                from v365_archviz.application.reference_delivery import generate_registered
+
+                return generate_registered(repository, job, settings, paths)
+            from v365_archviz.application.run_reference_proposal import run_proposal
+
+            return run_proposal(repository, job, settings, paths, view_set)
+
         if job.state in {WorkflowState.RENDERING_PASSES, WorkflowState.GENERATING_VIEWSET}:
             self._ensure_conditioning(paths, view_set, job)
 

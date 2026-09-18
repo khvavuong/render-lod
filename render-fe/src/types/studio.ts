@@ -60,6 +60,8 @@ export interface DesignFormValues {
   creativePrompt?: string;
   factoryDesignReference?: File;
   contextRealismReference?: File;
+  constructionMaterialReference?: File;
+  referenceLedPilot?: boolean;
 }
 
 export interface UserRenderIntent {
@@ -192,6 +194,8 @@ export interface StudioJob {
   designRevision: string;
   state: WorkflowState;
   certificationState: CertificationState;
+  generationPolicy?: string;
+  proposalSelected?: boolean;
   outputs: OutputArtifact[];
   intentWarnings?: IntentWarning[];
   errorMessage?: string;

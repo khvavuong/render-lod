@@ -544,3 +544,16 @@ Judge đã có phản ví dụ: đọc một ảnh office cục bộ thành vi p
 (R1 office rep-2/3). Do đó kết quả QA cũ 3/4 không đủ chứng minh judge đáng tin tổng quát.
 Các ca thiếu chứng cứ phải đi vào review/unknown; cần calibration có ground truth và
 phân biệt semantic viewpoint với camera registration trước khi dùng làm gate tự động.
+
+## 20. Kế hoạch tích hợp reference-led vào luồng chính
+
+Sau phản hồi tích cực của người dùng về ảnh thử nghiệm, đã đánh giá lại code hiện tại
+và lập [kế hoạch production integration](V365_REFERENCE_LED_PRODUCTION_INTEGRATION_PLAN.md).
+Luồng chính đã có Site → Facade identity chain và approval; khác biệt còn nằm ở reference
+finish-only, routing reference vào master, programme authority và camera orchestration.
+
+Ưu tiên P0/P1: policy/builder có version, typed reference bundle và proposal pilot trong
+API/job/UI, để kiểm chất lượng mới trước khi chờ hoàn thiện hình học toàn set. P2/P3 duyệt
+master family/requirements và chọn shot theo scene; P4/P5 kiểm set và rollout marketing.
+Giữ strict/tender và policy của job cũ. Không mở rộng editing, không đổi production code
+trong lượt lập kế hoạch, không gọi thêm API trả phí. Backend hiện tại 241 test qua.

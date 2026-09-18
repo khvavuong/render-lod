@@ -14,6 +14,35 @@ function jsonResponse(body: unknown, status = 200) {
 describe('HttpStudioGateway', () => {
   afterEach(() => vi.unstubAllGlobals());
 
+  it('routes the opt-in marketing pilot with architecture and material references', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ design_revision: 'design' }))
+      .mockResolvedValueOnce(jsonResponse({ reference_id: 'architecture' }))
+      .mockResolvedValueOnce(jsonResponse({ reference_id: 'materials' }))
+      .mockResolvedValueOnce(jsonResponse({ job_id: 'job', trace_id: 'trace', view_set_id: 'views',
+        design_revision: 'design', state: 'design_master_review',
+        generation_policy: 'reference-led-proposal-v1', proposal_selected: false,
+        certification_state: 'marketing_generative_review' }))
+      .mockResolvedValueOnce(jsonResponse({ outputs: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await new HttpStudioGateway().createDesign({
+      ...DEFAULT_FORM_VALUES, deliveryQuality: 'marketing', referenceLedPilot: true,
+      creativePrompt: 'Develop the architecture from references',
+      factoryDesignReference: new File(['architecture'], 'architecture.png'),
+      constructionMaterialReference: new File(['materials'], 'materials.png'),
+    }, { modelRevision: 'model', fileName: 'factory.rvt', capabilities: {
+      schema_version: '1.0.0', model_revision: 'model', components: [], warnings: [],
+    } });
+    const upload = fetchMock.mock.calls[2][1] as RequestInit;
+    expect(upload.headers).toMatchObject({ 'X-Reference-Role': 'construction_material_reference' });
+    const request = JSON.parse((fetchMock.mock.calls[3][1] as RequestInit).body as string);
+    expect(request).toMatchObject({ profile: 'marketing_hero',
+      generation_policy: 'reference-led-proposal-v1', reference_ids: ['architecture', 'materials'],
+      design_brief: 'Develop the architecture from references' });
+    expect(result.generationPolicy).toBe('reference-led-proposal-v1');
+    expect(result.proposalSelected).toBe(false);
+  });
+
   it('loads the versioned design option catalog from the backend', async () => {
     const options = {
       schema_version: '1.0.0',

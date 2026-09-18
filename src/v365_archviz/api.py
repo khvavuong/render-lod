@@ -30,6 +30,15 @@ from v365_archviz.application.inspect_model import InspectModel
 from v365_archviz.application.plan_cameras import PlanStandardCameras
 from v365_archviz.application.plan_design import PlanDesign
 from v365_archviz.application.plan_industrial_context import PlanIndustrialContext
+from v365_archviz.application.reference_delivery import (
+    DeliveryReviewRequest,
+    RegisterDesignRequest,
+    SelectShotsRequest,
+    register_design,
+    review_delivery,
+    select_shots,
+    verify_inputs,
+)
 from v365_archviz.application.run_generation_job import _JobPaths
 from v365_archviz.artifacts import atomic_write
 from v365_archviz.config import Settings
@@ -164,15 +173,19 @@ class CreateViewSetRequest(BaseModel):
     model_revision: str = Field(pattern=SAFE_IDENTIFIER_PATTERN)
     profile: GenerationProfile = GenerationProfile.PREVIEW_FAST
     render_profile: RenderProfile = RenderProfile.STANDARD_EEVEE
-    reference_ids: tuple[str, ...] = Field(default=(), max_length=2)
+    reference_ids: tuple[str, ...] = Field(default=(), max_length=3)
     style_pack_id: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9_-]{0,63}$")
+    generation_policy: Literal["legacy", "reference-led-proposal-v1"] = "legacy"
+    design_brief: str = Field(default="", max_length=1000)
 
 
 class ReferenceUploadResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     reference_id: str = Field(pattern=r"^[a-f0-9]{64}$")
-    role: Literal["factory_design_reference", "context_realism_reference"]
+    role: Literal[
+        "factory_design_reference", "context_realism_reference", "construction_material_reference"
+    ]
     file_name: str
     width: int = Field(gt=0)
     height: int = Field(gt=0)
@@ -191,6 +204,8 @@ class ViewSetJobResponse(BaseModel):
     created: bool
     error_code: str | None = None
     error_message: str | None = None
+    generation_policy: str = "legacy"
+    proposal_selected: bool = False
 
 
 class ViewActionRequest(BaseModel):
@@ -353,6 +368,8 @@ def _with_active_quality_baseline(
 
 
 def _certification_state(job: GenerationJob, settings: Settings) -> CertificationState:
+    if job.generation_policy != "legacy":
+        return CertificationState.MARKETING_GENERATIVE_REVIEW
     path = (
         _JobPaths.from_job(settings.artifact_dir, job).generated_root / "certification_report.json"
     )
@@ -362,6 +379,28 @@ def _certification_state(job: GenerationJob, settings: Settings) -> Certificatio
         return CertificationReport.model_validate_json(path.read_text(encoding="utf-8")).state
     except (OSError, ValueError):
         return CertificationState.BASE_PBR
+
+
+def _proposal_selected(job: GenerationJob, settings: Settings) -> bool:
+    if job.generation_policy == "legacy":
+        return False
+    root = _JobPaths.from_job(settings.artifact_dir, job).generated_root
+    try:
+        selected = json.loads((root / "proposal_selection.json").read_text(encoding="utf-8"))
+        review = json.loads((root / "design_master_review.json").read_text(encoding="utf-8"))
+        hashes = selected["master_hashes"]
+        return (
+            selected["view_set_id"] == job.view_set_id
+            and hashes == review["master_hashes"]
+            and set(hashes) == {"site", "facade"}
+            and set(review["master_image_refs"]) == set(hashes)
+            and all(
+                hashlib.sha256(Path(path).read_bytes()).hexdigest() == hashes[role]
+                for role, path in review["master_image_refs"].items()
+            )
+        )
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
 
 
 def _require_safe_identifier(value: str, label: str) -> None:
@@ -390,16 +429,48 @@ def _output_files(view_set_id: str) -> dict[str, tuple[Path, OutputKind, str, st
     settings = _settings()
     generated = _JobPaths.from_job(settings.artifact_dir, job).generated_root
     files: dict[str, tuple[Path, OutputKind, str, str | None]] = {}
+    if job.generation_policy != "legacy" and (generated / "shots/contact_sheet.jpg").is_file():
+        files["shot-contact-sheet"] = (
+            generated / "shots/contact_sheet.jpg",
+            "board",
+            "Camera candidates · Source geometry only",
+            None,
+        )
+    if job.generation_policy != "legacy" and (generated / "registered").is_dir():
+        selected = json.loads((generated / "selected_shots.json").read_text())
+        roles = {s["view_id"]: s["camera"]["role"] for s in selected["shots"]}
+        for view_dir in sorted((generated / "registered").glob("view-*")):
+            candidates = tuple(view_dir.glob("refined.*"))
+            if len(candidates) == 1:
+                files[f"registered-{view_dir.name}"] = (
+                    candidates[0],
+                    "image",
+                    "Registered proposal · Review required · " + roles[view_dir.name],
+                    view_dir.name,
+                )
+        board = generated / "registered/viewset_board.jpg"
+        if job.state is WorkflowState.COMPLETED and board.is_file():
+            files["registered-board"] = (
+                board,
+                "board",
+                "Reviewed marketing board · Not 3D certified",
+                None,
+            )
+        return files
     for view_dir in sorted(generated.glob("view-*")):
         candidates = tuple(view_dir.glob("refined.*"))
         if len(candidates) == 1 and candidates[0].is_file():
             asset_id = f"image-{view_dir.name}"
             title = _VIEW_TITLES.get(view_dir.name, view_dir.name.upper())
+            if job.generation_policy != "legacy":
+                title = "Đề xuất thiết kế · Chưa xác nhận hồ sơ · " + title
             files[asset_id] = (candidates[0], "image", title, view_dir.name)
     board = generated / "viewset_board.jpg"
     if board.is_file():
         files["board"] = (board, "board", "Bộ 6 góc nhìn", None)
     video_root = settings.artifact_dir / "videos" / job.model_revision / job.design_revision
+    if job.generation_policy != "legacy":
+        return files
     videos = sorted(video_root.glob("*/showreel.mp4"), key=lambda path: path.stat().st_mtime)
     if videos:
         files["video"] = (videos[-1], "video", "Video trình diễn", None)
@@ -450,9 +521,9 @@ def latest_model() -> ActiveModelResponse:
 async def upload_reference(
     request: Request,
     x_filename: str = Header(..., min_length=1, max_length=512),
-    x_reference_role: Literal["factory_design_reference", "context_realism_reference"] = Header(
-        ...
-    ),
+    x_reference_role: Literal[
+        "factory_design_reference", "context_realism_reference", "construction_material_reference"
+    ] = Header(...),
 ) -> ReferenceUploadResponse:
     file_name = Path(unquote(x_filename)).name
     content_length = request.headers.get("content-length")
@@ -736,13 +807,79 @@ def create_view_set(design_revision: str, request: CreateViewSetRequest) -> View
     design = DesignDNA.model_validate_json(design_path.read_text(encoding="utf-8"))
     if design.design_revision != design_revision:
         raise HTTPException(status_code=409, detail="design revision is not immutable")
-    view_set = PlanStandardCameras().execute(scene_path, design_path)
+    if request.generation_policy == "legacy":
+        view_set = PlanStandardCameras().execute(scene_path, design_path)
+    else:
+        # Proposal slots must not overwrite a legacy job's shared camera file.
+        view_set = PlanStandardCameras().execute(
+            scene_path,
+            design_path,
+            output_path=settings.artifact_dir / "proposal_planning" / f"{uuid.uuid4().hex}.json",
+        )
     reference_refs, reference_roles = _resolve_references(
         settings.artifact_dir, request.reference_ids
     )
-    if settings.auto_appearance_baseline:
+    if settings.auto_appearance_baseline and request.generation_policy == "legacy":
         reference_refs, reference_roles = _with_active_quality_baseline(
             settings.artifact_dir, reference_refs, reference_roles
+        )
+    proposal_snapshot = None
+    if request.generation_policy == "legacy" and (
+        len(request.reference_ids) > 2 or "construction_material_reference" in reference_roles
+    ):
+        raise HTTPException(
+            status_code=422, detail="Legacy supports factory/context references only"
+        )
+    if request.generation_policy != "legacy":
+        from v365_archviz.application.reference_led_input import (
+            REFERENCE_INSTRUCTIONS,
+            VERSION,
+            proposal_prompt,
+            source_envelopes,
+        )
+
+        if (
+            request.profile is not GenerationProfile.MARKETING_HERO
+            or settings.image_provider != "gemini"
+        ):
+            raise HTTPException(
+                status_code=422, detail="Proposal pilot requires marketing_hero/Gemini"
+            )
+        if not {"factory_design_reference", "construction_material_reference"} <= set(
+            reference_roles
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail="Pilot requires architecture AND construction/material references",
+            )
+        try:
+            envelopes = source_envelopes(json.loads(scene_path.read_text(encoding="utf-8")))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        proposal_snapshot = json.dumps(
+            {
+                "version": VERSION,
+                "brief": request.design_brief,
+                "envelopes": envelopes,
+                "source_sha256": hashlib.sha256(scene_path.read_bytes()).hexdigest(),
+                "model": settings.gemini_master_image_model or settings.gemini_image_model,
+                "references": [
+                    {
+                        "path": path,
+                        "role": role,
+                        "instruction": REFERENCE_INSTRUCTIONS[role],
+                        "sha256": hashlib.sha256(Path(path).read_bytes()).hexdigest(),
+                    }
+                    for path, role in zip(reference_refs, reference_roles, strict=True)
+                ],
+                "max_generation_calls": 2,
+                "prompts": {
+                    role: proposal_prompt(envelopes, role, request.design_brief)
+                    for role in ("overall", "office_hero")
+                },
+            },
+            sort_keys=True,
+            ensure_ascii=False,
         )
     style_pack_ref = None
     if request.style_pack_id is not None:
@@ -766,6 +903,7 @@ def create_view_set(design_revision: str, request: CreateViewSetRequest) -> View
         reference_image_refs=reference_refs,
         reference_roles=reference_roles,
         style_pack_ref=style_pack_ref,
+        proposal_snapshot=proposal_snapshot,
     )
     job = created.job
     if created.created:
@@ -792,6 +930,8 @@ def create_view_set(design_revision: str, request: CreateViewSetRequest) -> View
         state=job.state,
         certification_state=_certification_state(job, settings),
         created=created.created,
+        generation_policy=job.generation_policy,
+        proposal_selected=_proposal_selected(job, settings),
         error_code=job.error_code,
         error_message=job.error_message,
     )
@@ -817,6 +957,8 @@ def get_view_set(view_set_id: str) -> ViewSetJobResponse:
         state=job.state,
         certification_state=_certification_state(job, settings),
         created=False,
+        generation_policy=job.generation_policy,
+        proposal_selected=_proposal_selected(job, settings),
         error_code=job.error_code,
         error_message=job.error_message,
     )
@@ -983,6 +1125,133 @@ def _transition_view_set(view_set_id: str, target: WorkflowState) -> ViewSetJobR
     )
 
 
+def _reference_job(view_set_id: str):
+    _require_safe_identifier(view_set_id, "view_set_id")
+    settings = _settings()
+    try:
+        job = _repository(settings).get_by_view_set(view_set_id)
+    except OSError as exc:
+        raise HTTPException(status_code=404, detail="view set not found") from exc
+    if job.generation_policy != "reference-led-proposal-v1":
+        raise HTTPException(status_code=409, detail="Reference-led job required")
+    return settings, job, _JobPaths.from_job(settings.artifact_dir, job)
+
+
+@app.post("/v1/view-sets/{view_set_id}/design-registration", tags=["review"])
+def register_reference_design(view_set_id: str, request: RegisterDesignRequest):
+    _, job, paths = _reference_job(view_set_id)
+    try:
+        return register_design(job, paths, request)
+    except (OSError, ValueError, KeyError, V365Error) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.get("/v1/view-sets/{view_set_id}/reference-progress", tags=["review"])
+def reference_progress(view_set_id: str):
+    _, job, paths = _reference_job(view_set_id)
+    result = {
+        "state": job.state.value,
+        "generation_calls_reserved": len(list(paths.generated_root.rglob("call_reserved"))),
+    }
+    for name, filename in (
+        ("design", "registered_design.json"),
+        ("ranking", "shots/ranking.json"),
+        ("selection", "selected_shots.json"),
+        ("qa", "registered/stage_qa.json"),
+        ("delivery_review", "registered/delivery_review.json"),
+        ("advisory_review", "registered/agent_visual_review.json"),
+    ):
+        path = paths.generated_root / filename
+        result[name] = json.loads(path.read_text()) if path.is_file() else None
+    return result
+
+
+@app.post("/v1/view-sets/{view_set_id}/shots/search", tags=["views"])
+async def search_reference_shots(view_set_id: str):
+    from v365_archviz.application.reference_shots import search_shots
+
+    _, job, paths = _reference_job(view_set_id)
+    try:
+        verify_inputs(job, paths)
+        if (
+            job.state is not WorkflowState.DESIGN_MASTER_REVIEW
+            or not (paths.generated_root / "registered_design.json").is_file()
+        ):
+            raise V365Error("Register a design before searching shots")
+        return await run_in_threadpool(search_shots, paths, job)
+    except (OSError, ValueError, KeyError, V365Error) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/v1/view-sets/{view_set_id}/shots/select", tags=["views"])
+def select_reference_shots(view_set_id: str, request: SelectShotsRequest):
+    _, job, paths = _reference_job(view_set_id)
+    try:
+        if job.state is not WorkflowState.DESIGN_MASTER_REVIEW:
+            raise V365Error("Shots must be selected before generation")
+        return select_shots(job, paths, request)
+    except (OSError, ValueError, KeyError, V365Error) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.get(
+    "/v1/view-sets/{view_set_id}/shots/previews/{candidate_id}",
+    response_class=FileResponse,
+    tags=["views"],
+)
+def reference_shot_preview(view_set_id: str, candidate_id: str):
+    _require_safe_identifier(candidate_id, "candidate_id")
+    _, _, paths = _reference_job(view_set_id)
+    try:
+        ranking = json.loads((paths.generated_root / "shots/ranking.json").read_text())
+        row = next(r for r in ranking["candidates"] if r["candidate_id"] == candidate_id)
+        path = Path(row["evidence_ref"]).resolve()
+        if not path.is_relative_to((paths.generated_root / "shots/renders").resolve()):
+            raise V365Error("Invalid shot evidence path")
+        return FileResponse(path, media_type="image/png")
+    except (OSError, ValueError, StopIteration, V365Error) as exc:
+        raise HTTPException(status_code=404, detail="Shot preview unavailable") from exc
+
+
+@app.post(
+    "/v1/view-sets/{view_set_id}/registered-generation",
+    response_model=ViewSetJobResponse,
+    tags=["views"],
+)
+def start_reference_generation(view_set_id: str):
+    _, job, paths = _reference_job(view_set_id)
+    try:
+        verify_inputs(job, paths)
+        if not (paths.generated_root / "selected_shots.json").is_file():
+            raise V365Error("Select source shots before generation")
+        if job.state is not WorkflowState.DESIGN_MASTER_REVIEW:
+            raise V365Error("Generation already started; no additional budget")
+    except (OSError, ValueError, V365Error) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    _transition_view_set(view_set_id, WorkflowState.GENERATING_VIEWSET)
+    return get_view_set(view_set_id)
+
+
+@app.post("/v1/view-sets/{view_set_id}/delivery-review", tags=["review"])
+def review_reference_delivery(view_set_id: str, request: DeliveryReviewRequest):
+    settings, job, paths = _reference_job(view_set_id)
+    try:
+        result = review_delivery(job, paths, request)
+        if result["delivery_approved"]:
+            from v365_archviz.application.compose_viewset_board import ComposeViewSetBoard
+
+            ComposeViewSetBoard().execute(
+                paths.generated_root / "registered",
+                paths.generated_root / "registered/viewset_board.jpg",
+            )
+            repository = _repository(settings)
+            repository.save(job.transition(WorkflowState.COMPOSING_BOARD))
+            repository.save(repository.get(job.job_id).transition(WorkflowState.COMPLETED))
+        return result
+    except (OSError, ValueError, KeyError, V365Error) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @app.post(
     "/v1/view-sets/{view_set_id}/approve",
     response_model=ViewSetJobResponse,
@@ -998,6 +1267,8 @@ def approve_view_set(view_set_id: str) -> ViewSetJobResponse:
         job = _repository(settings).get_by_view_set(view_set_id)
     except OSError as exc:
         raise HTTPException(status_code=404, detail="view set not found") from exc
+    if job.generation_policy != "legacy" and job.state is not WorkflowState.DESIGN_MASTER_REVIEW:
+        raise HTTPException(status_code=409, detail="Pilot proposals cannot approve delivery")
     if job.state is WorkflowState.DESIGN_MASTER_REVIEW:
         review_path = (
             _JobPaths.from_job(settings.artifact_dir, job).generated_root
@@ -1011,6 +1282,38 @@ def approve_view_set(view_set_id: str) -> ViewSetJobResponse:
                 raise ValueError("Design Master image is missing")
         except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        if job.generation_policy != "legacy":
+            hashes = review.get("master_hashes", {})
+            refs = review.get("master_image_refs", {})
+            if (
+                not hashes
+                or not refs
+                or set(hashes) != {"site", "facade"}
+                or set(refs) != set(hashes)
+                or any(
+                    not Path(path).is_file()
+                    or hashlib.sha256(Path(path).read_bytes()).hexdigest() != hashes.get(role)
+                    for role, path in refs.items()
+                )
+            ):
+                raise HTTPException(
+                    status_code=409, detail="Proposal outputs changed or incomplete"
+                )
+            atomic_write(
+                review_path.parent / "proposal_selection.json",
+                json.dumps(
+                    {
+                        "view_set_id": job.view_set_id,
+                        "policy": job.generation_policy,
+                        "master_hashes": hashes,
+                        "status": "selected_concept",
+                        "geometry_verified": False,
+                        "delivery_approved": False,
+                    },
+                    indent=2,
+                ).encode(),
+            )
+            return get_view_set(view_set_id)
         review.update({"approved": True, "status": "approved"})
         atomic_write(
             review_path,
@@ -1069,6 +1372,10 @@ def reject_design_master(
         job = _repository(settings).get_by_view_set(view_set_id)
     except OSError as exc:
         raise HTTPException(status_code=404, detail="view set not found") from exc
+    if job.generation_policy != "legacy":
+        raise HTTPException(
+            status_code=409, detail="Pilot call budget is fixed; create a new brief/job"
+        )
     if job.state not in {WorkflowState.DESIGN_MASTER_REVIEW, WorkflowState.HUMAN_REVIEW}:
         raise HTTPException(
             status_code=409,

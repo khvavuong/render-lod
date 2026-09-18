@@ -48,6 +48,10 @@ class ViewConditioningInput:
     #: conditioning block forbidding it.
     design_freedom: str = "photoreal_only"
     context_policy: str = "translucent_massing"
+    generation_policy: str = "legacy"
+    reference_roles: tuple[str, ...] = ()
+    provider_model: str | None = None
+    reference_instructions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

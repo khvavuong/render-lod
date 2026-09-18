@@ -42,6 +42,8 @@ interface ViewSetResponse {
   design_revision: string;
   state: WorkflowState;
   certification_state?: CertificationState;
+  generation_policy?: string;
+  proposal_selected?: boolean;
   error_message?: string | null;
 }
 
@@ -127,6 +129,8 @@ function toJob(
     designRevision: job.design_revision,
     state: job.state,
     certificationState: job.certification_state ?? 'base_pbr',
+    generationPolicy: job.generation_policy ?? 'legacy',
+    proposalSelected: job.proposal_selected ?? false,
     outputs,
     intentWarnings,
     errorMessage: job.error_message ?? undefined,
@@ -142,6 +146,11 @@ function toVideoJob(job: VideoJobResponse): StudioVideoJob {
     outputUrl: job.output_url ?? undefined,
     errorMessage: job.error_message ?? undefined,
   };
+}
+
+export async function referenceAction<T>(viewSetId: string, action: string, body?: unknown): Promise<T> {
+  return request<T>(`/v1/view-sets/${encodeURIComponent(viewSetId)}/${action}`, body === undefined
+    ? undefined : { method: 'POST', body: JSON.stringify(body) });
 }
 
 export class HttpStudioGateway implements StudioGateway {
@@ -212,12 +221,16 @@ export class HttpStudioGateway implements StudioGateway {
         }),
       },
     );
+    const pilot = values.deliveryQuality === 'marketing' && values.referenceLedPilot === true;
     const referenceIds = await Promise.all([
       values.factoryDesignReference
         ? this.uploadReference(values.factoryDesignReference, 'factory_design_reference')
         : undefined,
       values.contextRealismReference
         ? this.uploadReference(values.contextRealismReference, 'context_realism_reference')
+        : undefined,
+      pilot && values.constructionMaterialReference
+        ? this.uploadReference(values.constructionMaterialReference, 'construction_material_reference')
         : undefined,
     ]);
     const job = await request<ViewSetResponse>(
@@ -232,6 +245,8 @@ export class HttpStudioGateway implements StudioGateway {
           style_pack_id: values.deliveryQuality === 'tender' ? undefined : 'marketing_photoreal',
           render_profile: 'standard_eevee',
           reference_ids: referenceIds.filter((value): value is string => Boolean(value)),
+          generation_policy: pilot ? 'reference-led-proposal-v1' : 'legacy',
+          design_brief: pilot ? values.creativePrompt ?? '' : '',
         }),
       },
     );

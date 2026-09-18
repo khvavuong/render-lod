@@ -273,7 +273,43 @@ class GeminiImageRenderer:
         identity_prompt: str = "",
         model: str | None = None,
     ) -> GeneratedImage:
-        if self._conditioning_mode is GeminiConditioningMode.PHOTOREAL_BALANCED:
+        if request.generation_policy in {
+            "reference-led-proposal-v1",
+            "reference-led-registered-v1",
+        }:
+            from v365_archviz.application.reference_led_input import REFERENCE_INSTRUCTIONS
+
+            if len(request.reference_images) != len(request.reference_roles):
+                raise ProviderError("Proposal reference roles are missing")
+            if request.reference_instructions and len(request.reference_instructions) != len(
+                request.reference_roles
+            ):
+                raise ProviderError("Proposal reference instructions are missing")
+            input_blocks = [{"type": "text", "text": request.prompt}]
+            for index, (reference, role) in enumerate(
+                zip(request.reference_images, request.reference_roles, strict=True)
+            ):
+                registered_roles = {"approved_design_anchor", "source_geometry_evidence"}
+                if role not in REFERENCE_INSTRUCTIONS and not (
+                    request.generation_policy == "reference-led-registered-v1"
+                    and role in registered_roles
+                    and request.reference_instructions
+                ):
+                    raise ProviderError("Unsupported proposal reference role")
+                instruction = (
+                    request.reference_instructions[index]
+                    if request.reference_instructions
+                    else REFERENCE_INSTRUCTIONS[role]
+                )
+                input_blocks.extend(
+                    [
+                        {"type": "text", "text": f"{role}: {instruction}"},
+                        _image_block(reference),
+                    ]
+                )
+        elif request.generation_policy != "legacy":
+            raise ProviderError("Unknown generation policy")
+        elif self._conditioning_mode is GeminiConditioningMode.PHOTOREAL_BALANCED:
             input_blocks = self._photoreal_balanced_input(
                 request,
                 style_anchor=style_anchor,
@@ -285,11 +321,13 @@ class GeminiImageRenderer:
                 style_anchor=style_anchor,
                 identity_prompt=identity_prompt,
             )
-        selected_model = model or self._settings.gemini_image_model
+        selected_model = request.provider_model or model or self._settings.gemini_image_model
         payload = {
             "model": selected_model,
             "input": input_blocks,
-            "store": self._settings.gemini_store_interactions,
+            "store": False
+            if request.generation_policy != "legacy"
+            else self._settings.gemini_store_interactions,
             "response_format": {
                 "type": "image",
                 "aspect_ratio": request.aspect_ratio,

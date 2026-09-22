@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -59,6 +60,26 @@ class ImageProviderCapabilities:
 
 
 @dataclass(frozen=True)
+class ViewEditInput:
+    """One human-directed edit of a view that already has a refined image.
+
+    `mask` is a PNG whose transparent pixels are the region the provider may
+    change; every opaque pixel must come back untouched. That is the convention
+    the OpenAI edits endpoint reads, and the mask the browser draws.
+    """
+
+    view_id: str
+    base_image: Path
+    prompt: str
+    mask: bytes | None = None
+    reference_images: tuple[Path, ...] = ()
+    aspect_ratio: str = "16:9"
+    quality: str | None = None
+    size: str | None = None
+    candidates: int = 1
+
+
+@dataclass(frozen=True)
 class ViewSetGenerationInput:
     request_id: str
     project_id: str
@@ -94,6 +115,19 @@ class GenerativeRenderer(Protocol):
     def capabilities(self) -> ImageProviderCapabilities: ...
 
     def generate(self, request: ViewConditioningInput) -> GeneratedImage: ...
+
+    def edit(
+        self,
+        request: ViewEditInput,
+        *,
+        on_partial: Callable[[int, bytes], None] | None = None,
+    ) -> tuple[GeneratedImage, ...]:
+        """Redraw the masked region of an already refined view.
+
+        Returns one image per requested candidate. A provider that cannot do
+        this says so through `capabilities.supports_masked_edit` and raises.
+        """
+        ...
 
 
 class ViewSetGenerativeRenderer(GenerativeRenderer, Protocol):

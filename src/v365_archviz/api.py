@@ -2,25 +2,45 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import io
 import json
 import os
 import re
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal
 from urllib.parse import unquote
 
-from fastapi import FastAPI, Header, HTTPException, Request, status
+from fastapi import (
+    FastAPI,
+    File,
+    Form,
+    Header,
+    HTTPException,
+    Request,
+    UploadFile,
+    status,
+)
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from starlette.concurrency import run_in_threadpool
 
 from v365_archviz import __version__
 from v365_archviz.application.analyze_model_capabilities import AnalyzeModelDesignCapabilities
+from v365_archviz.application.apply_view_edit import (
+    EDITABLE_STATES,
+    MAX_CANDIDATES,
+    MAX_REFERENCES,
+    ApplyViewEdit,
+    CommitViewEdit,
+    view_directory,
+)
 from v365_archviz.application.build_canonical_scene import BuildCanonicalScene
 from v365_archviz.application.compile_user_intent import CompileUserRenderIntent
 from v365_archviz.application.create_generation_job import CreateGenerationJob
@@ -30,6 +50,12 @@ from v365_archviz.application.inspect_model import InspectModel
 from v365_archviz.application.plan_cameras import PlanStandardCameras
 from v365_archviz.application.plan_design import PlanDesign
 from v365_archviz.application.plan_industrial_context import PlanIndustrialContext
+from v365_archviz.application.restore_view_edit import RestoreViewEdit
+from v365_archviz.application.view_edit_store import (
+    ViewEditRecord,
+    ViewEditStore,
+    media_type_of,
+)
 from v365_archviz.artifacts import atomic_write
 from v365_archviz.config import Settings
 from v365_archviz.domain.controlled_realism import CertificationReport, CertificationState
@@ -45,15 +71,26 @@ from v365_archviz.domain.render_intent import (
 from v365_archviz.domain.scene import CanonicalScene
 from v365_archviz.domain.video_jobs import VideoJob, VideoJobState
 from v365_archviz.domain.workflow import GenerationProfile, RenderProfile, ViewSet, WorkflowState
-from v365_archviz.errors import InvalidModelError, V365Error
+from v365_archviz.errors import (
+    ConfigurationError,
+    InvalidModelError,
+    ProviderError,
+    V365Error,
+)
 from v365_archviz.providers.aps.model_derivative import ApsModelDerivativeClient
 from v365_archviz.providers.local_dispatcher import LocalGenerationDispatcher
+from v365_archviz.providers.local_edit_dispatcher import LocalEditDispatcher, Publish
 from v365_archviz.providers.local_jobs import LocalJobRepository
 from v365_archviz.providers.local_rvt import LocalRvtInspector
 from v365_archviz.providers.local_video_dispatcher import LocalVideoDispatcher
 from v365_archviz.providers.local_video_jobs import LocalVideoJobRepository
 
 OutputKind = Literal["image", "board", "video"]
+# Read once here rather than in each signature: a call in an argument default
+# is evaluated at import, which is exactly what FastAPI wants and what B008
+# warns about everywhere else.
+_MASK_FILE = File(None)
+_REFERENCE_FILES = File(None)
 MAX_RVT_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024
 MAX_REFERENCE_UPLOAD_BYTES = 20 * 1024 * 1024
 
@@ -72,6 +109,7 @@ app.add_middleware(
 
 _generation_dispatcher = LocalGenerationDispatcher()
 _video_dispatcher = LocalVideoDispatcher()
+_edit_dispatcher = LocalEditDispatcher()
 
 SAFE_IDENTIFIER_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
 _SAFE_IDENTIFIER = re.compile(SAFE_IDENTIFIER_PATTERN)
@@ -222,6 +260,53 @@ class VideoJobResponse(BaseModel):
     output_url: str | None = None
     error_code: str | None = None
     error_message: str | None = None
+
+
+class ViewEditResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    edit_id: str
+    view_id: str
+    sequence: int
+    kind: str
+    state: str
+    prompt: str
+    candidate_count: int
+    chosen: int | None
+    created_by: str
+    created_at: str
+    committed_at: str | None
+    previous_url: str
+    candidate_urls: tuple[str, ...]
+
+
+class ViewEditListResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    edits: tuple[ViewEditResponse, ...]
+    #: How much of the bounded repair budget this view set has already spent.
+    attempt: int
+    editable: bool
+
+
+class StartViewEditResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    edit_id: str
+    view_id: str
+    view_set_id: str
+
+
+class CommitViewEditRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    chosen: int = Field(ge=0, lt=MAX_CANDIDATES)
+
+
+class RestoreViewEditRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    created_by: str = Field(default="unknown", min_length=1)
 
 
 def _settings() -> Settings:
@@ -1149,3 +1234,264 @@ def approve_view(view_id: str, request: ViewActionRequest) -> ViewSetJobResponse
 def repair_view(view_id: str, request: ViewActionRequest) -> ViewSetJobResponse:
     _require_safe_identifier(view_id, "view_id")
     return _transition_view_set(request.view_set_id, WorkflowState.REPAIRING)
+
+
+# -- view edits ----------------------------------------------------------
+#
+# An edit belongs to a view *within one view set*: `view-03` exists in every
+# view set, so these paths carry both ids rather than the view id alone.
+
+
+@contextmanager
+def _edit_errors() -> Iterator[None]:
+    """One mapping from an edit's refusals to the status the browser sees.
+
+    A refusal here is about what was asked — the wrong state, a spent repair
+    budget, a mask that selects nothing — so it answers 409 rather than 500. A
+    provider that fails is the service's own failure and answers 502.
+    """
+
+    try:
+        yield
+    except (ConfigurationError, InvalidModelError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ProviderError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+def _job_for_edit(view_set_id: str, view_id: str) -> GenerationJob:
+    _require_safe_identifier(view_set_id, "view_set_id")
+    _require_safe_identifier(view_id, "view_id")
+    try:
+        return _repository(_settings()).get_by_view_set(view_set_id)
+    except OSError as exc:
+        raise HTTPException(status_code=404, detail="view set not found") from exc
+
+
+def _edit_store(job: GenerationJob, view_id: str) -> ViewEditStore:
+    return ViewEditStore(view_directory(_settings(), job, view_id))
+
+
+def _edit_response(record: ViewEditRecord, view_set_id: str) -> ViewEditResponse:
+    base = f"/v1/view-sets/{view_set_id}/views/{record.view_id}/edits/{record.edit_id}"
+    return ViewEditResponse(
+        edit_id=record.edit_id,
+        view_id=record.view_id,
+        sequence=record.sequence,
+        kind=record.kind,
+        state=record.state,
+        prompt=record.prompt,
+        candidate_count=record.candidate_count,
+        chosen=record.chosen,
+        created_by=record.created_by,
+        created_at=record.created_at,
+        committed_at=record.committed_at,
+        previous_url=f"{base}/image?variant=previous",
+        candidate_urls=tuple(
+            f"{base}/image?variant=candidate&index={index}"
+            for index in range(record.candidate_count)
+        ),
+    )
+
+
+async def _read_upload(upload: UploadFile, label: str) -> bytes:
+    content = await upload.read()
+    if len(content) > MAX_REFERENCE_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"{label} exceeds {MAX_REFERENCE_UPLOAD_BYTES} bytes",
+        )
+    return content
+
+
+@app.post(
+    "/v1/view-sets/{view_set_id}/views/{view_id}/edits",
+    response_model=StartViewEditResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    tags=["review"],
+)
+async def start_view_edit(
+    view_set_id: str,
+    view_id: str,
+    prompt: str = Form(...),
+    created_by: str = Form("unknown"),
+    quality: str | None = Form(None),
+    size: str | None = Form(None),
+    candidates: int = Form(1),
+    mask: UploadFile | None = _MASK_FILE,
+    references: list[UploadFile] | None = _REFERENCE_FILES,
+) -> StartViewEditResponse:
+    with _edit_errors():
+        job = _job_for_edit(view_set_id, view_id)
+    if len(references or ()) > MAX_REFERENCES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"an edit takes at most {MAX_REFERENCES} reference images",
+        )
+    settings = _settings()
+    mask_bytes = await _read_upload(mask, "mask") if mask is not None else None
+    reference_paths: list[Path] = []
+    scratch = settings.artifact_dir / "edit_uploads" / uuid.uuid4().hex
+    for index, upload in enumerate(references or ()):
+        content = await _read_upload(upload, "reference image")
+        suffix = Path(upload.filename or f"reference-{index}.png").suffix or ".png"
+        target = scratch / f"{index:02d}{suffix}"
+        atomic_write(target, content)
+        reference_paths.append(target)
+
+    edit_id = uuid.uuid4().hex
+
+    def work(publish: Publish) -> None:
+        publish("started", {"edit_id": edit_id, "view_id": view_id})
+
+        def on_partial(index: int, content: bytes) -> None:
+            publish(
+                "partial_image",
+                {"index": index, "b64_png": base64.b64encode(content).decode("ascii")},
+            )
+
+        try:
+            applied = ApplyViewEdit().execute(
+                settings=settings,
+                repository=_repository(settings),
+                job=job,
+                view_id=view_id,
+                edit_id=edit_id,
+                prompt=prompt,
+                mask=mask_bytes,
+                references=tuple(reference_paths),
+                quality=quality,
+                size=size,
+                candidates=candidates,
+                created_by=created_by,
+                on_partial=on_partial,
+            )
+        finally:
+            for path in reference_paths:
+                path.unlink(missing_ok=True)
+        publish(
+            "completed",
+            {"edit": _edit_response(applied.record, view_set_id).model_dump(mode="json")},
+        )
+        if applied.requeued and settings.local_worker_enabled:
+            publish("validating", {"view_set_id": view_set_id})
+            _generation_dispatcher.submit(applied.job.job_id)
+
+    _edit_dispatcher.start(edit_id, work)
+    return StartViewEditResponse(edit_id=edit_id, view_id=view_id, view_set_id=view_set_id)
+
+
+@app.get(
+    "/v1/view-sets/{view_set_id}/views/{view_id}/edits/{edit_id}/events",
+    tags=["review"],
+)
+def stream_view_edit(view_set_id: str, view_id: str, edit_id: str) -> StreamingResponse:
+    _require_safe_identifier(view_set_id, "view_set_id")
+    _require_safe_identifier(view_id, "view_id")
+    _require_safe_identifier(edit_id, "edit_id")
+    stream = _edit_dispatcher.stream(edit_id)
+    if stream is None:
+        raise HTTPException(status_code=404, detail="edit run is no longer available")
+    return StreamingResponse(
+        stream.read(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.get(
+    "/v1/view-sets/{view_set_id}/views/{view_id}/edits",
+    response_model=ViewEditListResponse,
+    tags=["review"],
+)
+def list_view_edits(view_set_id: str, view_id: str) -> ViewEditListResponse:
+    with _edit_errors():
+        job = _job_for_edit(view_set_id, view_id)
+        store = _edit_store(job, view_id)
+        return ViewEditListResponse(
+            edits=tuple(_edit_response(record, view_set_id) for record in store.records()),
+            attempt=job.attempt,
+            editable=job.state in EDITABLE_STATES and job.attempt < 3,
+        )
+
+
+@app.get(
+    "/v1/view-sets/{view_set_id}/views/{view_id}/edits/{edit_id}/image",
+    response_class=FileResponse,
+    tags=["review"],
+)
+def download_view_edit_image(
+    view_set_id: str,
+    view_id: str,
+    edit_id: str,
+    variant: Literal["previous", "candidate"] = "previous",
+    index: int = 0,
+) -> FileResponse:
+    _require_safe_identifier(edit_id, "edit_id")
+    with _edit_errors():
+        job = _job_for_edit(view_set_id, view_id)
+        store = _edit_store(job, view_id)
+        record = store.record(edit_id)
+        path = (
+            store.previous_image(record)
+            if variant == "previous"
+            else store.candidate_image(record, index)
+        )
+        return FileResponse(path, media_type=media_type_of(path), filename=path.name)
+
+
+@app.post(
+    "/v1/view-sets/{view_set_id}/views/{view_id}/edits/{edit_id}/commit",
+    response_model=ViewEditResponse,
+    tags=["review"],
+)
+def commit_view_edit(
+    view_set_id: str,
+    view_id: str,
+    edit_id: str,
+    request: CommitViewEditRequest,
+) -> ViewEditResponse:
+    _require_safe_identifier(edit_id, "edit_id")
+    with _edit_errors():
+        job = _job_for_edit(view_set_id, view_id)
+        settings = _settings()
+        applied = CommitViewEdit().execute(
+            settings=settings,
+            repository=_repository(settings),
+            job=job,
+            view_id=view_id,
+            edit_id=edit_id,
+            chosen=request.chosen,
+        )
+        if settings.local_worker_enabled:
+            _generation_dispatcher.submit(applied.job.job_id)
+        return _edit_response(applied.record, view_set_id)
+
+
+@app.post(
+    "/v1/view-sets/{view_set_id}/views/{view_id}/edits/{edit_id}/restore",
+    response_model=ViewEditResponse,
+    tags=["review"],
+)
+def restore_view_edit(
+    view_set_id: str,
+    view_id: str,
+    edit_id: str,
+    request: RestoreViewEditRequest,
+) -> ViewEditResponse:
+    _require_safe_identifier(edit_id, "edit_id")
+    with _edit_errors():
+        job = _job_for_edit(view_set_id, view_id)
+        settings = _settings()
+        applied = RestoreViewEdit().execute(
+            settings=settings,
+            repository=_repository(settings),
+            job=job,
+            view_id=view_id,
+            source_edit_id=edit_id,
+            edit_id=uuid.uuid4().hex,
+            created_by=request.created_by,
+        )
+        if settings.local_worker_enabled:
+            _generation_dispatcher.submit(applied.job.job_id)
+        return _edit_response(applied.record, view_set_id)

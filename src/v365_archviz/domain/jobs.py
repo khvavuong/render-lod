@@ -64,7 +64,10 @@ _ALLOWED_TRANSITIONS: dict[WorkflowState, frozenset[WorkflowState]] = {
     ),
     WorkflowState.COMPOSING_BOARD: frozenset({WorkflowState.COMPLETED, WorkflowState.FAILED}),
     WorkflowState.GENERATING_VIDEO: frozenset({WorkflowState.COMPLETED, WorkflowState.FAILED}),
-    WorkflowState.COMPLETED: frozenset(),
+    # A finished set is not frozen: flaws are usually noticed on the board, after
+    # the run is over. A human-directed edit reopens it at REPAIRING, and the
+    # attempt limit below still counts every reopening.
+    WorkflowState.COMPLETED: frozenset({WorkflowState.REPAIRING}),
     # FAILED remains terminal during automatic execution. An explicit API retry may move a
     # failed job back to the cheapest safe checkpoint after inspecting persisted artifacts.
     WorkflowState.FAILED: frozenset({WorkflowState.RENDERING_PASSES, WorkflowState.VALIDATING}),

@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import base64
 import io
+import json
 import mimetypes
+from collections.abc import Callable
 from pathlib import Path
+from typing import TypeAlias
 
 import httpx
 from PIL import Image, UnidentifiedImageError
@@ -18,10 +21,37 @@ from v365_archviz.providers.contracts import (
     GeneratedViewSet,
     ImageProviderCapabilities,
     ViewConditioningInput,
+    ViewEditInput,
     ViewSetGenerationInput,
 )
 
 DEFAULT_ENDPOINT = "https://api.openai.com/v1/images/edits"
+
+#: How many progressive previews the provider sends before the finished image.
+_PARTIAL_IMAGES = 2
+
+_FilePart: TypeAlias = tuple[str, tuple[str, bytes, str]]
+
+
+def _edit_failed(exc: Exception) -> ProviderError:
+    status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
+    suffix = f" (HTTP {status})" if status else ""
+    return ProviderError(f"OpenAI image edit request failed{suffix}")
+
+
+def _sse_payload(line: str) -> dict[str, object] | None:
+    """The JSON object in one `data:` line, or None for keep-alives and `[DONE]`."""
+
+    if not line.startswith("data:"):
+        return None
+    body = line[len("data:") :].strip()
+    if not body or body == "[DONE]":
+        return None
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
 
 
 class OpenAIImageRenderer:
@@ -187,6 +217,140 @@ class OpenAIImageRenderer:
         buffer = io.BytesIO()
         image.save(buffer, format="PNG", optimize=True)
         return buffer.getvalue()
+
+    def _edit_request(self, request: ViewEditInput) -> tuple[list[_FilePart], dict[str, str]]:
+        """The multipart body an edit sends, shared by the buffered and streamed paths."""
+
+        files: list[_FilePart] = [self._file(request.base_image)]
+        ordering = [
+            "IMAGE 1 is the current approved render of this view and is the sole authority "
+            "for camera, crop, massing, building count, roof continuity, roads, gates, "
+            "fences, landscape regions and object positions."
+        ]
+        if request.mask is not None:
+            files.append(("mask", ("mask.png", request.mask, "image/png")))
+            ordering.append(
+                "The mask marks the only region you may repaint. Every pixel outside it must "
+                "return byte-for-byte unchanged."
+            )
+        for index, reference in enumerate(request.reference_images, start=2):
+            ordering.append(
+                f"IMAGE {index} is a realism-only reference. Borrow photographic credibility "
+                "only; do not copy geometry, architecture, palette, site or camera."
+            )
+            files.append(self._file(reference))
+        prompt = "\n\n".join(
+            (
+                request.prompt,
+                "INPUT AUTHORITY AND ORDER:\n" + "\n".join(ordering),
+                "Return one photorealistic image only, matching the existing lighting, "
+                "palette and photographic finish of IMAGE 1 at the mask boundary.",
+            )
+        )
+        data = {
+            "model": self._model,
+            "prompt": prompt,
+            "quality": request.quality or self._quality,
+            "size": request.size or self._size,
+            "output_format": "png",
+            "n": str(request.candidates),
+        }
+        return files, data
+
+    def edit(
+        self,
+        request: ViewEditInput,
+        *,
+        on_partial: Callable[[int, bytes], None] | None = None,
+    ) -> tuple[GeneratedImage, ...]:
+        """Redraw only what the mask exposes, leaving the rest of the view alone.
+
+        The base render is IMAGE 1 exactly as in `_generate`, so the wording that
+        makes it the authority for camera and massing still holds. The mask is
+        what narrows the change to the region a person drew.
+
+        `on_partial` receives the provider's progressive previews. Asking for
+        several candidates turns streaming off, because the endpoint interleaves
+        their previews and a half-drawn image is not worth that bookkeeping.
+        """
+
+        if request.candidates < 1 or request.candidates > 4:
+            raise ProviderError("an edit must ask for between one and four candidates")
+        files, data = self._edit_request(request)
+        if on_partial is not None and request.candidates == 1:
+            contents, request_id = self._edit_streamed(files, data, on_partial)
+        else:
+            contents, request_id = self._edit_buffered(files, data)
+        return tuple(
+            GeneratedImage(
+                content=self._normalize_aspect(content, request.aspect_ratio),
+                media_type="image/png",
+                provider_request_id=request_id,
+            )
+            for content in contents
+        )
+
+    def _edit_buffered(
+        self,
+        files: list[_FilePart],
+        data: dict[str, str],
+    ) -> tuple[tuple[bytes, ...], str | None]:
+        try:
+            response = self._client.post(
+                self._endpoint,
+                headers={"authorization": f"Bearer {self._api_key}"},
+                files=files,
+                data=data,
+            )
+            response.raise_for_status()
+            body = response.json()
+            encoded = tuple(str(item["b64_json"]) for item in body["data"])
+            if not encoded:
+                raise ProviderError("OpenAI returned no image for the edit")
+            contents = tuple(base64.b64decode(value, validate=True) for value in encoded)
+        except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as exc:
+            raise _edit_failed(exc) from exc
+        return contents, response.headers.get("x-request-id")
+
+    def _edit_streamed(
+        self,
+        files: list[_FilePart],
+        data: dict[str, str],
+        on_partial: Callable[[int, bytes], None],
+    ) -> tuple[tuple[bytes, ...], str | None]:
+        """Read the provider's server-sent events, forwarding each preview as it lands."""
+
+        streamed = dict(data, stream="true", partial_images=str(_PARTIAL_IMAGES))
+        contents: list[bytes] = []
+        request_id: str | None = None
+        try:
+            with self._client.stream(
+                "POST",
+                self._endpoint,
+                headers={"authorization": f"Bearer {self._api_key}"},
+                files=files,
+                data=streamed,
+            ) as response:
+                response.raise_for_status()
+                request_id = response.headers.get("x-request-id")
+                for line in response.iter_lines():
+                    event = _sse_payload(line)
+                    if event is None:
+                        continue
+                    encoded = event.get("b64_json")
+                    if not isinstance(encoded, str):
+                        continue
+                    decoded = base64.b64decode(encoded, validate=True)
+                    if event.get("type") == "image_edit.partial_image":
+                        index = event.get("partial_image_index")
+                        on_partial(int(index) if isinstance(index, int) else 0, decoded)
+                    elif event.get("type") == "image_edit.completed":
+                        contents.append(decoded)
+        except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as exc:
+            raise _edit_failed(exc) from exc
+        if not contents:
+            raise ProviderError("OpenAI streamed no completed image for the edit")
+        return tuple(contents), request_id
 
     def generate(self, request: ViewConditioningInput) -> GeneratedImage:
         return self._generate(request)

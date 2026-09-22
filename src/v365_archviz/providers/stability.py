@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import mimetypes
+from collections.abc import Callable
 
 import httpx
 
@@ -15,6 +16,7 @@ from v365_archviz.providers.contracts import (
     GeneratedViewSet,
     ImageProviderCapabilities,
     ViewConditioningInput,
+    ViewEditInput,
     ViewSetGenerationInput,
 )
 
@@ -124,6 +126,17 @@ class StabilityStructureRenderer:
             raise ProviderError("Stability returned an invalid image response")
         request_id = response.headers.get("stability-request-id")
         return GeneratedImage(response.content, media_type, request_id)
+
+    def edit(
+        self,
+        request: ViewEditInput,
+        *,
+        on_partial: Callable[[int, bytes], None] | None = None,
+    ) -> tuple[GeneratedImage, ...]:
+        raise ProviderError(
+            "Stability cannot repaint a masked region; set OPENAI_API_KEY so view edits "
+            "run through the OpenAI images/edits endpoint"
+        )
 
     def generate_view_set(self, request: ViewSetGenerationInput) -> GeneratedViewSet:
         views = tuple(

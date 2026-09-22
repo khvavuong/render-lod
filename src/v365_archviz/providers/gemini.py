@@ -6,6 +6,7 @@ import base64
 import io
 import json
 import mimetypes
+from collections.abc import Callable
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,7 @@ from v365_archviz.providers.contracts import (
     GeneratedViewSet,
     ImageProviderCapabilities,
     ViewConditioningInput,
+    ViewEditInput,
     ViewSetGenerationInput,
 )
 
@@ -427,6 +429,17 @@ class GeminiImageRenderer:
 
     def generate(self, request: ViewConditioningInput) -> GeneratedImage:
         return self._generate(request)
+
+    def edit(
+        self,
+        request: ViewEditInput,
+        *,
+        on_partial: Callable[[int, bytes], None] | None = None,
+    ) -> tuple[GeneratedImage, ...]:
+        raise ProviderError(
+            "Gemini cannot repaint a masked region; set OPENAI_API_KEY so view edits "
+            "run through the OpenAI images/edits endpoint"
+        )
 
     def generate_view_set(self, request: ViewSetGenerationInput) -> GeneratedViewSet:
         """Generate every multi-view set from one project appearance authority."""

@@ -90,6 +90,10 @@ OutputKind = Literal["image", "board", "video"]
 # is evaluated at import, which is exactly what FastAPI wants and what B008
 # warns about everywhere else.
 _MASK_FILE = File(None)
+# Who asked, carried as a header so the multipart body reaches this service
+# exactly as the browser built it. The proxy in front knows the user; this
+# service only records the name it is handed.
+_EDIT_USER_HEADER = Header("unknown", alias="X-Edit-User")
 _REFERENCE_FILES = File(None)
 MAX_RVT_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024
 MAX_REFERENCE_UPLOAD_BYTES = 20 * 1024 * 1024
@@ -1314,7 +1318,7 @@ async def start_view_edit(
     view_set_id: str,
     view_id: str,
     prompt: str = Form(...),
-    created_by: str = Form("unknown"),
+    created_by: str = _EDIT_USER_HEADER,
     quality: str | None = Form(None),
     size: str | None = Form(None),
     candidates: int = Form(1),

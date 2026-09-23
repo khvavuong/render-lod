@@ -2514,14 +2514,23 @@ def render_masks(view_dir: Path) -> None:
         "service_yard": (0.20, 0.70, 0.25, 1.0),
         "site_ground": (0.42, 0.30, 0.16, 1.0),
         "site_road": (0.18, 0.18, 0.18, 1.0),
-        "sidewalk": (0.55, 0.52, 0.48, 1.0),
+        # Was (0.55, 0.52, 0.48), 19 from `unknown` — inside the 36 the
+        # coverage reader matches within, so pavement decoded as unknown
+        # and unknown as pavement.
+        "sidewalk": (1.0, 1.0, 0.65, 1.0),
         "parking": (0.35, 0.35, 0.35, 1.0),
         "landscape_zone": (0.05, 0.80, 0.12, 1.0),
         "main_entrance": (0.95, 0.10, 0.75, 1.0),
         "secondary_entrance": (0.75, 0.10, 0.55, 1.0),
-        "site_boundary": (0.48, 0.25, 0.10, 1.0),
+        # Was (0.48, 0.25, 0.10), 25 from `site_ground`.
+        "site_boundary": (1.0, 0.6, 1.0, 1.0),
         "loading_zone": (0.20, 0.62, 0.58, 1.0),
         "roof": (0.12, 0.78, 0.82, 1.0),
+        # A LOD200 model draws the shed as cladding panels and awnings rather
+        # than as one mass. Both are at least 80 apart from every colour above,
+        # well clear of the 36 the coverage reader matches within.
+        "envelope_panel": (0.55, 0.85, 0.95, 1.0),
+        "canopy": (0.30, 0.12, 0.58, 1.0),
         "primary_facade": (0.82, 0.42, 0.16, 1.0),
         "facade_secondary": (0.58, 0.16, 0.72, 1.0),
         "glazing": (0.10, 0.52, 0.78, 1.0),
@@ -2550,7 +2559,16 @@ def render_masks(view_dir: Path) -> None:
     _replace_materials(instance_materials)
     scene.render.filepath = str(view_dir / "instance_id.png")
     bpy.ops.render.render(write_still=True)
-    _replace_materials({obj: semantic_materials[obj["semantic_role"]] for obj in mesh_objects})
+    # A role with no colour of its own is drawn as unknown rather than killing
+    # the render: adding `canopy` to the scene stopped every view set with a
+    # KeyError from inside Blender, hundreds of lines from anything that named
+    # the role.
+    _replace_materials(
+        {
+            obj: semantic_materials.get(obj["semantic_role"], semantic_materials["unknown"])
+            for obj in mesh_objects
+        }
+    )
     scene.render.filepath = str(view_dir / "semantic.png")
     bpy.ops.render.render(write_still=True)
     (view_dir / "semantic_id_manifest.json").write_text(

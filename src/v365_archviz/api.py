@@ -51,6 +51,7 @@ from v365_archviz.application.plan_cameras import PlanStandardCameras
 from v365_archviz.application.plan_design import PlanDesign
 from v365_archviz.application.plan_industrial_context import PlanIndustrialContext
 from v365_archviz.application.restore_view_edit import RestoreViewEdit
+from v365_archviz.application.sync_view_edit import SyncViewEdit
 from v365_archviz.application.view_edit_store import (
     ViewEditRecord,
     ViewEditStore,
@@ -288,7 +289,7 @@ class ViewEditListResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     edits: tuple[ViewEditResponse, ...]
-    #: How much of the bounded repair budget this view set has already spent.
+    #: How many repairs this view set has been through. Shown, not enforced.
     attempt: int
     editable: bool
 
@@ -1420,7 +1421,7 @@ def list_view_edits(view_set_id: str, view_id: str) -> ViewEditListResponse:
         return ViewEditListResponse(
             edits=tuple(_edit_response(record, view_set_id) for record in store.records()),
             attempt=job.attempt,
-            editable=job.state in EDITABLE_STATES and job.attempt < 3,
+            editable=job.state in EDITABLE_STATES,
         )
 
 
@@ -1504,3 +1505,57 @@ def restore_view_edit(
         if settings.local_worker_enabled:
             _generation_dispatcher.submit(applied.job.job_id)
         return _edit_response(applied.record, view_set_id)
+
+
+@app.post(
+    "/v1/view-sets/{view_set_id}/views/{view_id}/edits/{edit_id}/sync",
+    response_model=StartViewEditResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    tags=["review"],
+)
+def sync_view_edit(
+    view_set_id: str,
+    view_id: str,
+    edit_id: str,
+    request: RestoreViewEditRequest,
+) -> StartViewEditResponse:
+    """Carry a committed edit across to the other views, one provider call each.
+
+    Runs on the edit dispatcher and reports through the same event stream, so
+    the browser watches it exactly as it watches an edit.
+    """
+
+    _require_safe_identifier(edit_id, "edit_id")
+    with _edit_errors():
+        job = _job_for_edit(view_set_id, view_id)
+    settings = _settings()
+    sync_id = uuid.uuid4().hex
+    created_by = request.created_by
+
+    def work(publish: Publish) -> None:
+        publish("started", {"edit_id": sync_id, "view_id": view_id, "kind": "sync"})
+        synced = SyncViewEdit().execute(
+            settings=settings,
+            repository=_repository(settings),
+            job=job,
+            view_id=view_id,
+            edit_id=edit_id,
+            created_by=created_by,
+            on_view=lambda view, state: publish("view", {"view_id": view, "state": state}),
+        )
+        publish(
+            "synced",
+            {
+                "source_view_id": synced.source_view_id,
+                "changed": synced.changed,
+                "views": [
+                    {"view_id": view.view_id, "error": view.error} for view in synced.views
+                ],
+            },
+        )
+        if settings.local_worker_enabled:
+            publish("validating", {"view_set_id": view_set_id})
+            _generation_dispatcher.submit(synced.job.job_id)
+
+    _edit_dispatcher.start(sync_id, work)
+    return StartViewEditResponse(edit_id=sync_id, view_id=view_id, view_set_id=view_set_id)

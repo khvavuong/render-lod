@@ -39,8 +39,6 @@ EDITABLE_STATES = frozenset(
 
 MAX_REFERENCES = 16
 MAX_CANDIDATES = 4
-#: `GenerationJob` counts every entry into REPAIRING and refuses the fourth.
-MAX_ATTEMPTS = 3
 
 
 def ensure_editable(job: GenerationJob) -> None:
@@ -50,16 +48,14 @@ def ensure_editable(job: GenerationJob) -> None:
     job to reopen. Checking afterwards left a view rolled back on disk, its log
     saying `committed`, the caller holding a 500 and the gates never re-run —
     measured, not imagined.
+
+    There is no cap on how many times a person may edit. `attempt` still counts
+    the repairs, because the count is worth showing.
     """
 
     if job.state not in EDITABLE_STATES:
         raise InvalidModelError(
             f"a view set in state {job.state.value} has no reviewable image to edit"
-        )
-    if job.attempt >= MAX_ATTEMPTS:
-        raise InvalidModelError(
-            f"this view set has already been repaired {MAX_ATTEMPTS} times; it needs human "
-            "review rather than another edit"
         )
 
 

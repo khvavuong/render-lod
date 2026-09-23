@@ -135,7 +135,7 @@ def test_image_provider_is_part_of_job_identity(tmp_path: Path) -> None:
     assert openai.job.image_provider == "openai-image"
 
 
-def test_repair_attempts_are_bounded() -> None:
+def test_repair_attempts_are_counted_but_not_capped() -> None:
     job = GenerationJob.create(
         job_id="job-1",
         idempotency_key="key-1",
@@ -146,13 +146,13 @@ def test_repair_attempts_are_bounded() -> None:
         profile=GenerationProfile.PREVIEW_FAST,
         initial_state=WorkflowState.VALIDATING,
     )
-    for attempt in range(3):
+    # The count is kept because it is worth showing. It is not a limit: a
+    # person editing by hand asked for every repair, and refusing the fourth
+    # also refuses them the undo of the third.
+    for attempt in range(5):
         job = job.transition(WorkflowState.REPAIRING)
         assert job.attempt == attempt + 1
         job = job.transition(WorkflowState.VALIDATING)
-
-    with pytest.raises(ValueError, match="repair attempt limit"):
-        job.transition(WorkflowState.REPAIRING)
 
 
 def test_local_repository_rejects_unsafe_keys(tmp_path: Path) -> None:

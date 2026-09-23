@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
 from v365_archviz.domain.jobs import GenerationJob
 from v365_archviz.domain.scene import CanonicalScene, SourceModelRef
@@ -73,6 +73,11 @@ class ViewEditInput:
     prompt: str
     mask: bytes | None = None
     reference_images: tuple[Path, ...] = ()
+    #: What the references are for. `realism` borrows photographic credibility
+    #: and nothing else. `change` says the reference is this same project after
+    #: an approved edit, and is the authority for what changed — which is how
+    #: one view's edit is carried across to the other five.
+    reference_intent: Literal["realism", "change"] = "realism"
     aspect_ratio: str = "16:9"
     quality: str | None = None
     size: str | None = None

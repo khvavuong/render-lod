@@ -147,8 +147,10 @@ class GenerationJob(DomainModel):
     ) -> GenerationJob:
         if state not in _ALLOWED_TRANSITIONS[self.state]:
             raise ValueError(f"invalid workflow transition: {self.state.value} -> {state.value}")
-        if state is WorkflowState.REPAIRING and self.attempt >= 3:
-            raise ValueError("repair attempt limit reached; human review is required")
+        # `attempt` counts repairs but no longer caps them. A person editing by
+        # hand asked for every one of those repairs, and a limit that stops them
+        # also stops them undoing what they just did. The count is kept because
+        # it is worth showing; it is not worth refusing on.
         return self.model_copy(
             update={
                 "state": state,

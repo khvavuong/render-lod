@@ -228,10 +228,18 @@ def test_restoring_appends_a_new_entry_rather_than_deleting_one(
     assert restored.record.kind == "restore"
 
 
-def test_the_fourth_repair_is_refused(tmp_path: Path, fake_renderer: _FakeRenderer) -> None:
+def test_there_is_no_limit_on_how_often_a_person_may_edit(
+    tmp_path: Path,
+    fake_renderer: _FakeRenderer,
+) -> None:
+    # The cap existed to bound the automatic repair loop. A person asked for
+    # every one of these, and a limit that stops them also stops them undoing
+    # what they just did.
     _view_dir(tmp_path)
-    with pytest.raises(InvalidModelError, match="3 times"):
-        _apply(tmp_path, _job(attempt=3))
+    _, applied = _apply(tmp_path, _job(attempt=7))
+
+    assert applied.record.state == "committed"
+    assert applied.job.attempt == 8
 
 
 def test_a_view_set_still_generating_has_nothing_to_edit(
@@ -279,7 +287,7 @@ def test_the_log_survives_a_reread(tmp_path: Path, fake_renderer: _FakeRenderer)
     assert manifest["edits"][0]["prompt"] == "làm sạch vệt bẩn trên tường"
     assert ViewEditStore(directory).record("edit-1").created_by == "nguoi-dung"
 
-def test_a_restore_at_the_limit_leaves_the_image_alone(
+def test_a_refused_restore_leaves_the_image_alone(
     tmp_path: Path,
     fake_renderer: _FakeRenderer,
 ) -> None:
@@ -293,12 +301,14 @@ def test_a_restore_at_the_limit_leaves_the_image_alone(
     settings = _settings(tmp_path)
     repository, applied = _apply(tmp_path, _job())
 
-    # Spend the rest of the budget without touching this view again.
-    spent = repository.get("job-edit").model_copy(update={"attempt": 3})
+    # A state with nothing settled to put back.
+    spent = repository.get("job-edit").model_copy(
+        update={"state": WorkflowState.GENERATING_VIEWSET}
+    )
     repository.save(spent)
     current = ViewEditStore(directory).current_image().read_bytes()
 
-    with pytest.raises(InvalidModelError, match="3 times"):
+    with pytest.raises(InvalidModelError, match="no reviewable image"):
         RestoreViewEdit().execute(
             settings=settings,
             repository=repository,
@@ -314,7 +324,7 @@ def test_a_restore_at_the_limit_leaves_the_image_alone(
     assert [record.edit_id for record in store.records()] == ["edit-1"]
 
 
-def test_a_commit_at_the_limit_leaves_the_pending_edit_pending(
+def test_a_refused_commit_leaves_the_pending_edit_pending(
     tmp_path: Path,
     fake_renderer: _FakeRenderer,
 ) -> None:
@@ -323,11 +333,13 @@ def test_a_commit_at_the_limit_leaves_the_pending_edit_pending(
     settings = _settings(tmp_path)
     repository, _ = _apply(tmp_path, _job(), candidates=2)
 
-    spent = repository.get("job-edit").model_copy(update={"attempt": 3})
+    spent = repository.get("job-edit").model_copy(
+        update={"state": WorkflowState.GENERATING_VIEWSET}
+    )
     repository.save(spent)
     current = ViewEditStore(directory).current_image().read_bytes()
 
-    with pytest.raises(InvalidModelError, match="3 times"):
+    with pytest.raises(InvalidModelError, match="no reviewable image"):
         CommitViewEdit().execute(
             settings=settings,
             repository=repository,

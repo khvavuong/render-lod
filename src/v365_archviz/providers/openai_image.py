@@ -234,10 +234,22 @@ class OpenAIImageRenderer:
                 "return byte-for-byte unchanged."
             )
         for index, reference in enumerate(request.reference_images, start=2):
-            ordering.append(
-                f"IMAGE {index} is a realism-only reference. Borrow photographic credibility "
-                "only; do not copy geometry, architecture, palette, site or camera."
-            )
+            if request.reference_intent == "change":
+                # Carrying one view's edit across to another: here the reference
+                # is the authority for WHAT changed, the opposite of the usual
+                # realism reference. Camera and composition stay with IMAGE 1.
+                ordering.append(
+                    f"IMAGE {index} is this same project after an approved edit, seen from a "
+                    "different camera. It is the authority for what changed: the new or "
+                    "altered objects, materials and colours. It is not the authority for "
+                    "camera, crop, composition or which part of the site is in frame."
+                )
+            else:
+                ordering.append(
+                    f"IMAGE {index} is a realism-only reference. Borrow photographic "
+                    "credibility only; do not copy geometry, architecture, palette, site "
+                    "or camera."
+                )
             files.append(self._file(reference))
         prompt = "\n\n".join(
             (

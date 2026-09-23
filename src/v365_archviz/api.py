@@ -26,7 +26,7 @@ from fastapi import (
     status,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from starlette.concurrency import run_in_threadpool
@@ -509,6 +509,26 @@ _VIEW_TITLES = {
     "view-05": "VIEW-05 · ARCHITECTURAL DETAIL",
     "view-06": "VIEW-06 · HUMAN-SCALE / GOLDEN HOUR",
 }
+
+
+def _etag(path: Path) -> str:
+    """A strong validator for a file that is replaced rather than appended to."""
+
+    stat = path.stat()
+    # A cache validator, not a security claim.
+    digest = hashlib.md5(f"{stat.st_mtime_ns}-{stat.st_size}".encode()).hexdigest()
+    return f'"{digest}"'
+
+
+def _matches(if_none_match: str | None, etag: str) -> bool:
+    """Whether the caller already holds this version. `*` means any."""
+
+    if not if_none_match:
+        return False
+    candidates = [candidate.strip() for candidate in if_none_match.split(",")]
+    return "*" in candidates or any(
+        candidate.removeprefix("W/") == etag for candidate in candidates
+    )
 
 
 def _output_files(view_set_id: str) -> dict[str, tuple[Path, OutputKind, str, str | None]]:
@@ -1079,14 +1099,31 @@ def get_view_set_outputs(view_set_id: str) -> ViewSetOutputsResponse:
     response_class=FileResponse,
     tags=["generation"],
 )
-def download_view_set_output(view_set_id: str, asset_id: str) -> FileResponse:
+def download_view_set_output(
+    view_set_id: str, asset_id: str, request: Request
+) -> Response:
     _require_safe_identifier(view_set_id, "view_set_id")
     _require_safe_identifier(asset_id, "asset_id")
     artifact = _output_files(view_set_id).get(asset_id)
     if artifact is None:
         raise HTTPException(status_code=404, detail="output artifact not found")
     path, _, _, _ = artifact
-    return FileResponse(path, filename=path.name)
+    # These bytes change under a stable url: editing a view rewrites its
+    # `refined.*` in place, and the asset id stays the same because it names the
+    # view rather than the file. Without a cache directive a browser is free to
+    # decide for itself how long the old picture stays fresh, and it did — an
+    # edit that had been generated, committed and written to disk went on being
+    # served from the cache, which is indistinguishable from an edit that was
+    # thrown away.
+    #
+    # `no-cache` does not forbid the cache, it requires the question. Starlette
+    # does not answer that question for a `FileResponse`, so without the reply
+    # below every page view would re-download every image in full, which on a
+    # six-view board over a tunnel is the cure being worse than the illness.
+    caching = {"Cache-Control": "no-cache, must-revalidate", "ETag": _etag(path)}
+    if _matches(request.headers.get("if-none-match"), caching["ETag"]):
+        return Response(status_code=304, headers=caching)
+    return FileResponse(path, filename=path.name, headers=caching)
 
 
 @app.post(

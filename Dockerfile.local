@@ -35,7 +35,12 @@ RUN python3 -m venv /opt/venv \
 
 COPY assets ./assets
 COPY scripts ./scripts
+# Only the parts of `resource/` the running service reads: the packs and the
+# logo. The rest of that directory is sample models and research notes, and
+# copying it would put a hundred megabytes into the image.
 COPY resource/logo ./resource/logo
+COPY resource/photography_packs ./resource/photography_packs
+COPY resource/style_packs ./resource/style_packs
 
 RUN mkdir -p /app/.artifacts && chown -R v365:v365 /app/.artifacts
 

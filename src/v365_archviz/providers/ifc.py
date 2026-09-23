@@ -271,7 +271,12 @@ def roof_clusters(roofs: list[SceneElement]) -> list[list[SceneElement]]:
     return clusters
 
 
-def _shed_from_cluster(cluster: list[SceneElement], index: int, ground: float) -> SceneElement:
+def _shed_from_cluster(
+    cluster: list[SceneElement],
+    index: int,
+    ground: float,
+    mesh_ref: str,
+) -> SceneElement:
     """One building, as the mass the design and camera planners expect.
 
     They were written against LOD100, where a shed arrives as a single solid.
@@ -292,19 +297,35 @@ def _shed_from_cluster(cluster: list[SceneElement], index: int, ground: float) -
             type_name=f"mái gộp từ {len(cluster)} tấm",
         ),
         transform=IDENTITY_4X4,
-        mesh_ref=cluster[0].mesh_ref,
+        mesh_ref=mesh_ref,
         bounding_box=BoundingBox(minimum=(x0, y0, ground), maximum=(x1, y1, top)),
         semantic_role=SemanticRole.MAIN_SHED,
         semantic_confidence=0.85,
     )
 
 
-def sheds_from_roofs(elements: list[SceneElement], ground: float) -> list[SceneElement]:
+#: The derived shed draws nothing: the walls and roofs it was inferred from are
+#: already in the scene, and giving it one of their meshes drew that piece twice.
+EMPTY_MESH = "meshes/derived-shed.npz"
+
+
+def sheds_from_roofs(
+    elements: list[SceneElement],
+    ground: float,
+    mesh_directory: Path | None = None,
+) -> list[SceneElement]:
     roofs = [item for item in elements if item.semantic_role is SemanticRole.ROOF]
     if not roofs:
         return []
+    if mesh_directory is not None:
+        mesh_directory.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(
+            mesh_directory / Path(EMPTY_MESH).name,
+            vertices=np.zeros((0, 3), dtype=np.float64),
+            faces=np.zeros((0, 3), dtype=np.int32),
+        )
     return [
-        _shed_from_cluster(cluster, index, ground)
+        _shed_from_cluster(cluster, index, ground, EMPTY_MESH)
         for index, cluster in enumerate(roof_clusters(roofs), start=1)
     ]
 
@@ -465,7 +486,7 @@ class IfcGeometryProvider:
 
         # A LOD200 building arrives as roof planes; the design and camera
         # planners read masses. Resolve the planes into the mass they cover.
-        derived = sheds_from_roofs(elements, ground)
+        derived = sheds_from_roofs(elements, ground, mesh_directory)
         openings = {"IfcDoor", "IfcWindow"}
         for element in elements:
             # A door is held in a facade, it is not one. Boxing the eighteen

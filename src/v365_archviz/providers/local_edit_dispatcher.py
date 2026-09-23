@@ -124,6 +124,11 @@ class LocalEditDispatcher:
             logger.exception("view edit %s failed", edit_id)
             stream.publish("error", {"message": _safe_message(exc)})
         finally:
+            # The last event says the run is over, and a reader that sees it
+            # closes rather than reconnecting. Without it the browser cannot
+            # tell a finished stream from a dropped one, and `EventSource`
+            # reopens for ever — measured at forty reconnects on one run.
+            stream.publish("done", {})
             stream.close()
 
 

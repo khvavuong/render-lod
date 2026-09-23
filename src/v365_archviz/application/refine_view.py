@@ -21,7 +21,7 @@ from v365_archviz.providers.contracts import (
     ViewConditioningInput,
 )
 
-PROMPT_VERSION = "layered-authority-v6-paving-semantics"
+PROMPT_VERSION = "layered-authority-v10-design-context-policy"
 DEFAULT_PROMPT = """Create a photorealistic professional architectural visualization of this
 Vietnamese industrial project. Treat the base render and auxiliary passes as immutable spatial
 geometry: preserve the exact camera, site boundary, authored road and sidewalk centerlines and
@@ -157,9 +157,7 @@ def _reference_role(path: Path) -> str:
     return str(role) if role else "quality_only"
 
 
-def build_context_composition_guide(
-    base_path: Path, overlay_path: Path, target_path: Path
-) -> Path:
+def build_context_composition_guide(base_path: Path, overlay_path: Path, target_path: Path) -> Path:
     """Combine camera-aligned inputs for provider guidance, never for final pixel output."""
 
     with Image.open(base_path) as base_source:
@@ -193,6 +191,8 @@ class RefineView:
         generated_image: GeneratedImage | None = None,
         watermark: BrandWatermark | None = None,
         effective_provider_model: str | None = None,
+        design_freedom: str = "photoreal_only",
+        context_policy: str = "translucent_massing",
     ) -> RefinedViewArtifacts:
         view_directory = render_root / view_id
         inputs = {
@@ -214,7 +214,10 @@ class RefineView:
             )
             # External imagery supplies photographic vocabulary; this registered guide supplies
             # only proxy placement. Gemini's balanced mode consumes at most two references.
-            reference_images = (*reference_images[:1], composition_guide)
+            # RefineViewSet already registers this guide before provider generation. Preserve one
+            # appearance reference plus one spatial guide without duplicating the same guide in
+            # provenance when the generated image is persisted afterwards.
+            reference_images = tuple(dict.fromkeys((*reference_images[:1], composition_guide)))
         missing = [name for name, path in inputs.items() if not path.is_file()]
         missing.extend(f"reference:{path.name}" for path in reference_images if not path.is_file())
         if missing:
@@ -230,8 +233,13 @@ class RefineView:
                 semantic=inputs["semantic"],
                 edges=inputs["edges"],
                 prompt=prompt,
+                design_freedom=design_freedom,
+                context_policy=context_policy,
                 structure_guide=inputs.get("structure_guide"),
                 reference_images=reference_images,
+                # Gemini Pro prices 1K and 2K in the same tier; single-view QA should exercise
+                # the same detail budget as the production view-set path.
+                image_size="2K",
             )
         )
         try:
@@ -275,6 +283,8 @@ class RefineView:
             "effective_provider_model": effective_provider_model,
             "provider_request_id": generated.provider_request_id,
             "prompt_version": PROMPT_VERSION,
+            "effective_design_freedom": design_freedom,
+            "effective_context_policy": context_policy,
             "inputs": {
                 **{name: _sha256(path) for name, path in inputs.items()},
                 **{

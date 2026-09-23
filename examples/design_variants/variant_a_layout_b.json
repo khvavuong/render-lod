@@ -1,0 +1,72 @@
+{
+  "schema_version": "1.0.0",
+  "project_id": "variant-a-layout-b",
+  "design_language": {
+    "style": "corporate industrial campus with a strong brand-led entrance identity",
+    "primary_material": "light warm-grey architectural metal cladding",
+    "secondary_material": "deep graphite structural framing",
+    "office_material": "large-format low-iron architectural glazing",
+    "accent": "confident corporate accent used across entrance bays and vertical fins"
+  },
+  "environment": {
+    "time": "09:30",
+    "weather": "clear bright morning with soft atmospheric depth",
+    "sun_azimuth_deg": 132.0,
+    "sun_elevation_deg": 48.0,
+    "white_balance_k": 5600
+  },
+  "material_palette": {
+    "primary_hex": "#E6E4DE",
+    "secondary_hex": "#1B2430",
+    "glass_hex": "#2F5F7A",
+    "accent_hex": "#C8452D",
+    "paving_hex": "#6F7476"
+  },
+  "facade_articulation": {
+    "plinth_height_m": 1.1,
+    "parapet_band_height_m": 0.65,
+    "office_glazing_ratio": 0.68,
+    "feature_frame_depth_m": 1.2,
+    "entrance_canopy_projection_m": 3.6,
+    "vertical_fin_count": 6,
+    "accent_bay_interval": 6,
+    "clerestory_band_height_m": 1.6
+  },
+  "presentation": {
+    "landscape_character": "layered low-maintenance subtropical planting concentrated at arrival zones",
+    "paving_character": "clean light-grey concrete with darker service lanes and precise edge detailing",
+    "entourage_density": "medium"
+  },
+  "panel_module_m": 1.2,
+  "loading_docks_per_main_facade": 6,
+  "add_office_entrances": true,
+  "roof_type": "symmetric low-slope gable profiled-metal roof fitted inside LOD100 envelope",
+  "roof_slope_deg": 7.0,
+  "roof_eave_overhang_m": 0.75,
+  "roof_ridge_orientation": "short_axis",
+  "roof_grouping_mode": "per_element",
+  "roof_group_gap_tolerance_m": 2.0,
+  "solar_panels": false,
+  "focus_building_ids": [],
+  "context_building_ids": [],
+  "site_design": {
+    "preserve_transport_geometry": true,
+    "preserve_landscape_boundaries": true,
+    "context_render_mode": "translucent_massing",
+    "context_opacity": 0.24,
+    "surrounding_context_mode": "procedural_perimeter",
+    "surrounding_context_count": 9,
+    "surrounding_landscape_buffer": true
+  },
+  "grammar_version": "industrial-grammar-v3-continuous-roof",
+  "asset_library_version": "baseline-assets-v2",
+  "design_preferences": {
+    "style_preset": "corporate_industrial",
+    "decor_level": "expressive",
+    "design_package": "corporate_identity",
+    "envelope_kit": "profiled_metal_vertical",
+    "office_entrance_kit": "framed_glazed_bay",
+    "facade_rhythm_kit": "vertical_bays",
+    "accent_coverage_percent": 8
+  }
+}

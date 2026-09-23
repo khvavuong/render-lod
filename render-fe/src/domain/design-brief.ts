@@ -49,6 +49,7 @@ export const FALLBACK_DESIGN_OPTIONS: DesignOptions = {
     option('logistics', 'Nhấn vận hành logistics', 'Xe tải chỉ ở service/loading.', 'logistics'),
   ],
   delivery_qualities: [
+    option('marketing', 'Marketing / thiết kế', 'Phát triển kiến trúc và duyệt cả bộ ảnh.'),
     option('preview', 'Preview tiết kiệm', 'Duyệt nhanh Design Master.'),
     option('tender', 'Hồ sơ thầu', 'Chất lượng cao sau khi chốt ý đồ.'),
   ],

@@ -1,3 +1,4 @@
+import math
 from pathlib import Path
 
 from v365_archviz.application.plan_cameras import PlanStandardCameras
@@ -23,16 +24,31 @@ def test_plans_six_reproducible_cameras(tmp_path: Path, valid_scene: CanonicalSc
         ViewRole.OFFICE_HERO,
         ViewRole.LOADING_DETAIL,
     }
-    assert first.view_set_id.endswith("standard-v30")
-    close_hero = next(camera for camera in first.cameras if camera.role is ViewRole.HERO)
+    assert first.view_set_id.endswith("standard-v40")
+    hero_aerial = next(camera for camera in first.cameras if camera.role is ViewRole.OVERALL)
+    arrival = next(camera for camera in first.cameras if camera.role is ViewRole.CONTEXT)
+    logistics = next(camera for camera in first.cameras if camera.role is ViewRole.HERO)
+    reverse_aerial = next(camera for camera in first.cameras if camera.role is ViewRole.DETAIL)
+    office_detail = next(camera for camera in first.cameras if camera.role is ViewRole.OFFICE_HERO)
     human_view = next(camera for camera in first.cameras if camera.role is ViewRole.LOADING_DETAIL)
-    reverse_overall = next(
-        camera for camera in first.cameras if camera.role is ViewRole.OFFICE_HERO
-    )
-    assert close_hero.position[2] < 30
+    assert hero_aerial.position[2] >= 25
+    assert hero_aerial.focal_length_mm == 28
+    assert arrival.position[2] == 1.75
+    assert 3.2 <= logistics.position[2] <= 12
+    assert reverse_aerial.position[2] >= 25
+    assert reverse_aerial.focal_length_mm == 28
+    for aerial in (hero_aerial, reverse_aerial):
+        horizontal = math.hypot(
+            aerial.position[0] - aerial.target[0],
+            aerial.position[1] - aerial.target[1],
+        )
+        depression = math.degrees(
+            math.atan2(aerial.position[2] - aerial.target[2], horizontal)
+        )
+        assert 18 <= depression <= 45
+    assert office_detail.position[2] == 1.85
     assert human_view.position[2] == 1.65
-    assert human_view.focal_length_mm == 32
-    assert reverse_overall.position[2] < 80
+    assert human_view.focal_length_mm == 35
     # A single-row model has no internal corridor. The human camera must stay
     # outside the architectural envelope instead of landing inside the shed.
     assert human_view.position[1] <= -34

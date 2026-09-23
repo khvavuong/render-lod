@@ -28,6 +28,9 @@ class DockerConditioningRenderer:
         view_set_path: Path,
         output_directory: Path,
         profile: RenderProfile = RenderProfile.STANDARD_EEVEE,
+        *,
+        facade_mode: str = "authored",
+        camera_scoring: bool = False,
         asset_library_path: Path | None = None,
     ) -> None:
         for path in (scene_path, design_dna_path, view_set_path):
@@ -50,6 +53,8 @@ class DockerConditioningRenderer:
                 "Design DNA asset library version does not match renderer asset library"
             )
         output_directory.mkdir(parents=True, exist_ok=True)
+        if facade_mode not in {"authored", "envelope_program", "envelope_only"}:
+            raise ConfigurationError(f"unknown facade mode: {facade_mode}")
         command = self._command(
             scene_path,
             design_dna_path,
@@ -57,6 +62,8 @@ class DockerConditioningRenderer:
             output_directory,
             profile,
             asset_library,
+            facade_mode=facade_mode,
+            camera_scoring=camera_scoring,
         )
         self._run(command, timeout=30 * 60, label="conditioning renderer")
         try:
@@ -68,12 +75,18 @@ class DockerConditioningRenderer:
             RenderProfile.STANDARD_EEVEE: (1024, 576),
             RenderProfile.PREMIUM_CYCLES: (2048, 1152),
         }[profile]
+        if camera_scoring:
+            resolution = (512, 288)
         manifest = {
             "schema_version": "1.0.0",
             "view_set_id": view_set.view_set_id,
             "renderer_image": self.image,
             "renderer_image_id": self._image_id(),
             "render_profile": profile.value,
+            "facade_mode": facade_mode,
+            "renderer_script_sha256": hashlib.sha256(
+                (self._workspace / "scripts/blender/render_conditioning.py").read_bytes()
+            ).hexdigest(),
             "resolution": list(resolution),
             "scene_sha256": self._sha256(scene_path),
             "design_dna_sha256": self._sha256(design_dna_path),
@@ -106,19 +119,42 @@ class DockerConditioningRenderer:
         output_directory: Path,
         profile: RenderProfile,
         asset_library: Path,
+        *,
+        facade_mode: str = "authored",
+        camera_scoring: bool = False,
     ) -> list[str]:
+        """The docker invocation, kept a method so a backend can replace it.
+
+        `LocalBlenderConditioningRenderer` overrides this and nothing else: the
+        script, its arguments and the manifest are identical, only the way
+        Blender is launched differs. Inlining this would silently give that
+        backend a `docker run` to execute from inside its own container.
+
+        `--entrypoint blender` runs the checked-out script rather than an older
+        copy baked into an existing image tag.
+        """
+
+        uid_reader = getattr(os, "getuid", None)
+        gid_reader = getattr(os, "getgid", None)
         return [
             "docker",
             "run",
             "--rm",
             *(["--gpus", "all"] if profile is RenderProfile.PREMIUM_CYCLES else []),
-            "--user",
-            f"{os.getuid()}:{os.getgid()}",
+            *(["--user", f"{uid_reader()}:{gid_reader()}"] if uid_reader and gid_reader else []),
             "-e",
             "HOME=/tmp",
             "-v",
             f"{self._workspace}:/workspace",
+            "--entrypoint",
+            "blender",
             self.image,
+            "--background",
+            "--python",
+            "/workspace/scripts/blender/render_conditioning.py",
+            "--",
+            "--facade-mode",
+            facade_mode,
             "--scene",
             self._container_path(scene_path),
             "--design-dna",
@@ -128,7 +164,7 @@ class DockerConditioningRenderer:
             "--output",
             self._container_path(output_directory),
             "--profile",
-            profile.value,
+            "camera_scoring" if camera_scoring else profile.value,
             "--asset-library",
             self._container_path(asset_library),
         ]

@@ -66,6 +66,15 @@ def test_vietnamese_lot_boundary_is_not_misclassified_as_a_service_yard() -> Non
     assert confidence == 0.95
 
 
+def test_master_site_ground_is_not_misclassified_as_a_service_yard() -> None:
+    role, confidence = _semantic_role(
+        "IfcSlab", (220.0, 104.178636, 0.05), "Floor:SITEOPT - Nền tổng mặt bằng"
+    )
+
+    assert role is SemanticRole.SITE_GROUND
+    assert confidence == 0.98
+
+
 def test_named_low_auxiliary_mass_keeps_utility_semantics() -> None:
     role, confidence = _semantic_role(
         "IfcBuildingElementProxy", (28.0, 8.0, 2.0), "GM-Phụ trợ L28x8x2"

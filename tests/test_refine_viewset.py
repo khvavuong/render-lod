@@ -6,6 +6,7 @@ from PIL import Image
 
 from v365_archviz.application.refine_viewset import (
     RefineViewSet,
+    _failed_conditioning_view_ids,
     _select_master_view_id,
     select_master_view_ids,
 )
@@ -47,7 +48,7 @@ class FakeViewSetRenderer:
         )
 
 
-def test_selects_a_design_readable_master_instead_of_a_distant_overall(tmp_path: Path) -> None:
+def test_selects_overall_as_complete_viewset_master(tmp_path: Path) -> None:
     cameras = tuple(
         Camera(
             view_id=f"view-{index:02d}",
@@ -84,7 +85,7 @@ def test_selects_a_design_readable_master_instead_of_a_distant_overall(tmp_path:
         encoding="utf-8",
     )
 
-    assert _select_master_view_id(tmp_path, cameras) == "view-02"
+    assert _select_master_view_id(tmp_path, cameras) == "view-01"
     assert select_master_view_ids(tmp_path, cameras) == ("view-01", "view-02")
 
 
@@ -196,3 +197,33 @@ def test_refines_an_ordered_view_set_as_one_unit(tmp_path: Path) -> None:
     first_references = renderer.last_request.views[0].reference_images
     assert first_references[-1].name == "context_composition_guide.png"
     assert first_references[-1].is_file()
+    first_view_manifest = json.loads(
+        (tmp_path / "generated" / "view-01" / "generation_manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert first_view_manifest["input_roles"]["reference_01"] == "context_composition_guide"
+    assert "reference_02" not in first_view_manifest["input_roles"]
+
+
+def test_refuses_views_the_conditioning_gate_rejected(tmp_path: Path) -> None:
+    """The gate runs before generation so rejected cameras never reach a paid provider."""
+
+    (tmp_path / "conditioning_qa.json").write_text(
+        json.dumps(
+            {
+                "views": [
+                    {"view_id": "view-01", "status": "pass"},
+                    {"view_id": "view-02", "status": "fail"},
+                    {"view_id": "view-03", "status": "fail"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert _failed_conditioning_view_ids(tmp_path) == frozenset({"view-02", "view-03"})
+
+
+def test_absent_conditioning_report_is_not_treated_as_approval(tmp_path: Path) -> None:
+    assert _failed_conditioning_view_ids(tmp_path) == frozenset()

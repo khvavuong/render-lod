@@ -11,6 +11,7 @@ import {
   Alert,
   Button,
   Card,
+  Checkbox,
   Collapse,
   Flex,
   Form,
@@ -63,11 +64,14 @@ export function DesignPanel(props: DesignPanelProps) {
     designOptions, onPrepareModel, onPreview, onIntentChange, onModelChange, onSubmit,
   } = props;
   const [form] = Form.useForm<DesignFormValues>();
+  const pilotEnabled = Form.useWatch('referenceLedPilot', form);
+  const deliveryQuality = Form.useWatch('deliveryQuality', form);
+  const pilot = pilotEnabled === true && deliveryQuality === 'marketing';
   const [modelFiles, setModelFiles] = useState<UploadFile[]>([]);
   const [factoryReferenceFiles, setFactoryReferenceFiles] = useState<UploadFile[]>([]);
   const [contextReferenceFiles, setContextReferenceFiles] = useState<UploadFile[]>([]);
+  const [materialReferenceFiles, setMaterialReferenceFiles] = useState<UploadFile[]>([]);
   const [modelError, setModelError] = useState<string>();
-  const [referenceError, setReferenceError] = useState<string>();
   const capabilities = useMemo(
     () => new Map(preparedModel?.capabilities.components.map((item) => [item.key, item]) ?? []),
     [preparedModel],
@@ -101,23 +105,19 @@ export function DesignPanel(props: DesignPanelProps) {
       setModelError('Chọn một file Revit trước khi tiếp tục');
       return;
     }
-    if (
-      preparedModel
-      && designPreview
-      && values.deliveryQuality === 'tender'
-      && (!factoryReferenceFiles.length || !contextReferenceFiles.length)
-    ) {
-      setReferenceError('Chất lượng hồ sơ thầu cần đủ reference facade và bối cảnh khu công nghiệp.');
-      return;
-    }
-    setReferenceError(undefined);
     const completeValues = {
       ...DEFAULT_FORM_VALUES,
       ...values,
       modelFile: file,
       factoryDesignReference: factoryReferenceFiles[0]?.originFileObj,
       contextRealismReference: contextReferenceFiles[0]?.originFileObj,
+      constructionMaterialReference: materialReferenceFiles[0]?.originFileObj,
     };
+    if (completeValues.referenceLedPilot && completeValues.deliveryQuality === 'marketing'
+      && (!completeValues.factoryDesignReference || !completeValues.constructionMaterialReference)) {
+      setModelError('Pilot cần cả ảnh kiến trúc và ảnh construction/vật liệu.');
+      return;
+    }
     if (!preparedModel) {
       handlePrepare();
     } else if (!designPreview) {
@@ -238,7 +238,16 @@ export function DesignPanel(props: DesignPanelProps) {
                 <Form.Item label="Hoạt động vận hành" name="operatingScene"><Select options={constrainedOptions(designOptions.operating_scenes)} /></Form.Item>
                 <Form.Item label="Thời điểm" name="time"><Input type="time" /></Form.Item>
                 <Form.Item label="Mục tiêu hình ảnh" name="realismPreset"><Select options={designOptions.realism_presets} /></Form.Item>
-                <Form.Item label="Reference thiết kế nhà xưởng" tooltip="Chỉ ảnh hưởng độ chi tiết, vật liệu và tỷ lệ vận hành; không sao chép hình khối hoặc màu.">
+                <Alert
+                  type="info"
+                  showIcon
+                  className="reference-policy-alert"
+                  message={pilot ? 'Pilot cần reference kiến trúc và construction/vật liệu' : 'Ảnh tham khảo là tùy chọn'}
+                  description={pilot ? 'AI được phát triển kiến trúc và bố cục từ reference cùng brief. Source cung cấp envelope đo được, không ép camera hoặc facade render cũ. Ảnh tạo ra là proposal chưa xác minh hình học.' : 'Mặc định hệ thống dùng geometry render và Design Master của chính dự án. Chỉ tải reference ngang, rõ nét khi cần bổ sung ngôn ngữ vật liệu hoặc không khí; reference không điều khiển hình khối hay camera.'}
+                />
+                <Form.Item label="Reference thiết kế nhà xưởng · Tùy chọn" tooltip={pilot
+                  ? 'Hướng dẫn phân cấp kiến trúc, canopy, glazing và vật liệu; không sao chép site.'
+                  : 'Chỉ ảnh hưởng độ chi tiết, vật liệu và tỷ lệ vận hành; không sao chép hình khối hoặc màu.'}>
                   <Upload
                     accept="image/png,image/jpeg,image/webp"
                     beforeUpload={() => false}
@@ -246,14 +255,20 @@ export function DesignPanel(props: DesignPanelProps) {
                     maxCount={1}
                     onChange={({ fileList }) => {
                       setFactoryReferenceFiles(fileList.slice(-1));
-                      setReferenceError(undefined);
                       onIntentChange();
                     }}
                   >
-                    <Button icon={<CloudUploadOutlined />}>Chọn ảnh facade thực tế</Button>
+                    <Button icon={<CloudUploadOutlined />}>{pilot ? 'Chọn ảnh kiến trúc / reference board' : 'Chọn ảnh facade thực tế'}</Button>
                   </Upload>
                 </Form.Item>
-                <Form.Item label="Reference bối cảnh khu công nghiệp" tooltip="Chỉ ảnh hưởng đường, cây xanh, atmosphere và cảm giác khu công nghiệp.">
+                <Form.Item label="Reference construction / vật liệu · Cho pilot">
+                  <Upload accept="image/png,image/jpeg,image/webp" beforeUpload={() => false}
+                    fileList={materialReferenceFiles} maxCount={1}
+                    onChange={({ fileList }) => setMaterialReferenceFiles(fileList.slice(-1))}>
+                    <Button icon={<CloudUploadOutlined />}>Chọn ảnh construction / vật liệu</Button>
+                  </Upload>
+                </Form.Item>
+                <Form.Item label="Reference bối cảnh khu công nghiệp · Tùy chọn" tooltip="Chỉ ảnh hưởng đường, cây xanh, atmosphere và cảm giác khu công nghiệp.">
                   <Upload
                     accept="image/png,image/jpeg,image/webp"
                     beforeUpload={() => false}
@@ -261,7 +276,6 @@ export function DesignPanel(props: DesignPanelProps) {
                     maxCount={1}
                     onChange={({ fileList }) => {
                       setContextReferenceFiles(fileList.slice(-1));
-                      setReferenceError(undefined);
                       onIntentChange();
                     }}
                   >
@@ -269,6 +283,11 @@ export function DesignPanel(props: DesignPanelProps) {
                   </Upload>
                 </Form.Item>
                 <Form.Item label="Chất lượng lượt sinh" name="deliveryQuality" className="last-form-item"><Segmented block options={designOptions.delivery_qualities} /></Form.Item>
+                <Form.Item name="referenceLedPilot" valuePropName="checked">
+                  <Checkbox>Marketing pilot · AI phát triển thiết kế và góc chụp theo reference</Checkbox>
+                </Form.Item>
+                <Alert type="info" showIcon message="Pilot tạo 2 proposal, chưa phải bộ ảnh bàn giao"
+                  description="Chỉ áp dụng khi chọn Marketing và bật pilot. Cần reference kiến trúc + construction/vật liệu. Mặc định theo bối cảnh nhà xưởng Việt Nam: xe vận tải, cổng/bảo vệ, cấu tạo và sân đường phù hợp; không ép mẫu cổng, kit hay palette. Yêu cầu riêng ghi trong mô tả sáng tạo. Chọn proposal không tự sinh các góc còn lại hoặc chứng nhận hình học." />
               </>,
             }]} />
 
@@ -289,7 +308,6 @@ export function DesignPanel(props: DesignPanelProps) {
                 : `Các lựa chọn phù hợp với semantic evidence của model. Bối cảnh quy hoạch gồm ${designPreview.industrialContext.proxy_buildings.length} khối xưởng lân cận trong suốt và ${designPreview.industrialContext.roads.length} tuyến đường; đây là dữ liệu conceptual, không phải hiện trạng BIM.`}
             />
           )}
-          {referenceError && <Alert type="error" showIcon message={referenceError} />}
         </Flex>
 
         <Flex vertical gap={8} className="form-actions">
@@ -300,14 +318,16 @@ export function DesignPanel(props: DesignPanelProps) {
             icon={<ArrowRightOutlined />}
             block
           >
-            {!preparedModel ? 'Phân tích model' : !designPreview ? 'Kiểm tra phương án' : 'Tạo Design Master'}
+            {!preparedModel ? 'Phân tích model' : !designPreview ? 'Kiểm tra phương án'
+              : pilot ? 'Tạo 2 proposal reference-led' : 'Tạo Design Master'}
           </Button>
           <Typography.Text type="secondary" className="action-caption">
             {!preparedModel
               ? 'Chưa gọi AI sinh ảnh.'
               : !designPreview
                 ? 'Preview và kiểm tra rule trước khi phát sinh chi phí.'
-                : 'Chỉ sinh một góc master để duyệt trước 5 góc còn lại.'}
+                : pilot ? 'Tối đa 2 lượt generate/job; proposal chưa được xác nhận theo hồ sơ.'
+                  : 'Chỉ sinh một góc master để duyệt trước 5 góc còn lại.'}
           </Typography.Text>
         </Flex>
       </Form>

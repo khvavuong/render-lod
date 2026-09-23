@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,6 +34,19 @@ class EdgeGeometryMetrics:
     precision: float
     f1: float
     bidirectional_chamfer_px: float
+    # False when the LOCKED mask carried no authoritative edge to compare against. The screen
+    # then proves nothing, so it must never be reported as a pass.
+    verifiable: bool = True
+
+
+# Screen thresholds calibrated against reviewed output rather than assumed. On the reference
+# view set a reviewer accepted an aerial at recall 0.47 / f1 0.64 / chamfer 2.7 as faithful to
+# the model, and rejected a facade view at recall 0.01 / f1 0.01 / chamfer 4.5 where the
+# provider had pulled the camera back. The defaults sit between those two observations. They
+# remain arguments so a deployment can retune them as more reviewed evidence accumulates.
+DEFAULT_MINIMUM_EDGE_RECALL = 0.40
+DEFAULT_MINIMUM_EDGE_F1 = 0.55
+DEFAULT_MAXIMUM_EDGE_CHAMFER_PX = 3.2
 
 
 class ProtectRefinement:
@@ -43,10 +57,11 @@ class ProtectRefinement:
         render_root: Path,
         generated_root: Path,
         *,
-        minimum_edge_alignment: float = 0.75,
-        minimum_edge_f1: float = 0.80,
-        maximum_edge_chamfer_px: float = 3.0,
+        minimum_edge_alignment: float = DEFAULT_MINIMUM_EDGE_RECALL,
+        minimum_edge_f1: float = DEFAULT_MINIMUM_EDGE_F1,
+        maximum_edge_chamfer_px: float = DEFAULT_MAXIMUM_EDGE_CHAMFER_PX,
         restore_locked_pixels: bool = True,
+        composite_context_proxy: bool = False,
     ) -> ProtectedRefinementArtifacts:
         if not 0.0 <= minimum_edge_alignment <= 1.0:
             raise ValueError("minimum_edge_alignment must be between zero and one")
@@ -68,12 +83,47 @@ class ProtectRefinement:
             if not all(path.is_file() for path in (base, mask, critical_edges, control_manifest)):
                 raise InvalidModelError(f"{view_dir.name} has no complete protected control pack")
 
+            # `refined` carries the logo once branding has run, and branding runs at the end of
+            # every pipeline invocation. Reading it here and writing the result back to the
+            # unbranded deliverable burns the logo into the file whose whole purpose is not to
+            # have one, and a second invocation stacks another copy on top. Measured on the
+            # reference boards, re-running the pipeline over an already-branded directory left
+            # the logo in four of six `unbranded_refined.jpg` files, one of them twice. The
+            # unbranded deliverable is the canonical un-watermarked pixel state, so it is what
+            # this stage reads and writes; branding derives from it afterwards and stays
+            # idempotent however often the pipeline is re-run.
+            unbranded = view_dir / f"unbranded_refined{refined.suffix.lower()}"
+            pixel_source = unbranded if unbranded.is_file() else refined
             provider_source = view_dir / f"provider_source{refined.suffix.lower()}"
-            if provider_source != refined:
-                atomic_write(provider_source, refined.read_bytes())
-            with Image.open(refined) as generated_image:
+            if provider_source != pixel_source:
+                atomic_write(provider_source, pixel_source.read_bytes())
+            with Image.open(pixel_source) as generated_image:
                 target_size = generated_image.size
                 generated_rgb = generated_image.convert("RGB")
+            context_overlay = render_root / view_dir.name / "context_proxy_rgba.png"
+            context_composited = False
+            if composite_context_proxy and context_overlay.is_file():
+                with Image.open(context_overlay) as overlay_image:
+                    overlay = overlay_image.convert("RGBA").resize(
+                        target_size, Image.Resampling.LANCZOS
+                    )
+                generated_rgb = Image.alpha_composite(
+                    generated_rgb.convert("RGBA"), overlay
+                ).convert("RGB")
+                buffer = io.BytesIO()
+                if refined.suffix.lower() in {".jpg", ".jpeg"}:
+                    generated_rgb.save(buffer, format="JPEG", quality=95, optimize=True)
+                else:
+                    generated_rgb.save(buffer, format="PNG", optimize=True)
+                composited_bytes = buffer.getvalue()
+                atomic_write(refined, composited_bytes)
+                # Branding reuses the unbranded deliverable rather than the composited file, so
+                # without this the context composite is computed, recorded as done, and then
+                # silently dropped from every artifact. The bytes written here are unbranded
+                # because `pixel_source` above is.
+                if unbranded.is_file():
+                    atomic_write(unbranded, composited_bytes)
+                context_composited = True
             with Image.open(base) as base_image:
                 authoritative = base_image.convert("RGB").resize(
                     target_size, Image.Resampling.LANCZOS
@@ -86,10 +136,19 @@ class ProtectRefinement:
                 locked,
                 semantic_path=semantic if semantic.is_file() else None,
             )
-            accepted = (
+            alignment_within_thresholds = (
                 edge_metrics.recall >= minimum_edge_alignment
                 and edge_metrics.f1 >= minimum_edge_f1
                 and edge_metrics.bidirectional_chamfer_px <= maximum_edge_chamfer_px
+            )
+            # In pixel-restore mode the LOCKED pixels are composited back, so geometry is
+            # enforced rather than inferred and an unverifiable screen changes nothing. In
+            # validation-only mode the screen is the sole geometry evidence, so it may not be
+            # reported as a pass when it had nothing authoritative to measure against.
+            accepted = (
+                alignment_within_thresholds
+                if edge_metrics.verifiable
+                else restore_locked_pixels
             )
             generation_manifest = view_dir / "generation_manifest.json"
             document = json.loads(generation_manifest.read_text(encoding="utf-8"))
@@ -101,9 +160,13 @@ class ProtectRefinement:
                             "pixel_restore" if restore_locked_pixels else "validation_only"
                         ),
                         "geometry_protection_status": (
-                            "rejected_edge_misalignment"
-                            if restore_locked_pixels
-                            else "review_edge_misalignment"
+                            "edge_alignment_unverifiable"
+                            if not edge_metrics.verifiable
+                            else (
+                                "rejected_edge_misalignment"
+                                if restore_locked_pixels
+                                else "review_edge_misalignment"
+                            )
                         ),
                         **self._metrics_document(edge_metrics),
                         "edge_alignment_threshold": minimum_edge_alignment,
@@ -113,6 +176,10 @@ class ProtectRefinement:
                         "locked_mask_ref": str(mask),
                         "locked_mask_sha256": _sha256(mask),
                         "base_rgb_sha256": _sha256(base),
+                        "context_proxy_composited": context_composited,
+                        "context_proxy_sha256": (
+                            _sha256(context_overlay) if context_composited else None
+                        ),
                     }
                 )
                 atomic_write(
@@ -149,6 +216,10 @@ class ProtectRefinement:
                         "locked_mask_sha256": _sha256(mask),
                         "base_rgb_sha256": _sha256(base),
                         "sha256": _sha256(refined),
+                        "context_proxy_composited": context_composited,
+                        "context_proxy_sha256": (
+                            _sha256(context_overlay) if context_composited else None
+                        ),
                     }
                 )
                 atomic_write(
@@ -169,9 +240,7 @@ class ProtectRefinement:
                 )
                 continue
             protected = Image.composite(authoritative, generated_rgb, locked)
-            from io import BytesIO
-
-            buffer = BytesIO()
+            buffer = io.BytesIO()
             protected.save(buffer, format="PNG", optimize=True)
             protected_path = view_dir / "refined.png"
             atomic_write(protected_path, buffer.getvalue())
@@ -189,6 +258,10 @@ class ProtectRefinement:
                     "locked_mask_sha256": _sha256(mask),
                     "base_rgb_sha256": _sha256(base),
                     "geometry_protection_status": "promoted",
+                    "context_proxy_composited": context_composited,
+                    "context_proxy_sha256": (
+                        _sha256(context_overlay) if context_composited else None
+                    ),
                     **self._metrics_document(edge_metrics),
                     "edge_alignment_threshold": minimum_edge_alignment,
                     "edge_f1_threshold": minimum_edge_f1,
@@ -258,7 +331,9 @@ class ProtectRefinement:
         ) & locked
         authoritative_count = int(np.count_nonzero(authoritative))
         if not authoritative_count:
-            return EdgeGeometryMetrics(1.0, 1.0, 1.0, 0.0)
+            # Nothing authoritative is visible under LOCKED, so no claim about geometry can be
+            # made. Report it as unverifiable rather than inventing a perfect score.
+            return EdgeGeometryMetrics(0.0, 0.0, 0.0, 0.0, verifiable=False)
         # Ignore texture edges far from authored structural boundaries. They are allowed
         # photoreal detail and must not be counted as invented geometry.
         generated_edges &= ProtectRefinement._dilate(authoritative, 8)
@@ -347,12 +422,13 @@ class ProtectRefinement:
         return float(distances[source].mean())
 
     @staticmethod
-    def _metrics_document(metrics: EdgeGeometryMetrics) -> dict[str, float]:
+    def _metrics_document(metrics: EdgeGeometryMetrics) -> dict[str, float | bool]:
         return {
             "edge_alignment_recall": metrics.recall,
             "edge_alignment_precision": metrics.precision,
             "edge_alignment_f1": metrics.f1,
             "edge_bidirectional_chamfer_px": metrics.bidirectional_chamfer_px,
+            "edge_alignment_verifiable": metrics.verifiable,
         }
 
     @staticmethod

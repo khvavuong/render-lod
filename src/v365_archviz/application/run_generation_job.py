@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import logging
@@ -25,6 +26,7 @@ from v365_archviz.application.validate_viewset import ValidateGeneratedViewSet
 from v365_archviz.artifacts import atomic_write
 from v365_archviz.config import Settings
 from v365_archviz.domain.jobs import GenerationJob
+from v365_archviz.domain.style_pack import StylePack
 from v365_archviz.domain.workflow import Camera, ViewRole, ViewSet, WorkflowState
 from v365_archviz.errors import V365Error
 from v365_archviz.providers.image_factory import create_image_renderer
@@ -32,6 +34,29 @@ from v365_archviz.providers.local_blender_conditioning import create_conditionin
 from v365_archviz.providers.local_jobs import LocalJobRepository
 
 logger = logging.getLogger(__name__)
+
+
+def _authored_style(job: GenerationJob) -> StylePack | None:
+    """Load the style pack this job was submitted with, if any.
+
+    Both prompt call sites used to omit it, so every job ran on the built-in strict base prompt
+    whatever the caller chose, and `composite_context_proxy` was hardcoded true at all three
+    protection call sites. The effect was that DesignFreedom and ContextPolicy — the whole
+    authored-customisation layer — were reachable only from the CLI and never from the API.
+    """
+
+    if getattr(job, "style_pack_snapshot", None):
+        return StylePack.model_validate_json(job.style_pack_snapshot)
+    if not job.style_pack_ref:
+        return None
+    return StylePack.load(Path(job.style_pack_ref))
+
+
+def _composites_proxies(job: GenerationJob) -> bool:
+    """Whether authored context volumes are composited for this job's context policy."""
+
+    pack = _authored_style(job)
+    return True if pack is None else pack.context_policy.composites_proxies
 
 
 class RunGenerationJob:
@@ -64,6 +89,15 @@ class RunGenerationJob:
         paths = _JobPaths.from_job(settings.artifact_dir, job)
         view_set = ViewSet.model_validate_json(paths.view_set.read_text(encoding="utf-8"))
 
+        if job.generation_policy == "reference-led-proposal-v1":
+            if (paths.generated_root / "selected_shots.json").is_file():
+                from v365_archviz.application.reference_delivery import generate_registered
+
+                return generate_registered(repository, job, settings, paths)
+            from v365_archviz.application.run_reference_proposal import run_proposal
+
+            return run_proposal(repository, job, settings, paths, view_set)
+
         if job.state in {WorkflowState.RENDERING_PASSES, WorkflowState.GENERATING_VIEWSET}:
             self._ensure_conditioning(paths, view_set, job, settings)
 
@@ -77,7 +111,8 @@ class RunGenerationJob:
             )
 
         if job.state is WorkflowState.GENERATING_VIEWSET:
-            _, prompt = build_refinement_prompt(paths.design_dna)
+            style_pack = _authored_style(job)
+            _, prompt = build_refinement_prompt(paths.design_dna, style_pack=style_pack)
             references = tuple(Path(value) for value in job.reference_image_refs)
             reference_pairs = tuple(zip(references, job.reference_roles, strict=True))
             review_path = paths.generated_root / "design_master_review.json"
@@ -90,20 +125,23 @@ class RunGenerationJob:
                 )
                 stored_master_ids = review.get("master_view_ids", {})
                 stored_master_refs = review.get("master_image_refs", {})
+                approved_master_types = review.get("approved_master_types", [])
+                stored_site_ref = (
+                    stored_master_refs.get("site") if isinstance(stored_master_refs, dict) else None
+                )
                 preserve_site = (
-                    "site" in review.get("approved_master_types", [])
+                    isinstance(approved_master_types, list)
+                    and "site" in approved_master_types
                     and isinstance(stored_master_ids, dict)
                     and stored_master_ids.get("site") == site_master_id
-                    and isinstance(stored_master_refs, dict)
-                    and isinstance(stored_master_refs.get("site"), str)
-                    and Path(stored_master_refs["site"]).is_file()
+                    and isinstance(stored_site_ref, str)
+                    and Path(stored_site_ref).is_file()
                 )
-                generated_manifest_path = (
-                    paths.generated_root / "viewset_generation_manifest.json"
-                )
+                generated_manifest_path = paths.generated_root / "viewset_generation_manifest.json"
                 with create_image_renderer(settings, job.image_provider) as renderer:
                     if preserve_site:
-                        site_master_path = Path(stored_master_refs["site"])
+                        assert isinstance(stored_site_ref, str)
+                        site_master_path = Path(stored_site_ref)
                     else:
                         site_references = tuple(
                             path
@@ -120,7 +158,10 @@ class RunGenerationJob:
                             prompt,
                             profile=job.profile,
                             view_ids=(site_master_id,),
-                            reference_images=site_references or references,
+                            reference_images=site_references,
+                            style_pack=style_pack,
+                            attach_context_guide=style_pack is None
+                            or style_pack.context_policy.sends_composition_guide,
                         )
                         generated_manifest_path = generated.manifest_path
                         site_master_path = self._refined_image(
@@ -145,7 +186,10 @@ class RunGenerationJob:
                             prompt,
                             profile=job.profile,
                             view_ids=(facade_master_id,),
-                            reference_images=facade_references or references,
+                            reference_images=facade_references,
+                            style_pack=style_pack,
+                            attach_context_guide=style_pack is None
+                            or style_pack.context_policy.sends_composition_guide,
                             approved_master_path=site_master_path,
                             approved_master_view_id=site_master_id,
                         )
@@ -154,6 +198,7 @@ class RunGenerationJob:
                     paths.render_root,
                     paths.generated_root,
                     restore_locked_pixels=False,
+                    composite_context_proxy=_composites_proxies(job),
                 )
                 master_paths = {
                     "site": self._refined_image(paths.generated_root / site_master_id),
@@ -256,7 +301,7 @@ class RunGenerationJob:
                                         if role
                                         == (
                                             "context_realism_reference"
-                                            if camera.role in {ViewRole.OVERALL, ViewRole.CONTEXT}
+                                            if camera.role in {ViewRole.OVERALL, ViewRole.DETAIL}
                                             else "factory_design_reference"
                                         )
                                     ),
@@ -281,7 +326,7 @@ class RunGenerationJob:
                             camera.view_id
                             for camera in view_set.cameras
                             if camera.view_id in remaining_view_ids
-                            and camera.role in {ViewRole.OVERALL, ViewRole.CONTEXT}
+                            and camera.role in {ViewRole.OVERALL, ViewRole.DETAIL}
                         ),
                     ),
                     (
@@ -290,7 +335,7 @@ class RunGenerationJob:
                             camera.view_id
                             for camera in view_set.cameras
                             if camera.view_id in remaining_view_ids
-                            and camera.role not in {ViewRole.OVERALL, ViewRole.CONTEXT}
+                            and camera.role not in {ViewRole.OVERALL, ViewRole.DETAIL}
                         ),
                     ),
                 )
@@ -309,7 +354,10 @@ class RunGenerationJob:
                             prompt,
                             profile=job.profile,
                             view_ids=group_view_ids,
-                            reference_images=references,
+                            style_pack=style_pack,
+                            attach_context_guide=style_pack is None
+                            or style_pack.context_policy.sends_composition_guide,
+                            reference_images=(),
                             reference_images_by_view=reference_images_by_view,
                             approved_master_path=master_refs.get(master_type, master_path),
                             approved_master_view_id=typed_master_ids.get(
@@ -323,6 +371,7 @@ class RunGenerationJob:
                     paths.render_root,
                     paths.generated_root,
                     restore_locked_pixels=False,
+                    composite_context_proxy=_composites_proxies(job),
                 )
                 job = self._advance(
                     repository,
@@ -331,6 +380,113 @@ class RunGenerationJob:
                     generated.manifest_path,
                     protected.manifest_path,
                 )
+
+        if job.state is WorkflowState.REPAIRING:
+            repair_path = paths.generated_root / "manual_repair_request.json"
+            try:
+                repair = json.loads(repair_path.read_text(encoding="utf-8"))
+                repair_view_id = str(repair["view_id"])
+                instruction = str(repair.get("instruction", "")).strip()
+            except (OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
+                raise V365Error("targeted repair request is missing or invalid") from exc
+            cameras = {camera.view_id: camera for camera in view_set.cameras}
+            if repair_view_id not in cameras:
+                raise V365Error("targeted repair view does not belong to this view set")
+            review = self._read_master_review(paths.generated_root / "design_master_review.json")
+            if not review.get("approved", False):
+                raise V365Error("Design Masters must be approved before targeted repair")
+            master_ids = review.get("master_view_ids", {})
+            repair_master_refs = review.get("master_image_refs", {})
+            if not isinstance(master_ids, dict) or not isinstance(repair_master_refs, dict):
+                raise V365Error("approved Design Master lineage is incomplete")
+            camera = cameras[repair_view_id]
+            preferred_type = (
+                "site" if camera.role in {ViewRole.OVERALL, ViewRole.DETAIL} else "facade"
+            )
+            alternate_type = "facade" if preferred_type == "site" else "site"
+            anchor_type = (
+                alternate_type
+                if str(master_ids.get(preferred_type)) == repair_view_id
+                else preferred_type
+            )
+            anchor_path = Path(str(repair_master_refs.get(anchor_type, "")))
+            if not anchor_path.is_file():
+                raise V365Error("targeted repair has no valid approved identity anchor")
+            quality = review.get("quality_standard", {})
+            quality_path = (
+                Path(str(quality.get("image_ref")))
+                if isinstance(quality, dict) and quality.get("image_ref")
+                else None
+            )
+            style_pack = _authored_style(job)
+            _, prompt = build_refinement_prompt(paths.design_dna, style_pack=style_pack)
+            correction = (
+                instruction
+                or "Correct only the QA issue visible in this view while improving "
+                "photographic realism."
+            )
+            prompt = (
+                f"{prompt}\n\nQA-DRIVEN TARGETED REPAIR\n{correction}\n"
+                "Preserve every camera, mass, roof, opening, gate, fence, road, landscape boundary "
+                "and all pixels outside the affected visual issue. Do not redesign the project."
+            )
+            source_image = self._refined_image(paths.generated_root / repair_view_id)
+            source_hash = hashlib.sha256(source_image.read_bytes()).hexdigest()
+            external_role = (
+                "context_realism_reference"
+                if preferred_type == "site"
+                else "factory_design_reference"
+            )
+            external_references = tuple(
+                Path(path)
+                for path, role in zip(job.reference_image_refs, job.reference_roles, strict=True)
+                if role == external_role
+            )
+            with create_image_renderer(settings, job.image_provider) as renderer:
+                generated = RefineViewSet().execute(
+                    renderer,
+                    paths.render_root,
+                    paths.generated_root,
+                    paths.view_set,
+                    paths.design_dna,
+                    job.model_revision,
+                    prompt,
+                    profile=job.profile,
+                    view_ids=(repair_view_id,),
+                    style_pack=style_pack,
+                    attach_context_guide=style_pack is None
+                    or style_pack.context_policy.sends_composition_guide,
+                    reference_images=external_references,
+                    approved_master_path=anchor_path,
+                    approved_master_view_id=str(master_ids.get(anchor_type, repair_view_id)),
+                    quality_standard_path=quality_path,
+                )
+            protected = ProtectRefinement().execute(
+                paths.render_root,
+                paths.generated_root,
+                restore_locked_pixels=False,
+                composite_context_proxy=_composites_proxies(job),
+            )
+            repaired_image = self._refined_image(paths.generated_root / repair_view_id)
+            self._append_repair_lineage(
+                paths.generated_root / "repair_history.json",
+                view_set_id=job.view_set_id,
+                view_id=repair_view_id,
+                attempt=job.attempt,
+                instruction=correction,
+                parent_sha256=source_hash,
+                output_sha256=hashlib.sha256(repaired_image.read_bytes()).hexdigest(),
+                generation_manifest=generated.manifest_path,
+            )
+            job = self._advance(
+                repository,
+                job,
+                WorkflowState.VALIDATING,
+                generated.manifest_path,
+                protected.manifest_path,
+                repair_path,
+                paths.generated_root / "repair_history.json",
+            )
 
         if job.state is WorkflowState.VALIDATING:
             validation = ValidateGeneratedViewSet().execute(
@@ -433,6 +589,42 @@ class RunGenerationJob:
         board.save(buffer, format="JPEG", quality=95, optimize=True)
         atomic_write(target, buffer.getvalue())
 
+    @staticmethod
+    def _append_repair_lineage(
+        path: Path,
+        *,
+        view_set_id: str,
+        view_id: str,
+        attempt: int,
+        instruction: str,
+        parent_sha256: str,
+        output_sha256: str,
+        generation_manifest: Path,
+    ) -> None:
+        try:
+            history = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            history = {"schema_version": "1.0.0", "repairs": []}
+        repairs = history.get("repairs", [])
+        if not isinstance(repairs, list):
+            repairs = []
+        repairs.append(
+            {
+                "view_set_id": view_set_id,
+                "view_id": view_id,
+                "attempt": attempt,
+                "instruction": instruction,
+                "parent_sha256": parent_sha256,
+                "output_sha256": output_sha256,
+                "generation_manifest": str(generation_manifest),
+            }
+        )
+        history["repairs"] = repairs
+        atomic_write(
+            path,
+            json.dumps(history, ensure_ascii=False, indent=2).encode("utf-8") + b"\n",
+        )
+
     def _ensure_conditioning(
         self,
         paths: _JobPaths,
@@ -440,13 +632,36 @@ class RunGenerationJob:
         job: GenerationJob,
         settings: Settings,
     ) -> None:
-        if not self._conditioning_complete(paths.render_root, view_set):
+        pack = _authored_style(job)
+        facade_mode = (
+            "envelope_program"
+            if pack and pack.design_freedom.value == "design_within_envelope"
+            else "authored"
+        )
+        try:
+            render_manifest = json.loads(
+                (paths.render_root / "render_manifest.json").read_text(encoding="utf-8")
+            )
+        except (OSError, ValueError):
+            render_manifest = {}
+        mode_matches = render_manifest.get("facade_mode", "authored") == facade_mode
+        script_path = Path(__file__).resolve().parents[3] / "scripts/blender/render_conditioning.py"
+        script_matches = (
+            render_manifest.get("renderer_script_sha256")
+            == hashlib.sha256(script_path.read_bytes()).hexdigest()
+        )
+        if (
+            not script_matches
+            or not mode_matches
+            or not self._conditioning_complete(paths.render_root, view_set)
+        ):
             create_conditioning_renderer(settings.conditioning_backend).execute(
                 paths.scene,
                 paths.design_dna,
                 paths.view_set,
                 paths.render_root,
                 job.render_profile,
+                facade_mode=facade_mode,
             )
             for camera in view_set.cameras:
                 BuildControlPack().execute(paths.render_root / camera.view_id)
@@ -556,10 +771,19 @@ class _JobPaths:
     def from_job(cls, artifact_dir: Path, job: GenerationJob) -> _JobPaths:
         scene_root = artifact_dir / "scenes" / job.model_revision
         design_root = scene_root / "designs" / job.design_revision
+        view_set_path = design_root / "view_set.json"
+        if job.view_set_snapshot:
+            view_set_path = artifact_dir / "job_inputs" / job.job_id / "view_set.json"
+            atomic_write(view_set_path, job.view_set_snapshot.encode("utf-8") + b"\n")
+        render_root = artifact_dir / "renders" / job.model_revision / job.design_revision
+        generated_root = artifact_dir / "generated" / job.model_revision / job.design_revision
+        if job.output_namespace:
+            render_root = render_root / job.output_namespace
+            generated_root = generated_root / job.output_namespace
         return cls(
             scene=scene_root / "canonical_scene.json",
             design_dna=design_root / "design_dna.json",
-            view_set=design_root / "view_set.json",
-            render_root=artifact_dir / "renders" / job.model_revision / job.design_revision,
-            generated_root=artifact_dir / "generated" / job.model_revision / job.design_revision,
+            view_set=view_set_path,
+            render_root=render_root,
+            generated_root=generated_root,
         )

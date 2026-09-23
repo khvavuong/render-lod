@@ -58,6 +58,9 @@ class LocalBlenderConditioningRenderer(DockerConditioningRenderer):
         output_directory: Path,
         profile: RenderProfile,
         asset_library: Path,
+        *,
+        facade_mode: str = "authored",
+        camera_scoring: bool = False,
     ) -> list[str]:
         return [
             self._executable,
@@ -69,6 +72,8 @@ class LocalBlenderConditioningRenderer(DockerConditioningRenderer):
             "--python",
             str(self._workspace / RENDER_SCRIPT),
             "--",
+            "--facade-mode",
+            facade_mode,
             "--scene",
             str(scene_path.resolve()),
             "--design-dna",
@@ -78,11 +83,10 @@ class LocalBlenderConditioningRenderer(DockerConditioningRenderer):
             "--output",
             str(output_directory.resolve()),
             "--profile",
-            profile.value,
+            "camera_scoring" if camera_scoring else profile.value,
             "--asset-library",
             str(asset_library.resolve()),
         ]
-
 
 def create_conditioning_renderer(
     backend: str,

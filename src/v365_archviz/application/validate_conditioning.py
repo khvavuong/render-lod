@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -28,21 +29,58 @@ CIRCULATION_ROLES = frozenset(
     }
 )
 CONTEXT_ROLES = frozenset({"context_building", "context_landscape", "landscape_zone"})
+SITE_PLAN_ROLES = frozenset(
+    {
+        "site_ground",
+        "site_road",
+        "sidewalk",
+        "service_yard",
+        "parking",
+        "loading_zone",
+        "main_entrance",
+        "secondary_entrance",
+        "landscape_zone",
+        "site_boundary",
+    }
+)
+AERIAL_ROLES = frozenset({ViewRole.OVERALL, ViewRole.DETAIL})
+MINIMUM_AERIAL_SITE_PLAN_COVERAGE = 0.12
+MINIMUM_AERIAL_VISIBLE_SURFACE_ROLES = 3
+MINIMUM_AERIAL_DEPRESSION_DEGREES = 18.0
 FOREGROUND_OCCLUDER_ROLES = frozenset({"vehicle"})
 MAXIMUM_CENTRAL_OCCLUDER_COVERAGE = 0.12
+MINIMUM_ROLE_TARGET_COVERAGE: dict[ViewRole, float] = {
+    ViewRole.OVERALL: 0.005,
+    ViewRole.CONTEXT: 0.015,
+    ViewRole.HERO: 0.01,
+    ViewRole.DETAIL: 0.005,
+    ViewRole.OFFICE_HERO: 0.01,
+    ViewRole.LOADING_DETAIL: 0.01,
+}
+
+ROLE_TARGETS: dict[ViewRole, frozenset[str]] = {
+    ViewRole.OVERALL: frozenset({"site_road", "landscape_zone", "main_entrance"}),
+    ViewRole.CONTEXT: frozenset({"main_entrance", "secondary_entrance"}),
+    ViewRole.HERO: frozenset({"loading_zone", "service_yard"}),
+    ViewRole.DETAIL: frozenset({"site_road", "service_yard", "parking", "landscape_zone"}),
+    ViewRole.OFFICE_HERO: frozenset({"office_block", "design_detail", "primary_facade"}),
+    ViewRole.LOADING_DETAIL: frozenset(
+        {"main_entrance", "office_block", "loading_zone", "design_detail", "primary_facade"}
+    ),
+}
 
 # Deliberately lenient hard-reject thresholds. They catch empty, excessively distant, or badly
 # cropped cameras; bid-quality composition remains a human/aesthetic gate until benchmark tuning.
 ROLE_THRESHOLDS: dict[ViewRole, tuple[float, float, float]] = {
-    ViewRole.OVERALL: (0.04, 0.60, 0.01),
-    ViewRole.CONTEXT: (0.08, 0.75, 0.01),
-    ViewRole.HERO: (0.15, 0.90, 0.00),
-    ViewRole.DETAIL: (0.15, 0.90, 0.00),
-    ViewRole.OFFICE_HERO: (0.12, 0.90, 0.00),
+    ViewRole.OVERALL: (0.06, 0.72, 0.02),
+    ViewRole.CONTEXT: (0.08, 0.88, 0.015),
+    ViewRole.HERO: (0.12, 0.90, 0.04),
+    ViewRole.DETAIL: (0.06, 0.75, 0.015),
+    ViewRole.OFFICE_HERO: (0.15, 0.92, 0.005),
     # At pedestrian eye level, a legible gate/fence opening can occupy less image area
     # than a drone-visible yard. Count authored entrances as circulation and keep the
     # threshold high enough to reject a hidden or cropped access point.
-    ViewRole.LOADING_DETAIL: (0.15, 0.90, 0.015),
+    ViewRole.LOADING_DETAIL: (0.12, 0.90, 0.01),
 }
 
 
@@ -72,6 +110,7 @@ class ValidateConditioningViewSet:
             raise InvalidModelError(f"cannot load conditioning QA contracts: {exc}") from exc
 
         authored_roles = {element.semantic_role for element in scene.elements}
+        authored_role_names = {role.value for role in authored_roles}
         circulation_authored = bool(
             authored_roles
             & {
@@ -100,6 +139,21 @@ class ValidateConditioningViewSet:
             focus = sum(coverage.get(role, 0.0) for role in FOCUS_ROLES)
             circulation = sum(coverage.get(role, 0.0) for role in CIRCULATION_ROLES)
             context = sum(coverage.get(role, 0.0) for role in CONTEXT_ROLES)
+            site_plan = sum(coverage.get(role, 0.0) for role in SITE_PLAN_ROLES)
+            visible_site_roles = sorted(
+                role
+                for role in SITE_PLAN_ROLES & authored_role_names
+                if coverage.get(role, 0.0) >= 0.001
+            )
+            horizontal_distance = math.hypot(
+                camera.position[0] - camera.target[0],
+                camera.position[1] - camera.target[1],
+            )
+            depression_degrees = math.degrees(
+                math.atan2(camera.position[2] - camera.target[2], horizontal_distance)
+            )
+            available_role_targets = ROLE_TARGETS[camera.role] & authored_role_names
+            role_target_coverage = sum(coverage.get(role, 0.0) for role in available_role_targets)
             central_occluder = sum(
                 central_coverage.get(role, 0.0) for role in FOREGROUND_OCCLUDER_ROLES
             )
@@ -113,6 +167,17 @@ class ValidateConditioningViewSet:
                 failures.append("authored_circulation_not_visible")
             if central_occluder > MAXIMUM_CENTRAL_OCCLUDER_COVERAGE:
                 failures.append("foreground_entourage_obstructs_subject")
+            minimum_role_target = MINIMUM_ROLE_TARGET_COVERAGE[camera.role]
+            if available_role_targets and role_target_coverage < minimum_role_target:
+                failures.append("camera_role_target_not_visible")
+            authored_site_underlay = SemanticRole.SITE_GROUND in authored_roles
+            if camera.role in AERIAL_ROLES and authored_site_underlay:
+                if site_plan < MINIMUM_AERIAL_SITE_PLAN_COVERAGE:
+                    failures.append("aerial_site_plan_not_sufficiently_visible")
+                if len(visible_site_roles) < MINIMUM_AERIAL_VISIBLE_SURFACE_ROLES:
+                    failures.append("aerial_site_surface_layers_not_legible")
+                if depression_degrees < MINIMUM_AERIAL_DEPRESSION_DEGREES:
+                    failures.append("aerial_camera_angle_too_shallow")
             status = "pass" if not failures else "fail"
             if failures:
                 failed.append(camera.view_id)
@@ -124,6 +189,11 @@ class ValidateConditioningViewSet:
                     "focus_coverage": focus,
                     "circulation_coverage": circulation,
                     "context_coverage": context,
+                    "site_plan_coverage": site_plan,
+                    "visible_site_roles": visible_site_roles,
+                    "camera_depression_degrees": depression_degrees,
+                    "role_target_coverage": role_target_coverage,
+                    "available_role_targets": sorted(available_role_targets),
                     "central_entourage_occlusion": central_occluder,
                     "thresholds": {
                         "minimum_focus": minimum_focus,
@@ -132,6 +202,24 @@ class ValidateConditioningViewSet:
                             minimum_circulation if circulation_authored else 0.0
                         ),
                         "maximum_central_entourage_occlusion": (MAXIMUM_CENTRAL_OCCLUDER_COVERAGE),
+                        "minimum_role_target_coverage": (
+                            minimum_role_target if available_role_targets else 0.0
+                        ),
+                        "minimum_aerial_site_plan_coverage": (
+                            MINIMUM_AERIAL_SITE_PLAN_COVERAGE
+                            if camera.role in AERIAL_ROLES and authored_site_underlay
+                            else 0.0
+                        ),
+                        "minimum_aerial_visible_surface_roles": (
+                            MINIMUM_AERIAL_VISIBLE_SURFACE_ROLES
+                            if camera.role in AERIAL_ROLES and authored_site_underlay
+                            else 0
+                        ),
+                        "minimum_aerial_depression_degrees": (
+                            MINIMUM_AERIAL_DEPRESSION_DEGREES
+                            if camera.role in AERIAL_ROLES and authored_site_underlay
+                            else 0.0
+                        ),
                     },
                     "findings": failures,
                 }

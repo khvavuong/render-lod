@@ -51,6 +51,7 @@ class Settings:
     video_budget_usd: float = 1.20
     veo_poll_interval_seconds: float = 10.0
     veo_timeout_seconds: float = 900.0
+    auto_appearance_baseline: bool = False
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -60,7 +61,7 @@ class Settings:
             artifact_dir=Path(os.getenv("V365_ARTIFACT_DIR", ".artifacts")),
             log_level=os.getenv("V365_LOG_LEVEL", "INFO"),
             gemini_api_key=os.getenv("GEMINI_API_KEY"),
-            gemini_image_model=os.getenv("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image"),
+            gemini_image_model=os.getenv("GEMINI_IMAGE_MODEL", "gemini-3-pro-image"),
             gemini_store_interactions=_as_bool(
                 os.getenv("GEMINI_STORE_INTERACTIONS"), default=False
             ),
@@ -92,6 +93,9 @@ class Settings:
             openai_image_size=os.getenv("OPENAI_IMAGE_SIZE", "1536x1024"),
             local_worker_enabled=_as_bool(os.getenv("V365_ENABLE_LOCAL_WORKER"), default=True),
             conditioning_backend=os.getenv("V365_CONDITIONING_BACKEND", "docker"),
+            auto_appearance_baseline=_as_bool(
+                os.getenv("V365_AUTO_APPEARANCE_BASELINE"), default=False
+            ),
         )
 
     @property

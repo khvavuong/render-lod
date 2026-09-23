@@ -1,0 +1,48 @@
+{
+  "schema_version": "1.0.0",
+  "pack_id": "marketing_hero",
+  "label": "Marketing hero",
+  "description": "Tighter, more selective framing with presentation weight on the project.",
+  "roles": {
+    "overall": {
+      "elevation_deg": 30.0,
+      "focal_length_mm": 28.0,
+      "target_width_coverage": 0.88,
+      "roofline_margin": 0.92
+    },
+    "detail": {
+      "elevation_deg": 26.0,
+      "focal_length_mm": 28.0,
+      "target_width_coverage": 0.84,
+      "roofline_margin": 0.92
+    },
+    "context": {
+      "elevation_deg": 0.0,
+      "eye_height_m": 1.7,
+      "focal_length_mm": 35.0,
+      "target_width_coverage": 0.8,
+      "max_foreground_share": 0.24
+    },
+    "hero": {
+      "elevation_deg": 10.0,
+      "eye_height_m": 3.0,
+      "focal_length_mm": 35.0,
+      "target_width_coverage": 0.72,
+      "max_foreground_share": 0.28
+    },
+    "office_hero": {
+      "elevation_deg": 0.0,
+      "eye_height_m": 1.8,
+      "focal_length_mm": 42.0,
+      "target_width_coverage": 0.64,
+      "max_foreground_share": 0.26
+    },
+    "loading_detail": {
+      "elevation_deg": 0.0,
+      "eye_height_m": 1.65,
+      "focal_length_mm": 35.0,
+      "target_width_coverage": 0.68,
+      "max_foreground_share": 0.26
+    }
+  }
+}

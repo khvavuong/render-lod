@@ -196,23 +196,43 @@ class PlanIndustrialContext:
         long_size = max(45.0, min(110.0, scale * 0.34))
         short_size = max(22.0, min(50.0, min(span_x, span_y) * 0.30))
         height = max(7.0, min(13.0, (z1 - z0) * 0.82))
-        far = road_offset + road_width / 2 + short_size / 2 + setback * 0.42
+        # Hold the neighbours well clear of the project. A near ring crowds the frame and makes
+        # the project read as one shed among equals; pushing the first row out by a fraction of
+        # the site's own scale keeps it the dominant mass and leaves its yards legible.
+        prominence_standoff = max(40.0, scale * 0.14)
+        far = (
+            road_offset
+            + road_width / 2
+            + short_size / 2
+            + setback * 0.42
+            + prominence_standoff
+        )
+        # Neighbouring lots occupy two rows on every active side. A single ring at one standoff
+        # reads from the air as isolated blocks floating in empty land; a second row behind the
+        # first, staggered along the frontage, reads as the project holding one lot inside an
+        # estate that continues past it.
+        row_depth = short_size + road_width + setback * 0.5
+        rows = (far, far + row_depth)
+        spacing = max(long_size * 1.25, scale * 0.30)
         slots: list[tuple[float, float, float, float]] = []
         per_side = max(
             1,
-            (site.surrounding_context_count + len(active_sides) - 1) // len(active_sides),
+            (site.surrounding_context_count + len(active_sides) * len(rows) - 1)
+            // (len(active_sides) * len(rows)),
         )
-        for side in active_sides:
-            for slot_index in range(per_side):
-                offset = (slot_index - (per_side - 1) / 2) * max(long_size * 1.25, scale * 0.30)
-                if side == "north":
-                    slots.append((cx + offset, y1 + far, long_size, short_size))
-                elif side == "south":
-                    slots.append((cx + offset, y0 - far, long_size, short_size))
-                elif side == "east":
-                    slots.append((x1 + far, cy + offset, short_size, long_size))
-                else:
-                    slots.append((x0 - far, cy + offset, short_size, long_size))
+        for row_index, distance in enumerate(rows):
+            stagger = spacing * 0.5 * row_index
+            for side in active_sides:
+                for slot_index in range(per_side):
+                    offset = (slot_index - (per_side - 1) / 2) * spacing + stagger
+                    if side == "north":
+                        slots.append((cx + offset, y1 + distance, long_size, short_size))
+                    elif side == "south":
+                        slots.append((cx + offset, y0 - distance, long_size, short_size))
+                    elif side == "east":
+                        slots.append((x1 + distance, cy + offset, short_size, long_size))
+                    else:
+                        slots.append((x0 - distance, cy + offset, short_size, long_size))
         proxies = tuple(
             ContextProxyBuilding(
                 proxy_id=f"context-proxy-{index:02d}",

@@ -25,15 +25,29 @@ from v365_archviz.application.plan_video import PlanVideo
 from v365_archviz.application.protect_refinement import ProtectRefinement
 from v365_archviz.application.refine_view import DEFAULT_PROMPT, RefineView
 from v365_archviz.application.refine_viewset import RefineViewSet
-from v365_archviz.application.refinement_prompt import build_refinement_prompt
+from v365_archviz.application.refinement_prompt import (
+    build_refinement_prompt,
+    compose_style_prompt,
+)
+from v365_archviz.application.repair_conditioning import (
+    REPAIR_BEARING_OFFSETS_DEG,
+    failed_view_ids,
+    merge_repaired_views,
+)
 from v365_archviz.application.validate_conditioning import ValidateConditioningViewSet
 from v365_archviz.application.validate_viewset import ValidateGeneratedViewSet
+from v365_archviz.application.verify_massing import VerifyMassing
+from v365_archviz.application.verify_views import VerifyViews
+from v365_archviz.artifacts import atomic_write
 from v365_archviz.config import Settings
 from v365_archviz.domain.design import DesignDNA
+from v365_archviz.domain.style_pack import StylePack
 from v365_archviz.domain.workflow import GenerationProfile, ViewSet
-from v365_archviz.errors import V365Error
+from v365_archviz.errors import InvalidModelError, V365Error
 from v365_archviz.providers.aps import ApsModelDerivativeClient
 from v365_archviz.providers.gemini import GeminiConditioningMode
+from v365_archviz.providers.gemini_massing_judge import GeminiMassingJudge
+from v365_archviz.providers.gemini_view_judge import GeminiViewJudge
 from v365_archviz.providers.image_factory import (
     SUPPORTED_IMAGE_PROVIDERS,
     ImageRenderer,
@@ -89,6 +103,29 @@ def _parser() -> argparse.ArgumentParser:
     )
     controls.add_argument("render_root", type=Path)
     controls.add_argument("--view-set", type=Path, required=True)
+    verify_views = subcommands.add_parser(
+        "verify-views",
+        help="audit generated views for viewpoint, placement and opening drift",
+    )
+    verify_views.add_argument("render_root", type=Path)
+    verify_views.add_argument("generated_root", type=Path)
+    verify_views.add_argument("--view-set", type=Path, required=True)
+    verify_views.add_argument("--output", type=Path)
+    repair_cameras = subcommands.add_parser(
+        "repair-cameras",
+        help="re-derive the cameras a conditioning gate rejected, leaving accepted views alone",
+    )
+    repair_cameras.add_argument("scene", type=Path)
+    repair_cameras.add_argument("render_root", type=Path)
+    repair_cameras.add_argument("--view-set", type=Path, required=True)
+    repair_cameras.add_argument("--design-dna", type=Path)
+    repair_cameras.add_argument("--photography-pack", type=Path)
+    repair_cameras.add_argument(
+        "--attempt",
+        type=int,
+        default=0,
+        help="index into the fixed repair sequence; raise it when the previous attempt failed",
+    )
     refine = subcommands.add_parser(
         "refine-view", help="refine one complete conditioning pack with Gemini"
     )
@@ -96,6 +133,7 @@ def _parser() -> argparse.ArgumentParser:
     refine.add_argument("view_id")
     refine.add_argument("--output", type=Path, help="generated artifact root")
     refine.add_argument("--prompt-file", type=Path)
+    refine.add_argument("--style-pack", type=Path)
     refine.add_argument("--reference-image", type=Path, action="append", default=[])
     refine.add_argument("--design-dna", type=Path)
     refine.add_argument(
@@ -123,6 +161,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     refine_set.add_argument("--output", type=Path, required=True)
     refine_set.add_argument("--prompt-file", type=Path)
+    refine_set.add_argument("--style-pack", type=Path)
     refine_set.add_argument("--reference-image", type=Path, action="append", default=[])
     refine_set.add_argument(
         "--approved-master",
@@ -144,6 +183,11 @@ def _parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         help="generate only this benchmark view; repeat as needed",
+    )
+    refine_set.add_argument(
+        "--allow-failed-conditioning",
+        action="store_true",
+        help="generate views the conditioning gate rejected; spends budget on unusable cameras",
     )
     refine_set.add_argument(
         "--profile",
@@ -177,6 +221,15 @@ def _parser() -> argparse.ArgumentParser:
     conditioning_qa.add_argument("render_root", type=Path)
     conditioning_qa.add_argument("--view-set", type=Path, required=True)
     conditioning_qa.add_argument("--output", type=Path)
+    massing = subcommands.add_parser(
+        "verify-massing",
+        help="audit generated views for invented or missing building volumes",
+    )
+    massing.add_argument("render_root", type=Path)
+    massing.add_argument("generated_root", type=Path)
+    massing.add_argument("--view-set", type=Path, required=True)
+    massing.add_argument("--design-dna", type=Path, required=True)
+    massing.add_argument("--output", type=Path)
     consistency = subcommands.add_parser(
         "evaluate-consistency", help="create a fail-closed cross-view QA report"
     )
@@ -236,12 +289,25 @@ def _inspect(source: Path, output: Path | None) -> int:
 
 
 def _refinement_prompt(
-    design_dna_path: Path | None, prompt_file: Path | None
+    design_dna_path: Path | None,
+    prompt_file: Path | None,
+    style_pack_path: Path | None = None,
 ) -> tuple[DesignDNA | None, str]:
+    pack = StylePack.load(style_pack_path) if style_pack_path else None
     if design_dna_path is None:
-        prompt = prompt_file.read_text(encoding="utf-8") if prompt_file else DEFAULT_PROMPT
-        return None, prompt
-    return build_refinement_prompt(design_dna_path, prompt_file)
+        if prompt_file:
+            return None, prompt_file.read_text(encoding="utf-8")
+        return None, compose_style_prompt(pack) if pack else DEFAULT_PROMPT
+    return build_refinement_prompt(design_dna_path, prompt_file, pack)
+
+
+def _context_handling(style_pack_path: Path | None) -> tuple[bool, bool]:
+    """Return (composite proxies, send composition guide) for the authored context policy."""
+
+    if style_pack_path is None:
+        return True, True
+    policy = StylePack.load(style_pack_path).context_policy
+    return policy.composites_proxies, policy.sends_composition_guide
 
 
 def _image_renderer(
@@ -330,9 +396,67 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
             )
             return 0
+        if args.command == "verify-views":
+            audit = VerifyViews().execute(
+                GeminiViewJudge(Settings.from_env()),
+                args.render_root,
+                args.generated_root,
+                args.view_set,
+                args.output,
+            )
+            print(
+                json.dumps(
+                    {
+                        "passed": audit.passed,
+                        "view_count": audit.view_count,
+                        "failed_view_ids": list(audit.failed_view_ids),
+                        "review_view_ids": list(audit.review_view_ids),
+                        "unverified_view_ids": list(audit.unverified_view_ids),
+                        "report": str(audit.report_path),
+                    },
+                    indent=2,
+                )
+            )
+            return 0 if audit.passed else 3
+        if args.command == "repair-cameras":
+            current = ViewSet.model_validate_json(args.view_set.read_text(encoding="utf-8"))
+            rejected = failed_view_ids(args.render_root / "conditioning_qa.json")
+            if not rejected:
+                print(json.dumps({"repaired_view_ids": [], "note": "gate accepted every view"}))
+                return 0
+            if args.attempt >= len(REPAIR_BEARING_OFFSETS_DEG):
+                raise InvalidModelError(
+                    "repair sequence exhausted; the site cannot frame these roles and the "
+                    "view set needs review rather than another orbit"
+                )
+            offset = REPAIR_BEARING_OFFSETS_DEG[args.attempt]
+            replanned = PlanStandardCameras().execute(
+                args.scene,
+                design_dna_path=args.design_dna,
+                photography_pack_path=args.photography_pack,
+                bearing_offset_deg=offset,
+            )
+            merged = merge_repaired_views(current, replanned, rejected)
+            payload = merged.model_dump_json(indent=2) + chr(10)
+            atomic_write(args.view_set, payload.encode("utf-8"))
+            print(
+                json.dumps(
+                    {
+                        "attempt": args.attempt,
+                        "bearing_offset_deg": offset,
+                        "repaired_view_ids": list(rejected),
+                        "view_set": str(args.view_set),
+                        "next": "re-render only these views, then validate-conditioning again",
+                    },
+                    indent=2,
+                )
+            )
+            return 0
         if args.command == "refine-view":
             settings = Settings.from_env()
-            loaded_design, prompt = _refinement_prompt(args.design_dna, args.prompt_file)
+            loaded_design, prompt = _refinement_prompt(
+                args.design_dna, args.prompt_file, args.style_pack
+            )
             with _image_renderer(settings, args.provider, args.conditioning_mode) as renderer:
                 output_directory = args.output
                 if output_directory is None:
@@ -377,7 +501,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         if args.command == "refine-viewset":
             settings = Settings.from_env()
-            _, prompt = _refinement_prompt(args.design_dna, args.prompt_file)
+            _, prompt = _refinement_prompt(
+                args.design_dna, args.prompt_file, args.style_pack
+            )
+            # The two context mechanisms are mutually exclusive. Compositing deterministic
+            # proxies over an image whose prompt asked the provider to build real surroundings
+            # pastes placeholder slabs back over finished context, so the composite follows the
+            # authored policy instead of being switched on unconditionally.
+            composite_context_proxy, attach_context_guide = _context_handling(args.style_pack)
             with _image_renderer(settings, args.provider, args.conditioning_mode) as renderer:
                 viewset_artifacts = RefineViewSet().execute(
                     renderer,
@@ -392,11 +523,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                     view_ids=tuple(args.view),
                     approved_master_path=args.approved_master,
                     approved_master_view_id=args.approved_master_view_id,
+                    allow_failed_conditioning=args.allow_failed_conditioning,
+                    attach_context_guide=attach_context_guide,
+                    style_pack=(
+                        StylePack.load(args.style_pack) if args.style_pack else None
+                    ),
                 )
             protected = ProtectRefinement().execute(
                 args.render_root,
                 args.output,
                 restore_locked_pixels=False,
+                composite_context_proxy=composite_context_proxy,
             )
             BrandDeliverables().execute(BrandWatermark(), args.output)
             print(
@@ -467,6 +604,31 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
             )
             return 0 if result.passed else 3
+        if args.command == "verify-massing":
+            settings = Settings.from_env()
+            with GeminiMassingJudge(settings) as judge:
+                massing_result = VerifyMassing().execute(
+                    judge,
+                    args.render_root,
+                    args.generated_root,
+                    args.view_set,
+                    args.design_dna,
+                    args.output,
+                )
+            print(
+                json.dumps(
+                    {
+                        "passed": massing_result.passed,
+                        "view_count": massing_result.view_count,
+                        "failed_view_ids": massing_result.failed_view_ids,
+                        "unverified_view_ids": massing_result.unverified_view_ids,
+                        "report": str(massing_result.report_path),
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return 0 if massing_result.passed else 3
         if args.command == "evaluate-consistency":
             view_set = ViewSet.model_validate_json(args.view_set.read_text(encoding="utf-8"))
             consistency_result = EvaluateConsistency().execute(

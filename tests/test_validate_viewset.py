@@ -100,7 +100,19 @@ def test_validates_complete_generated_view_set(tmp_path: Path) -> None:
     report = json.loads(result.report_path.read_text(encoding="utf-8"))
     finder = report["views"][0]
     assert finder["technical_status"] == "pass"
+    assert finder["deliverable_status"] == "human_review"
+    assert report["critical_view_failures"] == []
     assert report["human_review_required"] is True
+
+
+def test_critical_semantic_findings_cannot_be_downgraded_to_visual_warnings() -> None:
+    critical = {
+        "authored_landscape_not_retained",
+        "context_proxy_not_visible_in_context_view",
+        "material_role_mismatch",
+    }
+
+    assert critical.isdisjoint(ValidateGeneratedViewSet._VISUAL_REVIEW_CODES)
 
 
 def test_detects_stale_conditioning_input(tmp_path: Path) -> None:

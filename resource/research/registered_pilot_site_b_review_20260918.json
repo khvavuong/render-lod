@@ -1,0 +1,17 @@
+{
+  "view_set_id": "a7d22ba36b4fa342-R01-30c3e1709447-standard-v40-cabc3257",
+  "reviewer": "agent_visual_advisory",
+  "human_approved": false,
+  "delivery_recommended": false,
+  "geometry_certified": false,
+  "summary": "Chất ảnh có triển vọng nhưng cả sáu ảnh đều thiên về aerial; context/office/logistics không giữ eye-level preview. Office, mái, canopy và cổng thay đổi giữa ảnh. Chưa đề xuất bàn giao hoặc bật mặc định.",
+  "method": "Direct visual inspection of six provider images and source previews; no numerical 3D measurement or VLM scoring.",
+  "views": [
+    {"view_id": "view-01", "purpose": "context", "camera": "fail_eye_level", "notes": "Cab-over vehicles and motorcycles fit regional direction; aerial instead of ground preview; untrusted invented signage."},
+    {"view_id": "view-02", "purpose": "detail", "camera": "unknown_registered_pose", "notes": "Readable aerial; roof segmentation and office differ from other views; source topology not verified."},
+    {"view_id": "view-03", "purpose": "hero", "camera": "input_and_output_role_issue", "notes": "Warm materials; elevated viewpoint. Input v2 eye-height bug contributed; human-scale story not met."},
+    {"view_id": "view-04", "purpose": "loading_detail", "camera": "fail_eye_level", "notes": "Aerial office/logistics overview, not eye-level operations shot."},
+    {"view_id": "view-05", "purpose": "office_hero", "camera": "fail_eye_level", "notes": "Good-looking office; aerial and drifting office/roof proportions; entrance-only source evidence insufficient."},
+    {"view_id": "view-06", "purpose": "overall", "camera": "unknown_registered_pose", "notes": "Two sheds legible; office/canopy/gate differ from other outputs; quantitative source fidelity unknown."}
+  ]
+}

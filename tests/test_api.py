@@ -1,7 +1,9 @@
+import io
 import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from v365_archviz.api import app
 from v365_archviz.domain.jobs import GenerationJob
@@ -115,6 +117,25 @@ def test_capabilities_never_expose_credentials(monkeypatch) -> None:  # type: ig
     assert response.json()["openai_image_generation"] is True
     assert "secret-value" not in response.text
     assert "openai-secret-value" not in response.text
+
+
+def test_reference_upload_is_compatibility_gated(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("V365_ARTIFACT_DIR", str(tmp_path))
+    content = io.BytesIO()
+    Image.new("RGB", (360, 640), "gray").save(content, format="PNG")
+
+    response = client.post(
+        "/v1/references",
+        content=content.getvalue(),
+        headers={
+            "Content-Type": "image/png",
+            "X-Filename": "portrait.png",
+            "X-Reference-Role": "context_realism_reference",
+        },
+    )
+
+    assert response.status_code == 422
+    assert "reference_resolution_too_low" in response.json()["detail"]["findings"]
 
 
 def test_model_capabilities_and_preview_are_semantic_evidence_gated(
@@ -331,6 +352,64 @@ def test_design_master_approval_resumes_remaining_view_generation(
     assert response.json()["state"] == "generating_viewset"
     assert json.loads(review.read_text())["approved"] is True
     assert dispatched == ["job-master-review"]
+
+
+def test_targeted_repair_persists_view_and_instruction(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("V365_ARTIFACT_DIR", str(tmp_path))
+    monkeypatch.setenv("V365_ENABLE_LOCAL_WORKER", "1")
+    dispatched: list[str] = []
+    monkeypatch.setattr(
+        "v365_archviz.api._generation_dispatcher.submit",
+        lambda job_id: dispatched.append(job_id) or True,
+    )
+    repository = LocalJobRepository(tmp_path / "metadata")
+    job = GenerationJob.create(
+        job_id="job-targeted-repair",
+        idempotency_key="key-targeted-repair",
+        project_id="project",
+        model_revision="model",
+        design_revision="design",
+        view_set_id="view-set-targeted-repair",
+        profile=GenerationProfile.TENDER_FINAL,
+        initial_state=WorkflowState.VALIDATING,
+    ).transition(WorkflowState.HUMAN_REVIEW)
+    repository.create_or_get(job)
+    view_set_path = tmp_path / "scenes" / "model" / "designs" / "design" / "view_set.json"
+    view_set_path.parent.mkdir(parents=True)
+    view_set_path.write_text(
+        ViewSet(
+            view_set_id=job.view_set_id,
+            design_revision=job.design_revision,
+            cameras=(
+                Camera(
+                    view_id="view-03",
+                    role=ViewRole.HERO,
+                    position=(0, 0, 10),
+                    target=(0, 1, 2),
+                    focal_length_mm=35,
+                    sensor_width_mm=36,
+                    aspect_ratio="16:9",
+                ),
+            ),
+        ).model_dump_json(),
+        encoding="utf-8",
+    )
+
+    response = client.post(
+        "/v1/views/view-03/repair",
+        json={
+            "view_set_id": job.view_set_id,
+            "instruction": "Make only the asphalt less uniform.",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["state"] == "repairing"
+    request_path = tmp_path / "generated" / "model" / "design" / "manual_repair_request.json"
+    request = json.loads(request_path.read_text(encoding="utf-8"))
+    assert request["view_id"] == "view-03"
+    assert request["instruction"] == "Make only the asphalt less uniform."
+    assert dispatched == [job.job_id]
 
 
 def test_failed_job_retries_from_persisted_generated_checkpoint(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]

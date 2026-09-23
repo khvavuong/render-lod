@@ -23,6 +23,7 @@ import {
   Typography,
 } from "antd";
 import { useMemo, useState } from "react";
+import { ReferenceDeliveryPanel } from './ReferenceDeliveryPanel';
 
 import type {
   OutputArtifact,
@@ -88,6 +89,15 @@ const CERTIFICATION_META: Record<
   approved_final: { label: "Đã duyệt bàn giao", color: "success" },
 };
 
+const VIEW_LABELS = [
+  "HERO AERIAL",
+  "MAIN ENTRANCE",
+  "LOGISTICS / OPERATION",
+  "REVERSE AERIAL",
+  "ARCHITECTURAL DETAIL",
+  "HUMAN-SCALE / GOLDEN HOUR",
+];
+
 function ArtifactCard({ artifact }: { artifact: OutputArtifact }) {
   if (artifact.kind === "video") {
     return (
@@ -147,7 +157,9 @@ function EmptyCanvas() {
       <div className="view-placeholder-grid" aria-hidden="true">
         {Array.from({ length: 6 }, (_, index) => (
           <div className="view-placeholder" key={index}>
-            <span>VIEW-{String(index + 1).padStart(2, "0")}</span>
+            <span>
+              VIEW-{String(index + 1).padStart(2, "0")} · {VIEW_LABELS[index]}
+            </span>
           </div>
         ))}
       </div>
@@ -181,7 +193,10 @@ export function GenerationWorkspace({
 }: GenerationWorkspaceProps) {
   const [filter, setFilter] = useState<"all" | "image" | "video">("all");
   const state = job?.state ?? "idle";
-  const meta = STATE_META[state];
+  const proposalPilot = job?.generationPolicy === "reference-led-proposal-v1";
+  const meta = proposalPilot && state === 'design_master_review'
+    ? { label: job?.proposalSelected ? 'Đã lưu proposal · Chưa duyệt bàn giao' : 'Chờ review proposal', percent: 48 }
+    : STATE_META[state];
   const outputs = useMemo(
     () =>
       job?.outputs.filter(
@@ -259,7 +274,7 @@ export function GenerationWorkspace({
         </section>
       )}
 
-      {job?.state === "human_review" && (
+      {job?.state === "human_review" && !proposalPilot && (
         <Alert
           className="review-action-panel"
           type="warning"
@@ -279,7 +294,15 @@ export function GenerationWorkspace({
         />
       )}
 
-      {job?.state === "design_master_review" && (
+      {job && proposalPilot && <ReferenceDeliveryPanel job={job} onRefresh={onRefresh} />}
+      {job?.state === "design_master_review" && proposalPilot && (
+        <Alert type="warning" showIcon className="review-action-panel"
+          message={job.proposalSelected ? "Đã lưu lựa chọn proposal" : "Proposal reference-led · Chưa xác nhận theo hồ sơ"}
+          description="Hai ảnh là các đề xuất độc lập, chưa chứng minh cùng thiết kế hoặc đúng camera/source. Lưu lựa chọn không duyệt bàn giao và không tự generate thêm. Registered shots và master family cần bước kiểm chứng tiếp theo."
+          action={<Button type="primary" loading={submittingReview} disabled={job.proposalSelected}
+            onClick={onApprove}>Lưu lựa chọn proposal</Button>} />
+      )}
+      {job?.state === "design_master_review" && !proposalPilot && (
         <Alert
           className="review-action-panel"
           type="info"
@@ -375,7 +398,12 @@ export function GenerationWorkspace({
         <section className="activity-panel">
           <Typography.Title level={5}>Tiến trình pipeline</Typography.Title>
           <Timeline
-            items={[
+            items={proposalPilot ? [
+              { color: "green", children: "Đã lưu snapshot brief, source và reference" },
+              { color: outputs.length === 2 ? "green" : "gray", children: "Tạo hai proposal độc lập, AI tự chọn bố cục" },
+              { color: job.proposalSelected ? "green" : "gray", children: "Chọn hướng thiết kế để phát triển tiếp" },
+              { color: "gray", children: "Chưa đăng ký thiết kế, kiểm tra source và tạo bộ ảnh đồng nhất" },
+            ] : [
               {
                 color: "green",
                 children: "Design Brief đã được khóa revision",

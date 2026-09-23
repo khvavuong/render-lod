@@ -28,6 +28,7 @@ class SemanticRole(str, Enum):
     OFFICE_BLOCK = "office_block"
     LOADING_ZONE = "loading_zone"
     SERVICE_YARD = "service_yard"
+    SITE_GROUND = "site_ground"
     SITE_ROAD = "site_road"
     SIDEWALK = "sidewalk"
     UTILITY_BLOCK = "utility_block"

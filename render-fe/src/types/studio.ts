@@ -20,7 +20,7 @@ export type LogisticsKit = 'preserve_model' | 'authored_dock_finish';
 export type BoundaryKit = 'preserve_model' | 'mesh_low_plinth' | 'vertical_bar';
 export type GateKit = 'preserve_model' | 'industrial_sliding' | 'hinged';
 export type OperatingScene = 'clean' | 'active' | 'logistics';
-export type DeliveryQuality = 'preview' | 'tender';
+export type DeliveryQuality = 'preview' | 'marketing' | 'tender';
 export type LandscapePreset =
   | 'preserve_model'
   | 'tropical_restrained'
@@ -60,6 +60,8 @@ export interface DesignFormValues {
   creativePrompt?: string;
   factoryDesignReference?: File;
   contextRealismReference?: File;
+  constructionMaterialReference?: File;
+  referenceLedPilot?: boolean;
 }
 
 export interface UserRenderIntent {
@@ -192,6 +194,8 @@ export interface StudioJob {
   designRevision: string;
   state: WorkflowState;
   certificationState: CertificationState;
+  generationPolicy?: string;
+  proposalSelected?: boolean;
   outputs: OutputArtifact[];
   intentWarnings?: IntentWarning[];
   errorMessage?: string;

@@ -31,10 +31,21 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--height", type=int)
     parser.add_argument(
         "--profile",
-        choices=("preview_fast", "standard_eevee", "premium_cycles"),
+        choices=("camera_scoring", "preview_fast", "standard_eevee", "premium_cycles"),
         default="standard_eevee",
     )
+    parser.add_argument(
+        "--neutral-massing",
+        action="store_true",
+        help=(
+            "render the source volumes without the procedurally proposed facade grammar. "
+            "On the reference model 116 of 116 facades, 42 docks and 15 entrances are generated "
+            "by plan-design rather than read from the source, so this is the only way to ask "
+            "whether sending that proposal to the provider helps or caps the result."
+        ),
+    )
     parser.add_argument("--view-id", action="append", dest="view_ids")
+    parser.add_argument("--facade-mode", choices=("authored", "envelope_program", "envelope_only"), default="authored")
     parser.add_argument("--pbr-only", action="store_true")
     return parser.parse_args(argv)
 
@@ -294,6 +305,12 @@ def build_materials(
             for item in asset.get("files", [])
             if asset_root is not None
         }
+        if role == "site_road":
+            # The bundled asphalt scan has useful normal/roughness maps, but its brown, pale
+            # albedo reads as concrete in aerial views and overrides the authoritative charcoal
+            # road colour. Retain surface response while letting the explicit asphalt colour drive
+            # the base channel. Parking is intentionally allowed to keep the lighter scan.
+            texture_files.pop("albedo", None)
         result = material(
             role,
             (*color[:3], opacity),
@@ -311,6 +328,9 @@ def build_materials(
         "main_shed": resolved("main_shed", _hex_color(palette["primary_hex"]), 0.35, 0.3),
         "office_block": resolved("office_block", _hex_color(palette["primary_hex"]), 0.18, 0.38),
         "service_yard": resolved("service_yard", _hex_color(palette["paving_hex"]), 0.0, 0.72),
+        # This is the model's continuous substrate, not a semantic concrete apron.
+        # Keep it neutral and subordinate so the overlaid authored site surfaces remain legible.
+        "site_ground": material("site_ground", (0.29, 0.31, 0.29, 1.0), 0.0, 0.94),
         "site_road": resolved("site_road", (0.12, 0.135, 0.14, 1), 0.0, 0.82),
         "sidewalk": resolved("sidewalk", (0.48, 0.49, 0.48, 1), 0.0, 0.76),
         "parking": resolved("parking", (0.28, 0.30, 0.31, 1), 0.0, 0.8),
@@ -784,13 +804,19 @@ def create_context_environment(
     long_size = max(52.0, min(96.0, span_x * 0.22))
     short_size = max(24.0, min(42.0, span_y * 0.18))
     height = max(7.0, min(11.0, (maximum[2] - minimum[2]) * 0.85))
-    slots = (
-        (center_x - span_x * 0.28, maximum[1] + buffer * 2.8, long_size, short_size),
-        (center_x + span_x * 0.28, maximum[1] + buffer * 2.8, long_size, short_size),
-        (maximum[0] + buffer * 2.8, center_y - span_y * 0.25, short_size, long_size),
-        (maximum[0] + buffer * 2.8, center_y + span_y * 0.25, short_size, long_size),
-        (minimum[0] - buffer * 2.8, center_y - span_y * 0.25, short_size, long_size),
-        (minimum[0] - buffer * 2.8, center_y + span_y * 0.25, short_size, long_size),
+    # Neighbouring plots are laid out as an estate, not as a single ring of slabs. A ring at one
+    # standoff reads from the air as isolated blocks in empty land; two rows on every side, each
+    # offset along the frontage, reads as the project sitting on one lot among many.
+    slots = tuple(
+        slot
+        for standoff in (2.6, 5.6)
+        for along in (-0.34, 0.0, 0.34)
+        for slot in (
+            (center_x + along * span_x, maximum[1] + buffer * standoff, long_size, short_size),
+            (center_x + along * span_x, minimum[1] - buffer * standoff, long_size, short_size),
+            (maximum[0] + buffer * standoff, center_y + along * span_y, short_size, long_size),
+            (minimum[0] - buffer * standoff, center_y + along * span_y, short_size, long_size),
+        )
     )
     count = min(site.get("surrounding_context_count", 0), len(slots))
     for massing_number, (x, y, width, depth) in enumerate(slots[:count], start=1):
@@ -1484,9 +1510,10 @@ def create_design_details(
                 detail_index,
                 semantic_role=entrance["semantic_role"],
             )
-        # A sliding leaf is shown parked clear of the authored traffic opening. This makes the
-        # entrance legible without inventing a ceremonial portal or blocking the approach road.
-        leaf_center = center + span_axis * opening_width if is_sliding_gate else center
+        # The semantic rectangle is a traffic opening, not a closed leaf. Park the restrained
+        # metal leaf beside that opening so every kit remains visibly truck-capable. Its location,
+        # width and connection to the fence remain derived from the authored entrance geometry.
+        leaf_center = center + span_axis * opening_width
         for rail_name, rail_height in (("bottom", 0.32), ("middle", 1.08), ("top", 2.02)):
             detail_index += 1
             _oriented_box(
@@ -1586,6 +1613,67 @@ def create_design_details(
                         0.045 if envelope_kit == "sandwich_panel_flat" else 0.06,
                         detail_materials["seam"],
                         detail_index,
+                    )
+            # Long eave facades receive a continuous gutter and regularly spaced downpipes.
+            # These are dimensioned construction details, not decorative motifs, and materially
+            # reduce the featureless-CGI appearance of long LOD100 industrial elevations.
+            assembly_bounds = assembly["bounding_box"] if assembly else None
+            assembly_long_span = (
+                max(
+                    assembly_bounds["maximum"][0] - assembly_bounds["minimum"][0],
+                    assembly_bounds["maximum"][1] - assembly_bounds["minimum"][1],
+                )
+                if assembly_bounds
+                else width
+            )
+            if width >= 24.0 and width >= assembly_long_span * 0.70:
+                protected_openings = [
+                    (
+                        dock["u"] * width - dock["width_m"] / 2 - 0.8,
+                        dock["u"] * width + dock["width_m"] / 2 + 0.8,
+                    )
+                    for dock in facade["loading_docks"]
+                ]
+                facade_entrance = facade.get("office_entrance")
+                if facade_entrance:
+                    protected_openings.append(
+                        (
+                            facade_entrance["u"] * width - facade_entrance["width_m"] - 0.8,
+                            facade_entrance["u"] * width + facade_entrance["width_m"] + 0.8,
+                        )
+                    )
+                detail_index += 1
+                _detail_box(
+                    f"{facade['surface_id']}:eave-gutter",
+                    surface,
+                    width / 2,
+                    max(0.35, height - 0.16),
+                    width * 0.99,
+                    0.22,
+                    0.24,
+                    detail_materials["secondary"],
+                    detail_index,
+                    semantic_role="design_detail",
+                )
+                downpipe_count = max(2, int(np.ceil(width / 24.0)))
+                for pipe_number in range(downpipe_count + 1):
+                    pipe_u = width * pipe_number / downpipe_count
+                    if pipe_u <= 0.25 or pipe_u >= width - 0.25:
+                        continue
+                    if any(start <= pipe_u <= end for start, end in protected_openings):
+                        continue
+                    detail_index += 1
+                    _detail_box(
+                        f"{facade['surface_id']}:downpipe-{pipe_number:02d}",
+                        surface,
+                        pipe_u,
+                        plinth_height + (height - plinth_height) / 2,
+                        0.14,
+                        max(0.5, height - plinth_height),
+                        0.18,
+                        detail_materials["secondary"],
+                        detail_index,
+                        semantic_role="design_detail",
                     )
             clerestory_height = min(
                 float(articulation.get("clerestory_band_height_m", 0.0)), height * 0.16
@@ -2051,6 +2139,7 @@ def configure_world(
     world_tree = scene.world.node_tree
     world_tree.nodes.clear()
     sky = world_tree.nodes.new("ShaderNodeTexSky")
+    sky.name = "V365 Physical Sky"
     sky.sky_type = "NISHITA"
     sky.sun_rotation = sun_azimuth
     sky.sun_elevation = sun_elevation
@@ -2058,10 +2147,12 @@ def configure_world(
     sky.dust_density = 1.4
     sky.ozone_density = 1.0
     sky_background = world_tree.nodes.new("ShaderNodeBackground")
+    sky_background.name = "V365 Sky Background"
     # Keep skylight as fill rather than flattening all facade/ground values. Direct sun then
     # creates readable contact shadows while AgX protects the light metal roof highlights.
     sky_background.inputs["Strength"].default_value = 0.45
     camera_background = world_tree.nodes.new("ShaderNodeBackground")
+    camera_background.name = "V365 Camera Background"
     # Headless EGL can return a black camera background for Nishita even while its lighting is
     # valid.  A neutral daylight plate keeps Base RGB useful as image-generation authority.
     camera_background.inputs["Color"].default_value = (0.32, 0.52, 0.78, 1.0)
@@ -2072,6 +2163,7 @@ def configure_world(
     if profile == "premium_cycles":
         light_path = world_tree.nodes.new("ShaderNodeLightPath")
         camera_mix = world_tree.nodes.new("ShaderNodeMixShader")
+        camera_mix.name = "V365 Camera Mix"
         world_tree.links.new(light_path.outputs["Is Camera Ray"], camera_mix.inputs[0])
         world_tree.links.new(camera_background.outputs["Background"], camera_mix.inputs[2])
 
@@ -2095,6 +2187,7 @@ def configure_world(
         environment = world_tree.nodes.new("ShaderNodeTexEnvironment")
         environment.image = bpy.data.images.load(str(environment_file), check_existing=True)
         environment_background = world_tree.nodes.new("ShaderNodeBackground")
+        environment_background.name = "V365 Environment Background"
         environment_background.inputs["Strength"].default_value = 0.7
         world_tree.links.new(environment.outputs["Color"], environment_background.inputs["Color"])
         if camera_mix:
@@ -2129,6 +2222,64 @@ def configure_world(
     sun = bpy.data.objects.new("Sun", sun_data)
     sun.rotation_euler = (math.pi / 2 - sun_elevation, 0.0, sun_azimuth)
     bpy.context.collection.objects.link(sun)
+
+
+def configure_view_lighting(spec: dict, design_data: dict | None = None) -> None:
+    """Give photography-specific cameras matching pixel evidence without changing geometry."""
+
+    scene = bpy.context.scene
+    environment = design_data.get("environment", {}) if design_data else {}
+    base_azimuth = math.radians(float(environment.get("sun_azimuth_deg", 135.0)))
+    base_elevation = math.radians(float(environment.get("sun_elevation_deg", 42.0)))
+    golden_hour = spec.get("role") == "loading_detail"
+    sun_azimuth = base_azimuth + (math.radians(18.0) if golden_hour else 0.0)
+    sun_elevation = math.radians(17.0) if golden_hour else base_elevation
+
+    sun = bpy.data.objects.get("Sun")
+    if sun is not None and sun.type == "LIGHT":
+        sun.rotation_euler = (math.pi / 2 - sun_elevation, 0.0, sun_azimuth)
+        sun.data.energy = 2.35 if golden_hour else 2.8
+        sun.data.color = (1.0, 0.68, 0.42) if golden_hour else (1.0, 1.0, 1.0)
+
+    if scene.world and scene.world.use_nodes and scene.world.node_tree:
+        world_tree = scene.world.node_tree
+        sky = world_tree.nodes.get("V365 Physical Sky")
+        if sky is not None:
+            sky.sun_rotation = sun_azimuth
+            sky.sun_elevation = sun_elevation
+            sky.dust_density = 2.2 if golden_hour else 1.4
+        camera_background = world_tree.nodes.get("V365 Camera Background")
+        if camera_background is not None:
+            camera_background.inputs["Color"].default_value = (
+                (0.48, 0.55, 0.72, 1.0) if golden_hour else (0.32, 0.52, 0.78, 1.0)
+            )
+            camera_background.inputs["Strength"].default_value = 0.65 if golden_hour else 0.55
+        scene.view_settings.exposure = 0.7 if golden_hour else 0.0
+        # The Eevee daylight HDRI otherwise remains a strong morning pixel cue and routinely
+        # overrides a text-only golden-hour instruction. For this one photography role, use the
+        # deterministic sky plate plus warm low sun as conditioning evidence. Restore the normal
+        # world source for every other role so rendering a selected subset remains deterministic.
+        output = next(
+            (node for node in world_tree.nodes if node.bl_idname == "ShaderNodeOutputWorld"),
+            None,
+        )
+        if output is not None:
+            camera_mix = world_tree.nodes.get("V365 Camera Mix")
+            environment_background = world_tree.nodes.get("V365 Environment Background")
+            sky_background = world_tree.nodes.get("V365 Sky Background")
+            normal_source = (
+                camera_mix or environment_background or sky_background or camera_background
+            )
+            source = camera_background if golden_hour else normal_source
+            if source is not None:
+                for link in tuple(output.inputs["Surface"].links):
+                    world_tree.links.remove(link)
+                output_socket = (
+                    source.outputs["Shader"]
+                    if source.bl_idname == "ShaderNodeMixShader"
+                    else source.outputs["Background"]
+                )
+                world_tree.links.new(output_socket, output.inputs["Surface"])
 
 
 def configure_camera(spec: dict):
@@ -2257,26 +2408,111 @@ def _replace_materials(materials_by_object: dict) -> None:
         obj.data.materials.append(replacement)
 
 
+#: Levels per channel on the instance-id lattice. 13**3 = 2197 slots, which covers every mesh the
+#: reference models emit, at a spacing of 255/12 ~ 21 bytes between neighbouring levels. The old
+#: scheme wrote the index straight into the low byte, so object 1 and object 2 differed by 1/255
+#: before the sRGB transfer and by nothing at all after it: measured on a rebuilt render, 305
+#: objects produced 4166 distinct colours, only 4.2% matched the manifest, and 60 manifest entries
+#: collided outright. Spacing the lattice is what makes the pass decodable at all.
+INSTANCE_LATTICE_LEVELS = 13
+
+
+def _instance_lattice_colour(index: int) -> tuple[float, float, float]:
+    """Linear colour for an instance index, spaced so neighbours are far apart after transfer.
+
+    The index is spread across the channels rather than packed into one, and the digits are
+    reversed so that consecutive indices move the most significant channel first. Two objects
+    created next to each other therefore land at opposite ends of the cube instead of adjacent
+    bytes, which is what survives compression and resampling.
+    """
+
+    levels = INSTANCE_LATTICE_LEVELS
+    remaining = max(0, index) % (levels ** 3)
+    digits = []
+    for _ in range(3):
+        digits.append(remaining % levels)
+        remaining //= levels
+    step = 1.0 / (levels - 1)
+    # Reversed so the first channel varies slowest; neighbouring indices differ in one full step.
+    return tuple(digit * step for digit in reversed(digits))  # type: ignore[return-value]
+
+
+def _linear_to_srgb8(value: float) -> int:
+    """Byte a linear channel becomes after the sRGB transfer the PNG writer applies."""
+
+    if value <= 0.0031308:
+        encoded = value * 12.92
+    else:
+        encoded = 1.055 * (value ** (1.0 / 2.4)) - 0.055
+    return max(0, min(255, int(round(encoded * 255.0))))
+
+
+def _write_instance_manifest(view_dir: Path, mesh_objects: list) -> None:
+    """Record what every instance-pass colour means.
+
+    instance_id.png already encodes each object's pass index as a 24-bit colour, so individual
+    facade details are separable in the pixels. Without this table nothing can say which index
+    is which door, so downstream selection can only resolve the handful of canonical scene
+    elements. Writing the mapping here costs nothing: the renderer holds both values already.
+    """
+
+    entries = {}
+    for obj in mesh_objects:
+        index = int(obj.pass_index)
+        if index <= 0 or index in entries:
+            continue
+        entries[index] = {
+            "instance_index": index,
+            "object_name": obj.name,
+            "semantic_role": obj.get("semantic_role", "unknown"),
+            "scene_element_id": obj.get("scene_element_id"),
+            "asset_instance_id": obj.get("asset_instance_id"),
+            "asset_id": obj.get("asset_id"),
+            # The index is emitted as a linear colour and the PNG is written through an sRGB
+            # transfer, so the bytes on disk are not the index bytes. Recording what actually
+            # lands in the file is the only way a consumer can match a pixel back to an object.
+            "encoded_rgb8": [
+                _linear_to_srgb8(channel) for channel in _instance_lattice_colour(index)
+            ],
+        }
+    document = {
+        "schema_version": "1.0.0",
+        "view_id": view_dir.name,
+        "encoding": (
+            f"instance_index on a {INSTANCE_LATTICE_LEVELS}-level RGB lattice, "
+            "sRGB-encoded; match on encoded_rgb8 by nearest colour within 10 bytes"
+        ),
+        "instances": [entries[key] for key in sorted(entries)],
+    }
+    (view_dir / "instance_id_manifest.json").write_text(
+        json.dumps(document, ensure_ascii=False, indent=2) + chr(10),
+        encoding="utf-8",
+    )
+
+
 def render_masks(view_dir: Path) -> None:
     scene = bpy.context.scene
     previous_engine = scene.render.engine
+    # ID passes are lookup tables, not pictures. The reconstruction filter blends neighbouring
+    # objects at every silhouette, and each blend is a colour that belongs to no object: that is
+    # where 305 objects turned into 4166 distinct colours. Collapsing the filter keeps one colour
+    # per object, so a pixel either names an object or is rejected as an edge.
+    previous_filter = scene.render.filter_size
+    scene.render.filter_size = 0.0
     _configure_engine("preview_fast")
     mesh_objects = [obj for obj in scene.objects if obj.type == "MESH"]
+    _write_instance_manifest(view_dir, mesh_objects)
     original = {obj: obj.data.materials[0] for obj in mesh_objects}
     instance_materials = {}
     for obj in mesh_objects:
         value = obj.pass_index
-        color = (
-            (value & 255) / 255.0,
-            ((value >> 8) & 255) / 255.0,
-            ((value >> 16) & 255) / 255.0,
-            1.0,
-        )
+        color = (*_instance_lattice_colour(int(value)), 1.0)
         instance_materials[obj] = emission_material(f"id_{value}", color)
     role_colors = {
         "main_shed": (0.85, 0.15, 0.10, 1.0),
         "office_block": (0.10, 0.35, 0.90, 1.0),
         "service_yard": (0.20, 0.70, 0.25, 1.0),
+        "site_ground": (0.42, 0.30, 0.16, 1.0),
         "site_road": (0.18, 0.18, 0.18, 1.0),
         "sidewalk": (0.55, 0.52, 0.48, 1.0),
         "parking": (0.35, 0.35, 0.35, 1.0),
@@ -2340,6 +2576,7 @@ def render_masks(view_dir: Path) -> None:
     scene.world.color = previous_world
     scene.view_settings.view_transform = previous_transform
     scene.view_settings.look = previous_look
+    scene.render.filter_size = previous_filter
     scene.render.engine = previous_engine
 
 
@@ -2502,12 +2739,29 @@ def main() -> None:
             "asset_library_version"
         ):
             raise ValueError("asset library version does not match Design DNA")
+    if args.facade_mode == "envelope_only":
+        # Source geometry only: no procedural programme, facade, gates or entourage.
+        design_data = None
     base_object_count = create_objects(scene_data, scene_path.parent, design_data, asset_data)
     if design_data:
         detail_start = create_context_environment(
             scene_data, design_data, base_object_count, asset_data
         )
-        detail_end = create_design_details(scene_data, design_data, detail_start, asset_data)
+        detail_end = (
+            detail_start
+            if args.neutral_massing
+            else create_design_details(scene_data, design_data, detail_start, asset_data)
+        )
+        if args.facade_mode == "envelope_program":
+            # Remove only procedural facade styling, not roofs, gates or functional openings.
+            decorative_tokens = (
+                ":plinth", ":parapet-band", ":horizontal-joint-", ":seam-",
+                ":eave-gutter", ":downpipe-", ":clerestory-", ":accent-bay-",
+                ":biophilic-", ":feature-frame-", ":accent-fin-", ":entrance-canopy",
+            )
+            for obj in list(bpy.data.objects):
+                if any(token in obj.name for token in decorative_tokens):
+                    bpy.data.objects.remove(obj, do_unlink=True)
         _, entourage = create_deterministic_entourage(
             scene_data,
             scene_path.parent,
@@ -2530,6 +2784,11 @@ def main() -> None:
         )
         batch_noncanonical_details(base_object_count)
     default_size = {
+        # Camera scoring ranks candidates, it does not deliver anything. At this size a whole
+        # candidate pool costs about what one delivery view costs, and the quantities the ranking
+        # reads — subject share, occlusion, visible surface roles, horizon balance — are all
+        # area measurements that survive downsampling.
+        "camera_scoring": (512, 288),
         "preview_fast": (768, 432),
         "standard_eevee": (1024, 576),
         "premium_cycles": (2048, 1152),
@@ -2554,8 +2813,22 @@ def main() -> None:
         (view_dir / "camera.json").write_text(
             json.dumps(camera_spec, indent=2) + "\n", encoding="utf-8"
         )
+        configure_view_lighting(camera_spec, design_data)
         camera = configure_camera(camera_spec)
+        if args.profile == "camera_scoring":
+            if args.facade_mode == "envelope_only":
+                render_pbr(view_dir)
+                bpy.context.scene.view_settings.exposure = 0.0
+            # Rank on semantics only. The beauty, material and control passes exist to condition
+            # and audit a camera that has already been chosen; none of them changes which camera
+            # is worth choosing, and rendering them for every candidate is the whole cost.
+            render_masks(view_dir)
+            bpy.data.objects.remove(camera, do_unlink=True)
+            continue
         render_pbr(view_dir)
+        # Photographic exposure belongs only to Base RGB. Semantic/material/control passes rely
+        # on exact encoded colours and must never inherit the golden-hour exposure transform.
+        bpy.context.scene.view_settings.exposure = 0.0
         render_context_proxy_overlay(view_dir)
         if not args.pbr_only:
             render_masks(view_dir)
@@ -2563,7 +2836,8 @@ def main() -> None:
             render_clay_and_edges(view_dir)
             render_control_policy(view_dir)
         bpy.data.objects.remove(camera, do_unlink=True)
-    bpy.ops.wm.save_as_mainfile(filepath=str(output / "designed_scene.blend"))
+    if args.profile != "camera_scoring":
+        bpy.ops.wm.save_as_mainfile(filepath=str(output / "designed_scene.blend"))
 
 
 main()

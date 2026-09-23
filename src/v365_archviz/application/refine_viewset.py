@@ -16,6 +16,7 @@ from v365_archviz.application.refine_view import (
 )
 from v365_archviz.artifacts import atomic_write
 from v365_archviz.domain.design import DesignDNA
+from v365_archviz.domain.style_pack import StylePack
 from v365_archviz.domain.workflow import Camera, GenerationProfile, ViewRole, ViewSet
 from v365_archviz.errors import InvalidModelError, ProviderError
 from v365_archviz.providers.contracts import (
@@ -28,40 +29,51 @@ from v365_archviz.providers.contracts import (
 
 VIEW_DIRECTIVES = {
     ViewRole.OVERALL: (
-        "VIEW PURPOSE — PRIMARY ARRIVAL: preserve this near-frontal approach from outside the "
-        "authored main gate looking into the project. The slight three-quarter offset must reveal "
-        "the full vehicular opening, two-way driveway depth, connected fence and focus factory. "
-        "Do not turn it into an aerial, flatten it into an elevation or let gate furniture, "
-        "planting or vehicles obstruct the access. Make it read as a premium arrival photograph."
+        "VIEW PURPOSE — HERO AERIAL OBLIQUE: this is the primary bid cover. Preserve the approved "
+        "drone camera and three-quarter azimuth so two principal facades and roughly 70-80% of the "
+        "authored site remain legible. Explain the masterplan, continuous roof assemblies, "
+        "massing, "
+        "palette, landscape and relationships between buildings. Never flatten it into a frontal "
+        "elevation, crop the site into one facade or invent off-site development."
     ),
     ViewRole.CONTEXT: (
-        "VIEW PURPOSE — CONTEXT: explain the opposite approach, adjoining roads and the "
-        "relationship between the focus factory and subdued surrounding massing. Use credible "
-        "drone optics and distance haze from a real industrial estate."
+        "VIEW PURPOSE — MAIN ENTRANCE / ARRIVAL: preserve this pedestrian-eye approach along the "
+        "authored vehicle path from outside the main gate. Clearly show the truck-capable opening, "
+        "connected fence, entrance identity zone, office block, facade recognition, landscape and "
+        "arrival axis. Keep the 28-35 mm documentary perspective; never make the gate decorative, "
+        "too narrow, blocked or detached from the road. Do not invent readable signage or logos."
     ),
     ViewRole.HERO: (
-        "VIEW PURPOSE — FACADE HERO: retain this lower oblique composition and explain the long "
-        "factory elevation, operational forecourt, facade hierarchy and human scale. Keep all "
-        "approved clerestory, accent and logistics modules aligned to the shared design grammar."
+        "VIEW PURPOSE — LOGISTICS / OPERATION: prove that the project can operate. Preserve the "
+        "authored loading facade, truck apron, industrial shutter or sectional doors, docks, "
+        "canopies, bollards, turning clearance and service circulation. Add only sparse correctly "
+        "scaled operational trucks, pallets and workers where they do not hide doors or geometry. "
+        "This is a credible working yard, not a showroom, residential street or office frontage."
     ),
     ViewRole.DETAIL: (
-        "VIEW PURPOSE — LOGISTICS FACADE: show a readable factory loading frontage at a modest "
-        "elevated three-quarter angle. Industrial openings must remain sectional overhead or "
-        "roller shutter doors with robust jambs/head, shallow weather canopies, safety bollards "
-        "and a separate personnel egress door—never domestic doors, shopfronts or repeated "
-        "office bays."
+        "VIEW PURPOSE — OPPOSITE AERIAL / SECONDARY MASSING: preserve the drone position on the "
+        "opposite side of the Hero Aerial, not a small pan from it. Confirm rear facades, internal "
+        "roads, setbacks, planting, utility/service areas and the relationship between all "
+        "authored "
+        "masses. Keep the same project identity as VIEW-01 and expose inconsistencies rather than "
+        "redesigning unseen sides."
     ),
     ViewRole.OFFICE_HERO: (
-        "VIEW PURPOSE — REVERSE OVERALL: preserve this opposite bird's-eye three-quarter view to "
-        "document the roof, rear/secondary frontage, perimeter circulation and boundary. It must "
-        "complement rather than duplicate the primary overall/context camera."
+        "VIEW PURPOSE — ARCHITECTURAL DETAIL / OFFICE FACADE: preserve this close eye-level "
+        "composition of the best authored office entrance ensemble; when no office entrance exists "
+        "in the model, use the strongest authored industrial door/canopy facade ensemble instead. "
+        "Show glazing only where authored, panel modules, entrance or industrial door, plinth, "
+        "facade depth and restrained landscape at believable construction scale. It need not show "
+        "the whole factory. Do not invent an office block or spread office glazing into plain bays."
     ),
     ViewRole.LOADING_DETAIL: (
-        "VIEW PURPOSE — LOW FACADE EXPERIENCE: preserve this low elevated, oblique camera along "
-        "the unobstructed reverse facade. Explain the full facade rhythm, planted trellis bays, "
-        "boundary landscape and industrial scale in one credible composition. Keep facade depth "
-        "and sky visible; never turn it into an interior, dead-end alley, square-on blank wall or "
-        "drone overview. Use a documentary architectural-photo character."
+        "VIEW PURPOSE — HUMAN-SCALE / GOLDEN-HOUR HERO: preserve the low human-scale oblique "
+        "camera and all design geometry, changing only photography DNA. This view explicitly "
+        "overrides the shared daylight environment: use credible late-afternoon golden light, a "
+        "low warm "
+        "sun, long physically plausible shadows, restrained warm loading/entrance lights and "
+        "a modest number of people and vehicles. Keep facade materials neutral and technically "
+        "legible; no cinematic fantasy colours, wet-road spectacle or night-time darkness."
     ),
 }
 
@@ -155,6 +167,7 @@ def _identity_contract(design: DesignDNA) -> tuple[dict[str, object], str]:
         "continuous_fence_and_gate": palette["boundary_hex"],
         "external_and_perimeter_site_roads": "dark charcoal asphalt, never pale concrete",
         "internal_service_yards_and_loading_aprons": palette["paving_hex"],
+        "site_ground_underlay": "non-finish neutral substrate; never infer road or concrete apron",
     }
     site_boundary_contract = {
         "geometry": "authored boundary and gate openings only",
@@ -222,7 +235,8 @@ def _identity_contract(design: DesignDNA) -> tuple[dict[str, object], str]:
         f"{design.design_language.secondary_material}, "
         f"{design.design_language.office_material}; "
         f"palette={', '.join(str(value) for value in palette.values())}; "
-        f"daylight={environment['time']} {environment['weather']}, "
+        f"base daylight={environment['time']} {environment['weather']} (VIEW-06 may override only "
+        "photography time to restrained golden/blue hour), "
         f"white balance={environment['white_balance_k']}K. "
         f"landscape={design.presentation.landscape_character}; "
         f"paving={design.presentation.paving_character}; "
@@ -242,6 +256,31 @@ def _identity_contract(design: DesignDNA) -> tuple[dict[str, object], str]:
     return contract, prompt
 
 
+def _failed_conditioning_view_ids(render_root: Path) -> frozenset[str]:
+    """Views the conditioning gate already rejected, read from its report if one exists.
+
+    The gate runs before generation precisely so unusable cameras never reach a paid provider.
+    Reading its verdict here closes the loop; an absent report means the gate has not run and
+    is not treated as approval.
+    """
+
+    report_path = render_root / "conditioning_qa.json"
+    if not report_path.is_file():
+        return frozenset()
+    try:
+        document = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return frozenset()
+    views = document.get("views")
+    if not isinstance(views, list):
+        return frozenset()
+    return frozenset(
+        str(item["view_id"])
+        for item in views
+        if isinstance(item, dict) and item.get("view_id") and item.get("status") == "fail"
+    )
+
+
 def _select_master_view_id(render_root: Path, cameras: tuple[Camera, ...]) -> str:
     """Choose the strongest visible design-identity view, falling back to an overview."""
 
@@ -258,20 +297,28 @@ def _select_master_view_id(render_root: Path, cameras: tuple[Camera, ...]) -> st
         except (OSError, json.JSONDecodeError, KeyError, TypeError):
             evidence = {}
 
+    # For a complete view set, the overview is the only single image that carries roof, site,
+    # access, boundary and context identity together. Close views can score highly from occupancy
+    # while being a poor project-wide appearance anchor. The staged worker excludes this camera
+    # when it independently chooses its complementary facade master.
+    overall = next((camera for camera in cameras if camera.role is ViewRole.OVERALL), None)
+    if overall is not None and evidence.get(overall.view_id, {}).get("status", "pass") == "pass":
+        return overall.view_id
+
     fallback_priority = {
         ViewRole.OVERALL: 6.0,
-        ViewRole.CONTEXT: 5.0,
-        ViewRole.DETAIL: 4.0,
-        ViewRole.OFFICE_HERO: 3.0,
-        ViewRole.HERO: 2.0,
+        ViewRole.OFFICE_HERO: 5.0,
+        ViewRole.HERO: 4.0,
+        ViewRole.CONTEXT: 3.0,
+        ViewRole.DETAIL: 2.0,
         ViewRole.LOADING_DETAIL: 1.0,
     }
     identity_bonus = {
         # Prefer a meaningful facade run with operational openings. A tight detail can report
         # high focus coverage while showing only a blank wall and cannot carry design identity.
-        ViewRole.HERO: 18.0,
+        ViewRole.OFFICE_HERO: 18.0,
+        ViewRole.HERO: 10.0,
         ViewRole.LOADING_DETAIL: 8.0,
-        ViewRole.OFFICE_HERO: 3.0,
         ViewRole.DETAIL: 2.0,
         ViewRole.CONTEXT: 3.0,
         ViewRole.OVERALL: 0.0,
@@ -326,10 +373,14 @@ def select_master_view_ids(render_root: Path, cameras: tuple[Camera, ...]) -> tu
         value = evidence.get(camera.view_id, {}).get(name, 0.0)
         return float(value) if isinstance(value, (int, float)) else 0.0
 
-    # The context view now owns complete-site composition; VIEW-01 is a frontal arrival.
-    site_priority = {ViewRole.CONTEXT: 20.0, ViewRole.OVERALL: 16.0}
+    # VIEW-01 is the primary site identity; VIEW-04 is its genuinely opposite confirmation.
+    site_priority = {ViewRole.OVERALL: 100.0, ViewRole.DETAIL: 20.0}
+    site_candidates = (
+        tuple(camera for camera in cameras if camera.role in {ViewRole.OVERALL, ViewRole.DETAIL})
+        or cameras
+    )
     site = max(
-        cameras,
+        site_candidates,
         key=lambda camera: (
             site_priority.get(camera.role, 0.0)
             + metric(camera, "circulation_coverage") * 120
@@ -404,12 +455,19 @@ def _provider_references(
     render_root: Path,
     camera: Camera,
     references: tuple[Path, ...],
+    attach_context_guide: bool = True,
 ) -> tuple[Path, ...]:
-    """Attach the camera-registered context guide before the paid provider request."""
+    """Attach the camera-registered context guide before the paid provider request.
+
+    The guide is a placement hint only where placeholder massing is meant to survive as
+    positioned context. Measured against reviewed output, sending it while the prompt asks for
+    generated surroundings makes the provider reproduce the translucent slabs literally: the
+    image wins over the instruction. Callers that want invented context therefore withhold it.
+    """
 
     view_root = render_root / camera.view_id
     proxy = view_root / "context_proxy_rgba.png"
-    if not proxy.is_file():
+    if not attach_context_guide or not proxy.is_file():
         return references
     guide = build_context_composition_guide(
         view_root / "base_rgb.png",
@@ -439,6 +497,9 @@ class RefineViewSet:
         approved_master_view_id: str | None = None,
         reference_images_by_view: dict[str, tuple[Path, ...]] | None = None,
         quality_standard_path: Path | None = None,
+        allow_failed_conditioning: bool = False,
+        attach_context_guide: bool = True,
+        style_pack: StylePack | None = None,
     ) -> RefinedViewSetArtifacts:
         view_set = ViewSet.model_validate_json(view_set_path.read_text(encoding="utf-8"))
         design = DesignDNA.model_validate_json(design_dna_path.read_text(encoding="utf-8"))
@@ -464,6 +525,17 @@ class RefineViewSet:
         )
         if not selected_cameras:
             raise InvalidModelError("view-set selection cannot be empty")
+        if not allow_failed_conditioning:
+            rejected = _failed_conditioning_view_ids(render_root)
+            blocked = sorted(
+                camera.view_id for camera in selected_cameras if camera.view_id in rejected
+            )
+            if blocked:
+                raise InvalidModelError(
+                    "conditioning QA rejected these views, so generating them would spend "
+                    f"provider budget on unusable cameras: {blocked}. Fix the framing and "
+                    "re-render, or pass allow_failed_conditioning to override deliberately."
+                )
         design_master: GeneratedImage | None = None
         if approved_master_path is not None:
             if not approved_master_path.is_file():
@@ -494,14 +566,24 @@ class RefineViewSet:
                     f"{prompt}\n\n{VIEW_DIRECTIVES[camera.role]}\n"
                     f"{_visible_facade_directive(design, camera)}"
                 ),
+                role=camera.role.value,
+                context_policy=(
+                    style_pack.context_policy.value if style_pack else "translucent_massing"
+                ),
+                design_freedom=(
+                    style_pack.design_freedom.value if style_pack is not None else "photoreal_only"
+                ),
                 structure_guide=render_root / camera.view_id / "structure_guide.png",
                 reference_images=_provider_references(
                     render_root,
                     camera,
                     (reference_images_by_view or {}).get(camera.view_id, reference_images),
+                    attach_context_guide,
                 ),
                 aspect_ratio=camera.aspect_ratio,
-                image_size=("1K" if profile is GenerationProfile.PREVIEW_FAST else "2K"),
+                # Pro prices 1K and 2K outputs in the same tier. Keep the full-detail 2K source
+                # even for preview jobs; the render profile still controls upstream GPU cost.
+                image_size="2K",
             )
             for camera in selected_cameras
         )
@@ -548,6 +630,18 @@ class RefineViewSet:
             view_set.cameras if approved_master_path is not None else selected_cameras,
         )
         identity_contract, identity_prompt = _identity_contract(design)
+        if style_pack and style_pack.design_freedom.value != "photoreal_only":
+            identity_prompt = (
+                "SHARED DESIGN DEVELOPMENT: one buildable architectural identity "
+                "for the entire set. "
+                "Preserve measured footprints, building count, height envelope, continuous roof "
+                "assemblies, functional doors and site circulation. The procedural facade grammar "
+                "is a starting proposal, not an immutable design. Develop the first Design Master "
+                "according to the authored brief. Once approved, all later views must keep its "
+                "facade family, material hierarchy, entrance treatment and restrained accent. "
+                "Never copy a master's camera or relocate its architecture to fit another view.\n"
+                + prompt
+            )
         generated = renderer.generate_view_set(
             ViewSetGenerationInput(
                 request_id=request_id,
@@ -582,11 +676,13 @@ class RefineViewSet:
                 design_revision=design.design_revision,
                 generated_image=result.image,
                 watermark=watermark,
-                effective_provider_model=(
-                    str(getattr(renderer, "provenance", {}).get("master_model"))
-                    if profile is GenerationProfile.TENDER_FINAL
-                    or (len(requests) == 1 and approved_master_path is not None)
-                    else str(getattr(renderer, "provenance", {}).get("model"))
+                design_freedom=style_pack.design_freedom.value if style_pack else "photoreal_only",
+                context_policy=style_pack.context_policy.value
+                if style_pack
+                else "translucent_massing",
+                effective_provider_model=str(
+                    getattr(renderer, "provenance", {}).get("master_model")
+                    or getattr(renderer, "provenance", {}).get("model")
                 ),
             )
             for result in generated.views
@@ -602,8 +698,7 @@ class RefineViewSet:
             "provider_configuration": getattr(renderer, "provenance", {}),
             "effective_view_model": (
                 getattr(renderer, "provenance", {}).get("master_model")
-                if profile is GenerationProfile.TENDER_FINAL
-                else getattr(renderer, "provenance", {}).get("model")
+                or getattr(renderer, "provenance", {}).get("model")
             ),
             "master_view_id": master_view_id,
             "master_sha256": hashlib.sha256(master_image.content).hexdigest(),
@@ -662,6 +757,13 @@ class RefineViewSet:
             "design_revision": design.design_revision,
             "view_set_id": view_set.view_set_id,
             "profile": profile.value,
+            "effective_design_freedom": style_pack.design_freedom.value
+            if style_pack
+            else "photoreal_only",
+            "effective_context_policy": style_pack.context_policy.value
+            if style_pack
+            else "translucent_massing",
+            "style_pack_snapshot": style_pack.model_dump(mode="json") if style_pack else None,
             "provider": renderer.name,
             "provider_configuration": getattr(renderer, "provenance", {}),
             "effective_view_model": (

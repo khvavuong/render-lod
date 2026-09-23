@@ -67,6 +67,7 @@ class OperatingScene(str, Enum):
 
 class DeliveryQuality(str, Enum):
     PREVIEW = "preview"
+    MARKETING = "marketing"
     TENDER = "tender"
 
 
@@ -331,6 +332,11 @@ DESIGN_OPTIONS = DesignOptionsCatalog(
         ),
     ),
     delivery_qualities=(
+        DesignOption(
+            value="marketing",
+            label="Marketing / phát triển thiết kế",
+            description="Phát triển mặt đứng trong envelope, duyệt Design Master và cả bộ ảnh.",
+        ),
         DesignOption(
             value="preview",
             label="Preview tiết kiệm",

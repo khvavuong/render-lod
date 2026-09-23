@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import fcntl
+import os
 import re
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -10,6 +10,11 @@ from pathlib import Path
 
 from v365_archviz.artifacts import atomic_write
 from v365_archviz.domain.jobs import GenerationJob
+
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
 
 _SAFE_KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$")
 
@@ -29,11 +34,19 @@ class LocalJobRepository:
         self._root.mkdir(parents=True, exist_ok=True)
         lock_path = self._root / ".lock"
         with lock_path.open("a+b") as handle:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            if os.name == "nt":
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+            else:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
             try:
                 yield
             finally:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                if os.name == "nt":
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
     def create_or_get(self, job: GenerationJob) -> tuple[GenerationJob, bool]:
         with self._lock():

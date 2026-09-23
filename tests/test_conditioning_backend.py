@@ -61,3 +61,52 @@ def test_local_backend_refuses_when_blender_is_missing(tmp_path: Path) -> None:
 
     with pytest.raises(ConfigurationError, match="Blender executable not found"):
         renderer._ensure_image()
+
+
+def test_local_command_carries_the_facade_mode_and_scoring_profile(tmp_path: Path) -> None:
+    """The seam must pass the new arguments, not just the old ones.
+
+    `_command` is the only thing the local backend overrides. When the docker
+    path inlined its command, this backend kept an override nothing called and
+    quietly ran `docker run` from inside its own container.
+    """
+
+    renderer = LocalBlenderConditioningRenderer(tmp_path, executable="blender-test")
+
+    command = renderer._command(
+        tmp_path / "scene.json",
+        tmp_path / "design_dna.json",
+        tmp_path / "view_set.json",
+        tmp_path / "renders",
+        RenderProfile.PREVIEW_FAST,
+        tmp_path / "assets" / "manifest.json",
+        facade_mode="envelope_program",
+        camera_scoring=True,
+    )
+
+    assert command[command.index("--facade-mode") + 1] == "envelope_program"
+    assert command[command.index("--profile") + 1] == "camera_scoring"
+    assert "docker" not in command
+
+
+def test_the_docker_command_launches_the_checked_out_script(tmp_path: Path) -> None:
+    renderer = DockerConditioningRenderer(tmp_path)
+
+    command = renderer._command(
+        tmp_path / "scene.json",
+        tmp_path / "design_dna.json",
+        tmp_path / "view_set.json",
+        tmp_path / "renders",
+        RenderProfile.PREVIEW_FAST,
+        tmp_path / "assets" / "manifest.json",
+        facade_mode="authored",
+    )
+
+    assert command[:3] == ["docker", "run", "--rm"]
+    # The image runs blender over the mounted script rather than whatever an
+    # older tag baked in.
+    assert command[command.index("--entrypoint") + 1] == "blender"
+    assert command[command.index("--python") + 1] == (
+        "/workspace/scripts/blender/render_conditioning.py"
+    )
+    assert command[command.index("--facade-mode") + 1] == "authored"

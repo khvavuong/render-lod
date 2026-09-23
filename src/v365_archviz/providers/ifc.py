@@ -60,6 +60,15 @@ def _semantic_role(
         for character in unicodedata.normalize("NFD", (name or "").casefold())
         if unicodedata.category(character) != "Mn"
     ).replace("đ", "d")
+    # A master site-ground slab is an underlay for the authored roads, loading yards,
+    # parking and landscape islands above it. Treating it as a service yard tells the
+    # image model that the entire property is one concrete apron and destroys the site
+    # plan in aerial views.
+    if any(
+        token in normalized_name
+        for token in ("nen tong mat bang", "site ground", "site base", "ground plane")
+    ):
+        return SemanticRole.SITE_GROUND, 0.98
     if any(token in normalized_name for token in ("cay xanh", "landscape", "green")):
         return SemanticRole.LANDSCAPE_ZONE, 0.98
     if any(token in normalized_name for token in ("via he", "sidewalk", "pavement")):

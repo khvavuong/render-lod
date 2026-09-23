@@ -1,0 +1,72 @@
+{
+  "schema_version": "1.0.0",
+  "project_id": "variant-c-refined-minimal",
+  "design_language": {
+    "style": "refined minimal high-tech logistics architecture with crisp uninterrupted planes",
+    "primary_material": "flat white-grey composite panel cladding",
+    "secondary_material": "anthracite shadow-gap detailing",
+    "office_material": "full-height frameless architectural glazing",
+    "accent": "a single restrained accent line at the entrance only"
+  },
+  "environment": {
+    "time": "09:30",
+    "weather": "clear bright morning with soft atmospheric depth",
+    "sun_azimuth_deg": 132.0,
+    "sun_elevation_deg": 48.0,
+    "white_balance_k": 5600
+  },
+  "material_palette": {
+    "primary_hex": "#F2F2F0",
+    "secondary_hex": "#2B2B2E",
+    "glass_hex": "#1F3B4A",
+    "accent_hex": "#B8B5AE",
+    "paving_hex": "#8A8C8B"
+  },
+  "facade_articulation": {
+    "plinth_height_m": 0.5,
+    "parapet_band_height_m": 0.35,
+    "office_glazing_ratio": 0.82,
+    "feature_frame_depth_m": 0.35,
+    "entrance_canopy_projection_m": 5.0,
+    "vertical_fin_count": 0,
+    "accent_bay_interval": 0,
+    "clerestory_band_height_m": 1.0
+  },
+  "presentation": {
+    "landscape_character": "layered low-maintenance subtropical planting concentrated at arrival zones",
+    "paving_character": "seamless pale concrete with precise saw-cut joints",
+    "entourage_density": "low"
+  },
+  "panel_module_m": 1.2,
+  "loading_docks_per_main_facade": 3,
+  "add_office_entrances": true,
+  "roof_type": "symmetric low-slope gable profiled-metal roof fitted inside LOD100 envelope",
+  "roof_slope_deg": 7.0,
+  "roof_eave_overhang_m": 0.75,
+  "roof_ridge_orientation": "long_axis",
+  "roof_grouping_mode": "continuous_rows",
+  "roof_group_gap_tolerance_m": 10.0,
+  "solar_panels": false,
+  "focus_building_ids": [],
+  "context_building_ids": [],
+  "site_design": {
+    "preserve_transport_geometry": true,
+    "preserve_landscape_boundaries": true,
+    "context_render_mode": "translucent_massing",
+    "context_opacity": 0.24,
+    "surrounding_context_mode": "procedural_perimeter",
+    "surrounding_context_count": 6,
+    "surrounding_landscape_buffer": true
+  },
+  "grammar_version": "industrial-grammar-v3-continuous-roof",
+  "asset_library_version": "baseline-assets-v2",
+  "design_preferences": {
+    "style_preset": "refined_high_tech",
+    "decor_level": "minimal",
+    "design_package": "minimal_logistics",
+    "envelope_kit": "sandwich_panel_flat",
+    "office_entrance_kit": "canopy_entry",
+    "facade_rhythm_kit": "horizontal_restrained",
+    "accent_coverage_percent": 3
+  }
+}

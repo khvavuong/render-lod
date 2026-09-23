@@ -165,7 +165,84 @@ def test_validation_only_protection_keeps_photoreal_provider_pixels(tmp_path: Pa
     document = json.loads((generated / "generation_manifest.json").read_text())
     assert document["output"]["protected_composite"] is False
     assert document["output"]["geometry_protection_mode"] == "validation_only"
+    # This fixture has no authoritative edge under LOCKED, so the structural screen measured
+    # nothing. Validation-only ships the provider pixels unchanged, so an unmeasurable screen
+    # must be reported as unverifiable instead of being promoted on an invented perfect score.
+    assert document["output"]["geometry_protection_status"] == "edge_alignment_unverifiable"
+    assert document["output"]["edge_alignment_verifiable"] is False
+    assert result.promoted_count == 0
+    assert result.rejected_count == 1
+
+
+def test_validation_only_screen_promotes_when_locked_edges_align(tmp_path: Path) -> None:
+    """A measurable, aligned screen still promotes in validation-only mode."""
+
+    size = (48, 48)
+    render = tmp_path / "renders" / "view-01"
+    generated = tmp_path / "generated" / "view-01"
+    base = Image.new("RGB", size, (255, 255, 255))
+    edges = Image.new("L", size, 0)
+    refined = Image.new("RGB", size, (255, 255, 255))
+    for y in range(size[1]):
+        # A detected edge occupies the transition band either side of the drawn line, so the
+        # authoritative band is written at the same width the screen will measure.
+        for x in (23, 24, 25):
+            edges.putpixel((x, y), 255)
+        refined.putpixel((24, y), (0, 0, 0))
+    render.mkdir(parents=True)
+    base.save(render / "base_rgb.png")
+    edges.save(render / "edges.png")
+    Image.new("L", size, 255).save(render / "locked_mask.png")
+    (render / "control_pack_manifest.json").write_text("{}", encoding="utf-8")
+    generated.mkdir(parents=True)
+    refined.save(generated / "refined.png")
+    (generated / "generation_manifest.json").write_text(
+        json.dumps({"output": {"media_type": "image/png", "sha256": "old"}}),
+        encoding="utf-8",
+    )
+
+    result = ProtectRefinement().execute(
+        tmp_path / "renders",
+        tmp_path / "generated",
+        restore_locked_pixels=False,
+    )
+
+    document = json.loads((generated / "generation_manifest.json").read_text())
+    assert document["output"]["edge_alignment_verifiable"] is True
+    assert document["output"]["geometry_protection_status"] == "edge_alignment_screen_passed"
     assert result.promoted_count == 1
+
+
+def test_validation_only_can_composite_registered_context_after_generation(tmp_path: Path) -> None:
+    render = tmp_path / "renders" / "view-01"
+    generated = tmp_path / "generated" / "view-01"
+    _save_rgb(render / "base_rgb.png", (255, 255, 255), (4, 2))
+    Image.new("L", (4, 2), 255).save(render / "locked_mask.png")
+    Image.new("L", (4, 2), 0).save(render / "edges.png")
+    Image.new("RGBA", (4, 2), (190, 190, 190, 96)).save(render / "context_proxy_rgba.png")
+    (render / "control_pack_manifest.json").write_text("{}", encoding="utf-8")
+    generated.mkdir(parents=True)
+    (generated / "refined.png").write_bytes(_png_bytes((20, 40, 60), (4, 2)))
+    (generated / "generation_manifest.json").write_text(
+        json.dumps({"output": {"media_type": "image/png", "sha256": "old"}}),
+        encoding="utf-8",
+    )
+
+    ProtectRefinement().execute(
+        tmp_path / "renders",
+        tmp_path / "generated",
+        restore_locked_pixels=False,
+        composite_context_proxy=True,
+    )
+
+    with Image.open(generated / "refined.png") as image:
+        assert image.convert("RGB").getpixel((0, 0)) != (20, 40, 60)
+    document = json.loads((generated / "generation_manifest.json").read_text())
+    assert document["output"]["context_proxy_composited"] is True
+    assert (
+        document["output"]["context_proxy_sha256"]
+        == hashlib.sha256((render / "context_proxy_rgba.png").read_bytes()).hexdigest()
+    )
 
 
 def test_geometry_v2_penalizes_invented_locked_edges(tmp_path: Path) -> None:
@@ -323,6 +400,8 @@ def test_conditioning_camera_preflight_measures_semantic_coverage(tmp_path: Path
     report = json.loads(result.report_path.read_text(encoding="utf-8"))
     assert report["views"][0]["focus_coverage"] == pytest.approx(0.3)
     assert report["views"][0]["circulation_coverage"] == pytest.approx(0.2)
+    assert report["views"][0]["role_target_coverage"] == pytest.approx(0.2)
+    assert report["views"][0]["available_role_targets"] == ["site_road"]
 
 
 def test_conditioning_camera_preflight_measures_central_occluder_crop(
@@ -465,3 +544,89 @@ def test_certification_labels_missing_visual_evidence_as_review(tmp_path: Path) 
     assert report.state is CertificationState.MARKETING_GENERATIVE_REVIEW
     integrity = next(item for item in report.evidence if item.gate is QAGate.ARTIFACT_INTEGRITY)
     assert integrity.status is QAStatus.PASS
+
+
+def test_context_composite_reaches_the_unbranded_deliverable(tmp_path: Path) -> None:
+    """Generation writes unbranded_refined first, and branding reuses it rather than the
+    composited file, so the composite has to update it too or it never ships."""
+
+    size = (16, 16)
+    render = tmp_path / "renders" / "view-01"
+    generated = tmp_path / "generated" / "view-01"
+    render.mkdir(parents=True)
+    generated.mkdir(parents=True)
+    _save_rgb(render / "base_rgb.png", (255, 255, 255), size)
+    Image.new("L", size, 0).save(render / "edges.png")
+    Image.new("L", size, 255).save(render / "locked_mask.png")
+    (render / "control_pack_manifest.json").write_text("{}", encoding="utf-8")
+    overlay = Image.new("RGBA", size, (0, 0, 0, 0))
+    for x in range(size[0]):
+        for y in range(4):
+            overlay.putpixel((x, y), (10, 20, 30, 255))
+    overlay.save(render / "context_proxy_rgba.png")
+    Image.new("RGB", size, (255, 255, 255)).save(generated / "refined.png")
+    Image.new("RGB", size, (255, 255, 255)).save(generated / "unbranded_refined.png")
+    (generated / "generation_manifest.json").write_text(
+        json.dumps({"output": {"media_type": "image/png", "sha256": "old"}}), encoding="utf-8"
+    )
+
+    ProtectRefinement().execute(
+        tmp_path / "renders",
+        tmp_path / "generated",
+        restore_locked_pixels=False,
+        composite_context_proxy=True,
+    )
+
+    with Image.open(generated / "unbranded_refined.png") as unbranded:
+        assert unbranded.getpixel((0, 0)) == (10, 20, 30)
+    document = json.loads((generated / "generation_manifest.json").read_text())
+    assert document["output"]["context_proxy_composited"] is True
+
+
+def test_context_composite_never_copies_branding_into_the_unbranded_deliverable(
+    tmp_path: Path,
+) -> None:
+    """Branding runs at the end of every invocation, so on a re-run `refined` already carries
+    the logo. Compositing from it and writing the result back to `unbranded_refined` burns the
+    logo into the one file that must not have it, and each further run stacks another copy.
+    Measured on the reference boards this left the logo in four of six unbranded deliverables.
+    """
+
+    size = (16, 16)
+    render = tmp_path / "renders" / "view-01"
+    generated = tmp_path / "generated" / "view-01"
+    render.mkdir(parents=True)
+    generated.mkdir(parents=True)
+    _save_rgb(render / "base_rgb.png", (255, 255, 255), size)
+    Image.new("L", size, 0).save(render / "edges.png")
+    Image.new("L", size, 255).save(render / "locked_mask.png")
+    (render / "control_pack_manifest.json").write_text("{}", encoding="utf-8")
+    overlay = Image.new("RGBA", size, (0, 0, 0, 0))
+    for x in range(size[0]):
+        for y in range(4):
+            overlay.putpixel((x, y), (10, 20, 30, 255))
+    overlay.save(render / "context_proxy_rgba.png")
+
+    # A previously branded run: `refined` carries a mark that `unbranded_refined` does not.
+    # The mark sits below the overlay band so the composite cannot hide it either way.
+    branded = Image.new("RGB", size, (255, 255, 255))
+    for x in range(3):
+        for y in range(5, 8):
+            branded.putpixel((x, y), (200, 0, 0))
+    branded.save(generated / "refined.png")
+    Image.new("RGB", size, (255, 255, 255)).save(generated / "unbranded_refined.png")
+    (generated / "generation_manifest.json").write_text(
+        json.dumps({"output": {"media_type": "image/png", "sha256": "old"}}), encoding="utf-8"
+    )
+
+    ProtectRefinement().execute(
+        tmp_path / "renders",
+        tmp_path / "generated",
+        restore_locked_pixels=False,
+        composite_context_proxy=True,
+    )
+
+    with Image.open(generated / "unbranded_refined.png") as unbranded:
+        # The overlay applied, and the logo pixel did not travel with it.
+        assert unbranded.getpixel((0, 0)) == (10, 20, 30)
+        assert unbranded.getpixel((1, 6)) == (255, 255, 255)

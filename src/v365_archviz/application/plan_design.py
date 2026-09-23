@@ -196,7 +196,16 @@ class PlanDesign:
                 treatment = BuildingTreatment.CONTEXT
             elif element.scene_element_id in brief.focus_building_ids or (
                 not brief.focus_building_ids
-                and element.semantic_role in {SemanticRole.MAIN_SHED, SemanticRole.OFFICE_BLOCK}
+                and element.semantic_role
+                in {
+                    SemanticRole.MAIN_SHED,
+                    SemanticRole.OFFICE_BLOCK,
+                    # In a LOD200 model the cladding panel is the shed's facade,
+                    # so it is the subject rather than something standing near
+                    # it. Left out, it was treated as an auxiliary mass and
+                    # never received the envelope grammar it exists to show.
+                    SemanticRole.ENVELOPE_PANEL,
+                }
             ):
                 treatment = BuildingTreatment.FOCUS
             elif element.semantic_role is SemanticRole.UTILITY_BLOCK:

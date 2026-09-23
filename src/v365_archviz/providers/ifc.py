@@ -202,15 +202,12 @@ def _box_surfaces(
         return ()
     if height < 3.0 and element_role is not SemanticRole.UTILITY_BLOCK:
         return ()
-    # A wall, a roof plane and an awning are parts of a building's skin, not
-    # masses with four sides of their own. Boxing each of them would hand the
-    # design planner dozens of facades facing every direction; the shed derived
-    # from the roofs is what carries this building's real faces.
-    if element_role in {
-        SemanticRole.ENVELOPE_PANEL,
-        SemanticRole.ROOF,
-        SemanticRole.CANOPY,
-    }:
+    # A roof and an awning are horizontal; boxing them would invent four walls
+    # where the building already has its own. A wall keeps its faces, because in
+    # a LOD200 model those faces are the real facade, and `plan_design` skips
+    # any element that has none — suppressing them left two dozen cladding
+    # panels with no design applied to them at all.
+    if element_role in {SemanticRole.ROOF, SemanticRole.CANOPY}:
         return ()
     definitions = (
         ("south", (x0, y0, z0), (1.0, 0.0, 0.0), (0.0, -1.0, 0.0), width),
@@ -468,13 +465,23 @@ class IfcGeometryProvider:
 
         # A LOD200 building arrives as roof planes; the design and camera
         # planners read masses. Resolve the planes into the mass they cover.
-        elements.extend(sheds_from_roofs(elements, ground))
+        derived = sheds_from_roofs(elements, ground)
+        openings = {"IfcDoor", "IfcWindow"}
         for element in elements:
+            # A door is held in a facade, it is not one. Boxing the eighteen
+            # dock doors produced fifty-four surfaces and handed the design
+            # planner each of them as something to design.
+            if element.source.category in openings:
+                continue
             surfaces.extend(
                 _box_surfaces(
                     element.scene_element_id, element.bounding_box, element.semantic_role
                 )
             )
+        # The derived shed is a shape for the planners to reason about, not a
+        # surface anybody should design or a solid anybody should draw: the
+        # walls it was inferred from are already both of those.
+        elements.extend(derived)
         if _has_overlapping_focus_alternatives(elements):
             raise InvalidModelError(
                 "IFC contains overlapping focus-building alternatives; use a view-scoped Revit "

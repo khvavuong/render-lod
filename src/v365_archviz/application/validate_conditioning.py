@@ -16,7 +16,21 @@ from v365_archviz.domain.scene import CanonicalScene, SemanticRole
 from v365_archviz.domain.workflow import ViewRole, ViewSet
 from v365_archviz.errors import InvalidModelError
 
-FOCUS_ROLES = frozenset({"main_shed", "office_block", "roof", "primary_facade", "design_detail"})
+# A LOD200 model draws the building as walls and roof planes rather than as one
+# mass, and at eye level the walls are the only part of it in frame. Leaving
+# them out measured the subject at under one per cent of the image and rejected
+# every camera before generation.
+FOCUS_ROLES = frozenset(
+    {
+        "main_shed",
+        "office_block",
+        "roof",
+        "canopy",
+        "envelope_panel",
+        "primary_facade",
+        "design_detail",
+    }
+)
 CIRCULATION_ROLES = frozenset(
     {
         "site_road",

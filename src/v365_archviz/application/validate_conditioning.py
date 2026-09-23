@@ -76,11 +76,21 @@ MINIMUM_ROLE_TARGET_COVERAGE: dict[ViewRole, float] = {
 ROLE_TARGETS: dict[ViewRole, frozenset[str]] = {
     ViewRole.OVERALL: frozenset({"site_road", "landscape_zone", "main_entrance"}),
     ViewRole.CONTEXT: frozenset({"main_entrance", "secondary_entrance"}),
-    ViewRole.HERO: frozenset({"loading_zone", "service_yard"}),
+    # A dock door is what a logistics view is of. A LOD200 model authors the
+    # doors and leaves the apron to the site drawing, so a gate that accepts
+    # only ground rejects every such model however well the view is framed.
+    ViewRole.HERO: frozenset({"loading_zone", "service_yard", "loading_dock"}),
     ViewRole.DETAIL: frozenset({"site_road", "service_yard", "parking", "landscape_zone"}),
     ViewRole.OFFICE_HERO: frozenset({"office_block", "design_detail", "primary_facade"}),
     ViewRole.LOADING_DETAIL: frozenset(
-        {"main_entrance", "office_block", "loading_zone", "design_detail", "primary_facade"}
+        {
+            "main_entrance",
+            "office_block",
+            "loading_zone",
+            "loading_dock",
+            "design_detail",
+            "primary_facade",
+        }
     ),
 }
 

@@ -28,10 +28,22 @@ RUN useradd --create-home --uid 10001 v365
 WORKDIR /app
 
 COPY pyproject.toml README.md ./
-COPY src ./src
-# Editable, because the API resolves the brand logo from the source tree.
+# The dependencies are installed from `pyproject.toml` alone, against a stub
+# package, so this layer is keyed on the dependency list rather than on the
+# source. Copying `src` first put the source above the install, so every
+# one-line change re-resolved and re-downloaded every wheel — forty-four
+# megabytes of ifcopenshell among them. On a slow connection that is twenty-five
+# minutes to see the effect of an edit, every time.
 RUN python3 -m venv /opt/venv \
-    && /opt/venv/bin/pip install --no-cache-dir -e .
+    && mkdir -p src/v365_archviz \
+    && touch src/v365_archviz/__init__.py \
+    && /opt/venv/bin/pip install --no-cache-dir -e . \
+    && rm -rf src
+
+COPY src ./src
+# Editable, because the API resolves the brand logo from the source tree. The
+# dependencies are in the venv already, so this only re-points the path hook.
+RUN /opt/venv/bin/pip install --no-cache-dir --no-deps -e .
 
 COPY assets ./assets
 COPY scripts ./scripts

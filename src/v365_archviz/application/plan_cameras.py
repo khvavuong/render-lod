@@ -14,7 +14,14 @@ from v365_archviz.application.camera_framing import (
     half_fov_deg,
 )
 from v365_archviz.artifacts import atomic_write
-from v365_archviz.domain.design import BuildingTreatment, DesignDNA, FacadeDesign, LoadingDock
+from v365_archviz.domain.design import (
+    BuildingTreatment,
+    DesignDNA,
+    DesignEvidenceState,
+    Entrance,
+    FacadeDesign,
+    LoadingDock,
+)
 from v365_archviz.domain.photography_pack import PhotographyPack, RoleFraming
 from v365_archviz.domain.scene import CanonicalScene, SceneElement, SceneSurface, SemanticRole
 from v365_archviz.domain.workflow import Camera, ViewRole, ViewSet
@@ -465,6 +472,328 @@ def _preferred_long_axis(design: DesignDNA | None, fallback: int) -> int:
     return 0 if votes[0] >= votes[1] else 1
 
 
+#: Roles a camera cannot stand inside. Ground and site surfaces are excluded on
+#: purpose: a camera standing on the apron is inside the apron slab's box, and
+#: that is where it belongs.
+SOLID_ROLES = frozenset(
+    {
+        SemanticRole.MAIN_SHED,
+        SemanticRole.OFFICE_BLOCK,
+        SemanticRole.UTILITY_BLOCK,
+        SemanticRole.ENVELOPE_PANEL,
+    }
+)
+
+#: How many boxes a standpoint may be pushed out of before the search gives up.
+#: Leaving one building can put the camera inside the next, so the eviction is
+#: iterative; three buildings deep is already further than any authored site.
+MAXIMUM_EVICTIONS = 8
+
+
+def _solid_footprints(
+    scene: CanonicalScene,
+) -> tuple[tuple[float, float, float, float, float, float], ...]:
+    """The boxes a camera must stay out of, as (x0, y0, z0, x1, y1, z1)."""
+
+    return tuple(
+        (
+            element.bounding_box.minimum[0],
+            element.bounding_box.minimum[1],
+            element.bounding_box.minimum[2],
+            element.bounding_box.maximum[0],
+            element.bounding_box.maximum[1],
+            element.bounding_box.maximum[2],
+        )
+        for element in scene.elements
+        if element.semantic_role in SOLID_ROLES
+    )
+
+
+#: How far off a facade plane an authored opening may sit and still belong to it.
+#: A dock door is modelled in the wall, so its centre is within the wall's own
+#: thickness of the plane; a metre of tolerance covers a reveal or a sill.
+FACADE_ATTACHMENT_TOLERANCE_M = 1.5
+
+
+#: Where an elevation is probed for somewhere to stand. A LOD200 office is
+#: usually built against the shed it serves, so one or two of its four box
+#: faces are buried in the neighbour; aiming at a buried face puts the camera
+#: inside that neighbour, and once evicted it looks at the neighbour's back.
+APPROACH_PROBES_M = (6.0, 14.0)
+
+
+def _facades_of(
+    scene: CanonicalScene,
+    roles: frozenset[SemanticRole],
+    solids: tuple[tuple[float, float, float, float, float, float], ...] = (),
+) -> list[SceneSurface]:
+    """The vertical surfaces of the masses a camera can be aimed at.
+
+    With `solids`, only the ones a camera can stand in front of.
+    """
+
+    subjects = {
+        element.scene_element_id
+        for element in scene.elements
+        if element.semantic_role in roles
+    }
+    facades = [
+        surface
+        for surface in scene.surfaces
+        if surface.element_id in subjects and abs(surface.frame.normal[2]) < 0.1
+    ]
+    if not solids:
+        return facades
+    approachable = [
+        surface for surface in facades if _is_approachable(surface, solids)
+    ]
+    # An elevation with nowhere to stand is still better than no elevation at
+    # all: a courtyard model where every face is enclosed should fall through
+    # to the gate's own report rather than to a silent empty list.
+    return approachable or facades
+
+
+def _is_approachable(
+    surface: SceneSurface,
+    solids: tuple[tuple[float, float, float, float, float, float], ...],
+) -> bool:
+    """Whether there is open air in front of this elevation to photograph it from."""
+
+    frame = surface.frame
+    middle = (
+        frame.origin[0] + frame.u_axis[0] * surface.width_m / 2,
+        frame.origin[1] + frame.u_axis[1] * surface.width_m / 2,
+        frame.origin[2] + surface.height_m / 2,
+    )
+    return all(
+        _escape_once(
+            middle[0] + frame.normal[0] * probe,
+            middle[1] + frame.normal[1] * probe,
+            middle[2],
+            solids,
+            0.0,
+        )
+        is None
+        for probe in APPROACH_PROBES_M
+    )
+
+
+def _position_on_facade(surface: SceneSurface, point: tuple[float, float]) -> float | None:
+    """Where along a facade a point sits, as a fraction of its width, or None.
+
+    None when the point is off the end of the facade or too far off its plane to
+    have been modelled in it.
+    """
+
+    frame = surface.frame
+    offset = (point[0] - frame.origin[0], point[1] - frame.origin[1])
+    along = offset[0] * frame.u_axis[0] + offset[1] * frame.u_axis[1]
+    away = abs(offset[0] * frame.normal[0] + offset[1] * frame.normal[1])
+    if away > FACADE_ATTACHMENT_TOLERANCE_M:
+        return None
+    if not 0.0 <= along <= surface.width_m:
+        return None
+    return along / surface.width_m
+
+
+def _authored_dock_candidates(
+    scene: CanonicalScene,
+) -> list[tuple[FacadeDesign | None, SceneSurface | None, LoadingDock, float]]:
+    """The dock doors the model itself draws, as the shot builder expects them.
+
+    The design plan invents docks only when the brief asks it to, and a LOD200
+    brief asks it not to: the doors are already drawn, so `logistics kit =
+    preserve_model`. The planner then had nothing to aim the two logistics views
+    at and fell back to arithmetic on the site bounding box — on a 176 m site
+    that stands the camera 180 m from its subject with a 35 mm lens. The doors
+    were there the whole time; nothing was reading them.
+    """
+
+    solids = _solid_footprints(scene)
+    facades = _facades_of(
+        scene, frozenset({SemanticRole.MAIN_SHED, SemanticRole.OFFICE_BLOCK}), solids
+    )
+    if not facades:
+        return []
+    docks = [
+        element for element in scene.elements if element.semantic_role is SemanticRole.LOADING_DOCK
+    ]
+    on_facade: dict[str, list[tuple[SceneSurface, LoadingDock]]] = {}
+    for index, dock in enumerate(docks, start=1):
+        box = dock.bounding_box
+        centre = (
+            (box.minimum[0] + box.maximum[0]) / 2,
+            (box.minimum[1] + box.maximum[1]) / 2,
+        )
+        placements = [
+            (surface, position)
+            for surface in facades
+            if (position := _position_on_facade(surface, centre)) is not None
+        ]
+        if not placements:
+            continue
+        # A door sits in one wall. When two walls claim it — a shed's own panel
+        # and the derived mass it belongs to — the widest is the elevation a
+        # photographer would stand in front of.
+        surface, position = max(placements, key=lambda placement: placement[0].width_m)
+        authored = LoadingDock(
+            dock_id=f"authored-dock-{index:02d}",
+            u=min(1.0, max(0.0, position)),
+            width_m=max(0.8, box.maximum[0] - box.minimum[0], box.maximum[1] - box.minimum[1]),
+            clear_height_m=min(6.5, max(3.2, box.maximum[2] - box.minimum[2])),
+            evidence_state=DesignEvidenceState.AUTHORED,
+        )
+        on_facade.setdefault(surface.surface_id, []).append((surface, authored))
+    if not on_facade:
+        return []
+    # One elevation, not eighteen scattered doors. The wall the model puts most
+    # of its doors in is the operational face, and a logistics view is of that
+    # face; picking a door off a wall that has one puts the camera at the quiet
+    # end of the building with nothing around it to photograph.
+    chosen = max(
+        on_facade.values(),
+        key=lambda placements: (len(placements), placements[0][0].width_m),
+    )
+    return [
+        (None, surface, dock, side)
+        for surface, dock in chosen
+        for side in (-1.0, 1.0)
+    ]
+
+
+def _authored_office_candidates(
+    scene: CanonicalScene,
+) -> list[tuple[FacadeDesign | None, SceneSurface | None, Entrance | None]]:
+    """The office block's own elevation, when the brief invents no entrance.
+
+    `add_office_entrances` is false whenever the entrance kit preserves the
+    model, which is the honest setting for a model that drew its own. Without
+    this the office view had nothing authored to stand in front of either.
+    """
+
+    facades = _facades_of(
+        scene, frozenset({SemanticRole.OFFICE_BLOCK}), _solid_footprints(scene)
+    )
+    if not facades:
+        return []
+    # Centre of the widest elevation: with no authored door position to use,
+    # the middle of the longest wall is the least arbitrary place to aim.
+    surface = max(facades, key=lambda candidate: candidate.width_m)
+    entrance = Entrance(
+        u=0.5,
+        width_m=min(2.4, surface.width_m * 0.25),
+        evidence_state=DesignEvidenceState.INFERRED_PROPOSAL,
+    )
+    return [(None, surface, entrance)]
+
+
+#: The furthest off a facade's normal a ground-level camera is allowed to stand,
+#: as a fraction of its stand-off. A door four metres wide seen from sixty
+#: degrees off is two metres of pixels behind its own reveal, and the
+#: conditioning gate then reports — correctly — that the subject of the view is
+#: not visible. Thirty-five degrees still reads as a three-quarter view and
+#: still shows the depth of the yard.
+MAXIMUM_OBLIQUITY = math.tan(math.radians(35.0))
+
+
+def _legible_lateral(lateral: float, outward: float) -> float:
+    """Pull a sideways offset back until the elevation is still worth photographing."""
+
+    return min(lateral, outward * MAXIMUM_OBLIQUITY)
+
+
+#: The margin kept when the requested clearance will not fit. A yard narrower
+#: than twice the clearance makes the full stand-off impossible, and a camera
+#: bouncing between two walls ends inside one of them. The guarantee is that the
+#: lens is in open air; the clearance is what the planner asks for on top.
+MINIMUM_CLEARANCE_M = 1.0
+
+
+def _escape_once(
+    x: float,
+    y: float,
+    z: float,
+    solids: tuple[tuple[float, float, float, float, float, float], ...],
+    clearance: float,
+) -> tuple[float, float] | None:
+    """The shortest move that leaves the box the point is deepest inside, or None.
+
+    Containment is strict: a camera standing in front of a wall is where the
+    shot solvers put it, and a close elevation is a photograph, not a fault.
+    Only a lens inside the building is wrong, and `clearance` is how far out
+    such a camera is placed once it has been found — not a stand-off imposed on
+    cameras that were already in open air.
+    """
+
+    escapes: list[tuple[float, float, float]] = []
+    for x0, y0, z0, x1, y1, z1 in solids:
+        if not (z0 <= z <= z1 and x0 <= x <= x1 and y0 <= y <= y1):
+            continue
+        # Four ways out; take the shortest, so the camera keeps as much of the
+        # framing the planner asked for as it can.
+        candidates = (
+            (x0 - clearance - x, 0.0),
+            (x1 + clearance - x, 0.0),
+            (0.0, y0 - clearance - y),
+            (0.0, y1 + clearance - y),
+        )
+        shift = min(candidates, key=lambda offset: math.hypot(*offset))
+        escapes.append((math.hypot(*shift), shift[0], shift[1]))
+    if not escapes:
+        return None
+    # Resolve the deepest intrusion first: a shallow one may disappear on its
+    # own once the camera has left the building it is actually inside.
+    _, shift_x, shift_y = max(escapes)
+    return shift_x, shift_y
+
+
+def _evict(
+    position: tuple[float, float, float],
+    solids: tuple[tuple[float, float, float, float, float, float], ...],
+    clearance: float,
+) -> tuple[float, float, float]:
+    x, y, z = position
+    for _ in range(MAXIMUM_EVICTIONS):
+        shift = _escape_once(x, y, z, solids, clearance)
+        if shift is None:
+            break
+        x += shift[0]
+        y += shift[1]
+    return (x, y, z)
+
+
+def _free_standpoint(
+    position: tuple[float, float, float],
+    solids: tuple[tuple[float, float, float, float, float, float], ...],
+    clearance: float,
+) -> tuple[float, float, float]:
+    """Move a camera out of any building it stands inside, through the nearest wall.
+
+    The planner places ground-level cameras by arithmetic on a bounding box —
+    "back off the facade by a quarter of the cross span", "stand a tenth of the
+    way along". On a single shed in an open site every such offset lands in open
+    air, which is why the arithmetic survived this long. On a site with two rows
+    of sheds it lands inside one of them, and a camera inside a wall renders a
+    frame that is one hundred percent cladding: the conditioning gate reports it
+    as an excessively cropped subject, which is true but says nothing about the
+    real fault.
+
+    No offset can be trusted to be in open air, so the standpoint is checked
+    against the geometry instead of argued about. Height is left alone: a camera
+    at eye level is inside a building's box vertically by definition, and lifting
+    it out would put the lens on the roof.
+    """
+
+    if not solids:
+        return position
+    placed = _evict(position, solids, clearance)
+    if _escape_once(*placed, solids, 0.0) is None:
+        return placed
+    # The clearance did not fit — a yard too narrow for it bounces the camera
+    # from one wall into the other. Keep the guarantee, drop the preference.
+    return _evict(position, solids, MINIMUM_CLEARANCE_M)
+
+
 def _arrival_shot(
     scene: CanonicalScene,
     focus_minimum: tuple[float, float, float],
@@ -788,13 +1117,15 @@ class PlanStandardCameras:
         human_focal_mm = photography.framing_for(ViewRole.LOADING_DETAIL).focal_length_mm
         if design is not None:
             surfaces_by_id = {surface.surface_id: surface for surface in scene.surfaces}
-            office_candidates = [
+            office_candidates: list[
+                tuple[FacadeDesign | None, SceneSurface | None, Entrance | None]
+            ] = [
                 (facade, surfaces_by_id.get(facade.surface_id), facade.office_entrance)
                 for building in design.buildings
                 if building.treatment is BuildingTreatment.FOCUS
                 for facade in building.facades
                 if facade.office_entrance is not None
-            ]
+            ] or _authored_office_candidates(scene)
             if office_candidates:
                 _office_facade, office_surface, office_entrance = max(
                     office_candidates,
@@ -888,14 +1219,16 @@ class PlanStandardCameras:
                             * math.tan(math.radians(office_framing.elevation_deg)),
                         ),
                     )
-            all_loading_candidates = [
+            all_loading_candidates: list[
+                tuple[FacadeDesign | None, SceneSurface | None, LoadingDock, float]
+            ] = [
                 (facade, surfaces_by_id.get(facade.surface_id), dock, side)
                 for building in design.buildings
                 if building.treatment is BuildingTreatment.FOCUS
                 for facade in building.facades
                 for dock in facade.loading_docks
                 for side in (-1.0, 1.0)
-            ]
+            ] or _authored_dock_candidates(scene)
             density_factor = {"none": 0.0, "low": 0.65, "medium": 1.0, "high": 1.35}[
                 design.presentation.entourage_density
             ]
@@ -924,7 +1257,7 @@ class PlanStandardCameras:
             ]
 
             def dock_clearance(
-                candidate: tuple[FacadeDesign, SceneSurface | None, LoadingDock, float],
+                candidate: tuple[FacadeDesign | None, SceneSurface | None, LoadingDock, float],
             ) -> tuple[float, float]:
                 _facade, surface, dock, side = candidate
                 if surface is None:
@@ -1019,6 +1352,9 @@ class PlanStandardCameras:
                         logistics_outward_distance,
                         logistics_focal_mm,
                     )
+                    legible_lateral = _legible_lateral(
+                        lateral_distance, logistics_outward_distance
+                    )
                     target = (
                         anchored_door[0],
                         anchored_door[1],
@@ -1027,10 +1363,10 @@ class PlanStandardCameras:
                     loading_detail_shot = (
                         (
                             anchored_door[0]
-                            + frame.u_axis[0] * lateral_distance * side
+                            + frame.u_axis[0] * legible_lateral * side
                             + frame.normal[0] * logistics_outward_distance,
                             anchored_door[1]
-                            + frame.u_axis[1] * lateral_distance * side
+                            + frame.u_axis[1] * legible_lateral * side
                             + frame.normal[1] * logistics_outward_distance,
                             # A narrow yard with auxiliary blocks needs the permitted low-drone
                             # variant so the operational facade is not hidden by foreground plant.
@@ -1041,8 +1377,10 @@ class PlanStandardCameras:
                     # Keep the close facade camera inside the verified service apron. A larger
                     # normal offset can cross a narrow yard and put the camera inside the
                     # opposite support building even though its target remains valid.
-                    facade_detail_lateral = min(26.0, max(22.0, surface.width_m * 0.14))
                     facade_detail_outward = outward_distance
+                    facade_detail_lateral = _legible_lateral(
+                        min(26.0, max(22.0, surface.width_m * 0.14)), facade_detail_outward
+                    )
                     facade_detail_shot = (
                         (
                             door[0]
@@ -1066,6 +1404,7 @@ class PlanStandardCameras:
                     )
                     human_outward = human_shot.distance_m
                     human_focal_mm = human_shot.focal_length_mm
+                    human_lateral = _legible_lateral(human_lateral, human_outward)
                     human_target_shift = min(10.0, max(6.0, surface.width_m * 0.05))
                     loading_human_shot = (
                         (
@@ -1260,6 +1599,21 @@ class PlanStandardCameras:
                 sensor_width_mm=36,
                 aspect_ratio="16:9",
             ),
+        )
+        # Nothing above this line knows whether the point it computed is in open
+        # air. This does, and it is the only guarantee in the planner that does
+        # not depend on the shape of the model it was tuned against.
+        solids = _solid_footprints(scene)
+        standpoint_clearance = max(6.0, height * 0.8)
+        cameras = tuple(
+            camera.model_copy(
+                update={
+                    "position": _free_standpoint(
+                        camera.position, solids, standpoint_clearance
+                    )
+                }
+            )
+            for camera in cameras
         )
         revision_key = (
             scene.source.source_sha256[:16]

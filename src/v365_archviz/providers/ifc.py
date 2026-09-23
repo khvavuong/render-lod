@@ -233,6 +233,31 @@ def _box_surfaces(
     )
 
 
+#: Categories held inside a facade rather than being one. A door is not a
+#: surface to design: boxing the eighteen dock doors of a LOD200 shed produced
+#: fifty-four surfaces and handed the design planner each of them as a facade.
+OPENING_CATEGORIES = frozenset({"IfcDoor", "IfcWindow"})
+
+
+def scene_surfaces(elements: list[SceneElement]) -> list[SceneSurface]:
+    """The analytical facades of every element that has any.
+
+    A surface is never drawn; it is how `plan_design` finds a facade to place a
+    dock on and how `plan_cameras` finds a wall to stand in front of. An element
+    with no surface is therefore invisible to both planners, which is why the
+    derived sheds must reach this function rather than be appended after it.
+    """
+
+    return [
+        surface
+        for element in elements
+        if element.source.category not in OPENING_CATEGORIES
+        for surface in _box_surfaces(
+            element.scene_element_id, element.bounding_box, element.semantic_role
+        )
+    ]
+
+
 def _footprints_touch(first: BoundingBox, second: BoundingBox, tolerance: float = 1.5) -> bool:
     """Whether two footprints overlap or sit against each other in plan."""
 
@@ -487,22 +512,15 @@ class IfcGeometryProvider:
         # A LOD200 building arrives as roof planes; the design and camera
         # planners read masses. Resolve the planes into the mass they cover.
         derived = sheds_from_roofs(elements, ground, mesh_directory)
-        openings = {"IfcDoor", "IfcWindow"}
-        for element in elements:
-            # A door is held in a facade, it is not one. Boxing the eighteen
-            # dock doors produced fifty-four surfaces and handed the design
-            # planner each of them as something to design.
-            if element.source.category in openings:
-                continue
-            surfaces.extend(
-                _box_surfaces(
-                    element.scene_element_id, element.bounding_box, element.semantic_role
-                )
-            )
-        # The derived shed is a shape for the planners to reason about, not a
-        # surface anybody should design or a solid anybody should draw: the
-        # walls it was inferred from are already both of those.
+        # Before the surfaces are built, not after. `plan_design` skips every
+        # element that carries no surface, so a shed added afterwards is a shed
+        # neither planner can see: on PA-HATAY-3 the three derived sheds were
+        # dropped and the design plan kept the 18 m office block as the only
+        # focus mass, which is what `plan_cameras` then sized the whole 176 m
+        # site from. Every ground-level stand-off was measured against the
+        # office and landed inside a shed.
         elements.extend(derived)
+        surfaces.extend(scene_surfaces(elements))
         if _has_overlapping_focus_alternatives(elements):
             raise InvalidModelError(
                 "IFC contains overlapping focus-building alternatives; use a view-scoped Revit "

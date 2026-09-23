@@ -17,6 +17,7 @@ from v365_archviz.providers.ifc import (
     IDENTITY_4X4,
     _semantic_role,
     roof_clusters,
+    scene_surfaces,
     sheds_from_roofs,
 )
 
@@ -203,3 +204,30 @@ class TestBuildingsFromRoofs:
 
     def test_a_model_with_no_roof_planes_derives_nothing(self) -> None:
         assert sheds_from_roofs([], ground=0.0) == []
+
+    def test_a_derived_shed_has_facades(self) -> None:
+        # A surface is how `plan_design` finds a wall to put a dock on and how
+        # `plan_cameras` finds one to stand in front of, and `plan_design` skips
+        # any element that has none. A shed with no surfaces is a shed neither
+        # planner can see: on PA-HATAY-3 that left the 18 m office block as the
+        # only focus mass in a 176 m site, and every ground-level stand-off was
+        # then measured from the office and landed inside a shed.
+        sheds = sheds_from_roofs(list(LOD200_ROOFS), ground=0.0)
+        surfaces = scene_surfaces(sheds)
+        assert len(surfaces) == 4 * len(sheds)
+        assert {surface.element_id for surface in surfaces} == {
+            shed.scene_element_id for shed in sheds
+        }
+
+    def test_a_dock_door_is_not_given_facades_of_its_own(self) -> None:
+        # A door is held in a facade, it is not one. Boxed, the eighteen dock
+        # doors handed the design planner fifty-four walls to design.
+        door = SceneElement(
+            scene_element_id="door",
+            source=SourceElementRef(external_id="door", category="IfcDoor"),
+            transform=IDENTITY_4X4,
+            mesh_ref="meshes/door.npz",
+            bounding_box=BoundingBox(minimum=(0.0, 0.0, 0.0), maximum=(3.5, 0.8, 4.0)),
+            semantic_role=SemanticRole.LOADING_DOCK,
+        )
+        assert scene_surfaces([door]) == []

@@ -39,6 +39,14 @@ class SemanticRole(str, Enum):
     ROOF = "roof"
     SITE_BOUNDARY = "site_boundary"
     PRIMARY_FACADE = "primary_facade"
+    #: A thin elevated plane too small or too narrow to be a shed roof — the
+    #: awnings a LOD200 model draws along a building edge. Kept apart from ROOF
+    #: so a roof finish is not applied to the canopies instead of the roof.
+    CANOPY = "canopy"
+    #: A wall. It is part of a building's skin, never a building of its own; the
+    #: geometric mass rules must not see it, or a shed's own cladding is counted
+    #: as a dozen utility buildings standing on the site.
+    ENVELOPE_PANEL = "envelope_panel"
 
 
 class SourceModelRef(DomainModel):

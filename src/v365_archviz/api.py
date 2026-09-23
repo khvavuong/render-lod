@@ -266,6 +266,13 @@ class OutputArtifactResponse(BaseModel):
     title: str
     url: str
     view_id: str | None = None
+    #: Changes when these bytes change, so a client can tell one picture from
+    #: the next at an address that names the view rather than the file. Editing
+    #: a view rewrites its image in place; without this the browser reuses the
+    #: copy it already has within the page, which `Cache-Control` alone does not
+    #: prevent — an edit that had been generated, committed and written to disk
+    #: went on being drawn, and that cannot be told apart from one thrown away.
+    version: str
 
 
 class ViewSetOutputsResponse(BaseModel):
@@ -511,13 +518,18 @@ _VIEW_TITLES = {
 }
 
 
-def _etag(path: Path) -> str:
-    """A strong validator for a file that is replaced rather than appended to."""
+def _version(path: Path) -> str:
+    """What identifies these bytes, for a file that is replaced rather than appended to."""
 
     stat = path.stat()
     # A cache validator, not a security claim.
-    digest = hashlib.md5(f"{stat.st_mtime_ns}-{stat.st_size}".encode()).hexdigest()
-    return f'"{digest}"'
+    return hashlib.md5(f"{stat.st_mtime_ns}-{stat.st_size}".encode()).hexdigest()
+
+
+def _etag(path: Path) -> str:
+    """The same identity, quoted as the protocol requires."""
+
+    return f'"{_version(path)}"'
 
 
 def _matches(if_none_match: str | None, etag: str) -> bool:
@@ -1088,8 +1100,9 @@ def get_view_set_outputs(view_set_id: str) -> ViewSetOutputsResponse:
             title=title,
             view_id=view_id,
             url=f"/v1/view-sets/{view_set_id}/outputs/{asset_id}",
+            version=_version(path),
         )
-        for asset_id, (_, kind, title, view_id) in _output_files(view_set_id).items()
+        for asset_id, (path, kind, title, view_id) in _output_files(view_set_id).items()
     )
     return ViewSetOutputsResponse(outputs=outputs)
 

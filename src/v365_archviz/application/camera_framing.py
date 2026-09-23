@@ -283,3 +283,245 @@ def tilt_for_roofline(
     _, vertical = half_fov_deg(focal_length_mm, sensor_width_mm, aspect_ratio)
     limit_deg = math.degrees(math.atan(rise / distance_m))
     return max(0.0, limit_deg - vertical * margin)
+
+
+#: How close to the lens a point may be and still be projected. A target that
+#: straddles this plane is clamped rather than dropped, so it reads as filling
+#: the frame, which from that distance it does.
+NEAR_PLANE_M = 0.05
+
+
+def _camera_basis(
+    position: Vector3, target: Vector3
+) -> tuple[Vector3, Vector3, Vector3] | None:
+    """Forward, right and up of a camera aimed at a target, or None if degenerate."""
+
+    forward = tuple(target[axis] - position[axis] for axis in range(3))
+    length = math.sqrt(sum(value * value for value in forward))
+    if length <= 1e-9:
+        return None
+    forward = tuple(value / length for value in forward)
+    world_up = (0.0, 0.0, 1.0)
+    right = (
+        forward[1] * world_up[2] - forward[2] * world_up[1],
+        forward[2] * world_up[0] - forward[0] * world_up[2],
+        forward[0] * world_up[1] - forward[1] * world_up[0],
+    )
+    span = math.sqrt(sum(value * value for value in right))
+    # Straight down or straight up: any horizontal right vector will do.
+    right = (1.0, 0.0, 0.0) if span <= 1e-9 else tuple(value / span for value in right)
+    up = (
+        right[1] * forward[2] - right[2] * forward[1],
+        right[2] * forward[0] - right[0] * forward[2],
+        right[0] * forward[1] - right[1] * forward[0],
+    )
+    return forward, right, up  # type: ignore[return-value]
+
+
+def _convex_hull(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """Andrew's monotone chain, counter-clockwise, without repeating the first point."""
+
+    ordered = sorted(set(points))
+    if len(ordered) < 3:
+        return ordered
+
+    def build(sequence: list[tuple[float, float]]) -> list[tuple[float, float]]:
+        chain: list[tuple[float, float]] = []
+        for point in sequence:
+            while len(chain) >= 2:
+                (x0, y0), (x1, y1) = chain[-2], chain[-1]
+                cross = (x1 - x0) * (point[1] - y0) - (y1 - y0) * (point[0] - x0)
+                if cross > 0:
+                    break
+                chain.pop()
+            chain.append(point)
+        return chain
+
+    lower = build(ordered)
+    upper = build(list(reversed(ordered)))
+    return lower[:-1] + upper[:-1]
+
+
+def _clip_half_plane(
+    polygon: list[tuple[float, float]], axis: int, boundary: float, keep_above: bool
+) -> list[tuple[float, float]]:
+    """Sutherland-Hodgman against one edge of the frame."""
+
+    if not polygon:
+        return []
+    other = 1 - axis
+    clipped: list[tuple[float, float]] = []
+    for index, current in enumerate(polygon):
+        previous = polygon[index - 1]
+        current_in = current[axis] >= boundary if keep_above else current[axis] <= boundary
+        previous_in = previous[axis] >= boundary if keep_above else previous[axis] <= boundary
+        if current_in != previous_in:
+            span = current[axis] - previous[axis]
+            if abs(span) > 1e-12:
+                ratio = (boundary - previous[axis]) / span
+                crossing = [0.0, 0.0]
+                crossing[axis] = boundary
+                crossing[other] = previous[other] + (current[other] - previous[other]) * ratio
+                clipped.append((crossing[0], crossing[1]))
+        if current_in:
+            clipped.append(current)
+    return clipped
+
+
+def _clip_to_frame(polygon: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """Keep only the part of a projected shape the frame actually contains."""
+
+    for axis, boundary, keep_above in (
+        (0, -1.0, True),
+        (0, 1.0, False),
+        (1, -1.0, True),
+        (1, 1.0, False),
+    ):
+        polygon = _clip_half_plane(polygon, axis, boundary, keep_above)
+        if not polygon:
+            return []
+    return polygon
+
+
+def _polygon_area(polygon: list[tuple[float, float]]) -> float:
+    if len(polygon) < 3:
+        return 0.0
+    total = 0.0
+    for index, (x0, y0) in enumerate(polygon):
+        x1, y1 = polygon[index - 1]
+        total += x1 * y0 - x0 * y1
+    return abs(total) / 2
+
+
+def _projected_polygon(
+    position: Vector3,
+    target: Vector3,
+    bounds: Bounds,
+    focal_length_mm: float,
+    sensor_width_mm: float,
+    aspect_ratio: float,
+) -> list[tuple[float, float]]:
+    """What share of the frame a box would fill if nothing stood in front of it.
+
+    This is the prediction a threshold can be derived from instead of written
+    down. A dock door four metres wide and a service yard two thousand square
+    metres in plan cannot be asked for the same share of a frame, and a constant
+    that suits one rejects a model whose only evidence is the other — which is
+    how a correctly framed logistics view came to be refused on a model that had
+    eighteen dock doors and no apron. What both can be asked for is that they
+    show up in something like the proportion the geometry says they should.
+
+    Occlusion is deliberately not modelled: the gap between this number and what
+    the render actually shows is the useful signal, not an error.
+    """
+
+    basis = _camera_basis(position, target)
+    if basis is None:
+        return []
+    forward, right, up = basis
+    horizontal, vertical = half_fov_deg(focal_length_mm, sensor_width_mm, aspect_ratio)
+    tan_horizontal = math.tan(math.radians(horizontal))
+    tan_vertical = math.tan(math.radians(vertical))
+    minimum, maximum = bounds
+    projected: list[tuple[float, float]] = []
+    ahead = False
+    for corner in (
+        (minimum[0], minimum[1], minimum[2]),
+        (minimum[0], minimum[1], maximum[2]),
+        (minimum[0], maximum[1], minimum[2]),
+        (minimum[0], maximum[1], maximum[2]),
+        (maximum[0], minimum[1], minimum[2]),
+        (maximum[0], minimum[1], maximum[2]),
+        (maximum[0], maximum[1], minimum[2]),
+        (maximum[0], maximum[1], maximum[2]),
+    ):
+        offset = tuple(corner[axis] - position[axis] for axis in range(3))
+        depth = sum(offset[axis] * forward[axis] for axis in range(3))
+        if depth >= NEAR_PLANE_M:
+            ahead = True
+        else:
+            depth = NEAR_PLANE_M
+        across = sum(offset[axis] * right[axis] for axis in range(3))
+        above = sum(offset[axis] * up[axis] for axis in range(3))
+        projected.append(
+            (across / (depth * tan_horizontal), above / (depth * tan_vertical))
+        )
+    if not ahead:
+        # Entirely behind the lens. Clamping every corner to the near plane would
+        # otherwise report it as filling the frame.
+        return []
+    return _clip_to_frame(_convex_hull(projected))
+
+
+def projected_frame_fraction(
+    position: Vector3,
+    target: Vector3,
+    bounds: Bounds,
+    focal_length_mm: float,
+    *,
+    sensor_width_mm: float = 36.0,
+    aspect_ratio: float = 16 / 9,
+) -> float:
+    """What share of the frame one box would fill if nothing stood in front of it."""
+
+    polygon = _projected_polygon(
+        position, target, bounds, focal_length_mm, sensor_width_mm, aspect_ratio
+    )
+    # The frame itself spans two units on each axis.
+    return min(1.0, _polygon_area(polygon) / 4.0)
+
+
+#: Resolution the union is counted on. Coarse on purpose: the answer is compared
+#: against a rendered coverage as a ratio, and a hundredth of a frame is finer
+#: than any threshold that ratio feeds.
+UNION_GRID = (128, 72)
+
+
+def _contains(polygon: list[tuple[float, float]], x: float, y: float) -> bool:
+    """Whether a convex, counter-clockwise polygon contains a point."""
+
+    for index, (x0, y0) in enumerate(polygon):
+        x1, y1 = polygon[(index + 1) % len(polygon)]
+        if (x1 - x0) * (y - y0) - (y1 - y0) * (x - x0) < -1e-12:
+            return False
+    return True
+
+
+def projected_frame_union(
+    position: Vector3,
+    target: Vector3,
+    boxes: list[Bounds],
+    focal_length_mm: float,
+    *,
+    sensor_width_mm: float = 36.0,
+    aspect_ratio: float = 16 / 9,
+) -> float:
+    """What share of the frame a set of boxes would fill between them, counted once.
+
+    Adding the boxes up instead would make the answer depend on how many volumes
+    a modeller happened to draw for one thing: eighteen overlapping landscape
+    slabs would predict half a frame of planting where there is a quarter, and
+    the ratio a threshold reads from it would move with the model rather than
+    with the photograph.
+    """
+
+    polygons = [
+        polygon
+        for box in boxes
+        if (
+            polygon := _projected_polygon(
+                position, target, box, focal_length_mm, sensor_width_mm, aspect_ratio
+            )
+        )
+    ]
+    if not polygons:
+        return 0.0
+    columns, rows = UNION_GRID
+    covered = 0
+    for row in range(rows):
+        y = -1.0 + (row + 0.5) * 2.0 / rows
+        for column in range(columns):
+            x = -1.0 + (column + 0.5) * 2.0 / columns
+            if any(_contains(polygon, x, y) for polygon in polygons):
+                covered += 1
+    return covered / (columns * rows)

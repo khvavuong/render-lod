@@ -11,6 +11,7 @@ from typing import Any
 import numpy as np
 from PIL import Image, UnidentifiedImageError
 
+from v365_archviz.application.camera_framing import projected_frame_union
 from v365_archviz.artifacts import atomic_write
 from v365_archviz.domain.scene import CanonicalScene, SemanticRole
 from v365_archviz.domain.workflow import ViewRole, ViewSet
@@ -64,14 +65,24 @@ MINIMUM_AERIAL_VISIBLE_SURFACE_ROLES = 3
 MINIMUM_AERIAL_DEPRESSION_DEGREES = 18.0
 FOREGROUND_OCCLUDER_ROLES = frozenset({"vehicle"})
 MAXIMUM_CENTRAL_OCCLUDER_COVERAGE = 0.12
-MINIMUM_ROLE_TARGET_COVERAGE: dict[ViewRole, float] = {
-    ViewRole.OVERALL: 0.005,
-    ViewRole.CONTEXT: 0.015,
-    ViewRole.HERO: 0.01,
-    ViewRole.DETAIL: 0.005,
-    ViewRole.OFFICE_HERO: 0.01,
-    ViewRole.LOADING_DETAIL: 0.01,
-}
+#: How much of what the geometry predicts must survive into the render.
+#:
+#: This used to be a share of the frame per role, which cannot be right for two
+#: models at once. A service yard is two thousand square metres of ground and a
+#: dock door is sixteen; asking both for one percent of a frame asks the door to
+#: be photographed from six metres, and refuses a correctly framed logistics
+#: view of a model that authored eighteen doors and no apron. It also refused a
+#: LOD100 context view that was pointed straight at its gate, because a truck
+#: gate at a hundred metres is half of one tenth of a percent of the frame and
+#: nothing can change that but walking closer.
+#:
+#: What both can be asked is that they show up in something like the proportion
+#: the geometry says they should. Measured across the two real models the ratio
+#: runs from 0.12 — an aerial whose planting is mostly under its own trees — to
+#: 1.84, where the site grammar paints more ground than the model authored. The
+#: failures it has to keep catching sit at 0.00 to 0.03: an office block behind
+#: the shed it belongs to, an entrance hidden by a neighbour.
+MINIMUM_VISIBLE_FRACTION_OF_PREDICTED = 0.10
 
 ROLE_TARGETS: dict[ViewRole, frozenset[str]] = {
     ViewRole.OVERALL: frozenset({"site_road", "landscape_zone", "main_entrance"}),
@@ -107,6 +118,16 @@ ROLE_THRESHOLDS: dict[ViewRole, tuple[float, float, float]] = {
     # threshold high enough to reject a hidden or cropped access point.
     ViewRole.LOADING_DETAIL: (0.12, 0.90, 0.01),
 }
+
+
+def _aspect_ratio(notation: str) -> float:
+    """A camera states its aspect as `16:9`; the projection wants the number."""
+
+    try:
+        width, height = (float(part) for part in notation.split(":", 1))
+    except ValueError:
+        return 16 / 9
+    return width / height if height > 0 else 16 / 9
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,6 +200,18 @@ class ValidateConditioningViewSet:
             )
             available_role_targets = ROLE_TARGETS[camera.role] & authored_role_names
             role_target_coverage = sum(coverage.get(role, 0.0) for role in available_role_targets)
+            predicted_role_target = projected_frame_union(
+                camera.position,
+                camera.target,
+                [
+                    (element.bounding_box.minimum, element.bounding_box.maximum)
+                    for element in scene.elements
+                    if element.semantic_role.value in available_role_targets
+                ],
+                camera.focal_length_mm,
+                sensor_width_mm=camera.sensor_width_mm,
+                aspect_ratio=_aspect_ratio(camera.aspect_ratio),
+            )
             central_occluder = sum(
                 central_coverage.get(role, 0.0) for role in FOREGROUND_OCCLUDER_ROLES
             )
@@ -192,9 +225,13 @@ class ValidateConditioningViewSet:
                 failures.append("authored_circulation_not_visible")
             if central_occluder > MAXIMUM_CENTRAL_OCCLUDER_COVERAGE:
                 failures.append("foreground_entourage_obstructs_subject")
-            minimum_role_target = MINIMUM_ROLE_TARGET_COVERAGE[camera.role]
-            if available_role_targets and role_target_coverage < minimum_role_target:
-                failures.append("camera_role_target_not_visible")
+            minimum_role_target = MINIMUM_VISIBLE_FRACTION_OF_PREDICTED * predicted_role_target
+            if available_role_targets:
+                if predicted_role_target <= 0.0:
+                    # Nothing to do with occlusion: the camera is not pointed at it.
+                    failures.append("camera_role_target_not_in_frame")
+                elif role_target_coverage < minimum_role_target:
+                    failures.append("camera_role_target_not_visible")
             authored_site_underlay = SemanticRole.SITE_GROUND in authored_roles
             if camera.role in AERIAL_ROLES and authored_site_underlay:
                 if site_plan < MINIMUM_AERIAL_SITE_PLAN_COVERAGE:
@@ -218,6 +255,7 @@ class ValidateConditioningViewSet:
                     "visible_site_roles": visible_site_roles,
                     "camera_depression_degrees": depression_degrees,
                     "role_target_coverage": role_target_coverage,
+                    "predicted_role_target_coverage": predicted_role_target,
                     "available_role_targets": sorted(available_role_targets),
                     "central_entourage_occlusion": central_occluder,
                     "thresholds": {

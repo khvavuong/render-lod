@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from v365_archviz.application.apply_view_edit import (
     AppliedViewEdit,
+    ensure_editable,
     requeue_for_validation,
     view_directory,
 )
@@ -34,6 +35,10 @@ class RestoreViewEdit:
         edit_id: str,
         created_by: str,
     ) -> AppliedViewEdit:
+        # Before the image is put back, not after: a refusal that arrives once
+        # the file is already swapped leaves the view changed and the caller
+        # told it failed.
+        ensure_editable(job)
         store = ViewEditStore(view_directory(settings, job, view_id))
         source = store.record(source_edit_id)
         if source.state != "committed":

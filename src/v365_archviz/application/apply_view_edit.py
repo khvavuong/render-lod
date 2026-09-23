@@ -39,6 +39,28 @@ EDITABLE_STATES = frozenset(
 
 MAX_REFERENCES = 16
 MAX_CANDIDATES = 4
+#: `GenerationJob` counts every entry into REPAIRING and refuses the fourth.
+MAX_ATTEMPTS = 3
+
+
+def ensure_editable(job: GenerationJob) -> None:
+    """Refuse before anything is written, rather than after.
+
+    Every path here replaces the view's current image and only then asks the
+    job to reopen. Checking afterwards left a view rolled back on disk, its log
+    saying `committed`, the caller holding a 500 and the gates never re-run —
+    measured, not imagined.
+    """
+
+    if job.state not in EDITABLE_STATES:
+        raise InvalidModelError(
+            f"a view set in state {job.state.value} has no reviewable image to edit"
+        )
+    if job.attempt >= MAX_ATTEMPTS:
+        raise InvalidModelError(
+            f"this view set has already been repaired {MAX_ATTEMPTS} times; it needs human "
+            "review rather than another edit"
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,10 +90,7 @@ def requeue_for_validation(
     spends the same bounded budget an automatic repair would.
     """
 
-    if job.state not in EDITABLE_STATES:
-        raise InvalidModelError(
-            f"a view set in state {job.state.value} has no reviewable image to edit"
-        )
+    ensure_editable(job)
     repairing = job.transition(WorkflowState.REPAIRING)
     repository.save(repairing)
     validating = repairing.transition(WorkflowState.VALIDATING)
@@ -120,15 +139,7 @@ class ApplyViewEdit:
             raise InvalidModelError(
                 f"an edit produces between one and {MAX_CANDIDATES} candidates"
             )
-        if job.state not in EDITABLE_STATES:
-            raise InvalidModelError(
-                f"a view set in state {job.state.value} has no reviewable image to edit"
-            )
-        if job.attempt >= 3:
-            raise InvalidModelError(
-                "this view set has already been repaired three times; it needs human review "
-                "rather than another edit"
-            )
+        ensure_editable(job)
         if mask is not None:
             _verify_mask(mask)
 
@@ -203,6 +214,7 @@ class CommitViewEdit:
         edit_id: str,
         chosen: int,
     ) -> AppliedViewEdit:
+        ensure_editable(job)
         store = ViewEditStore(view_directory(settings, job, view_id))
         record = store.commit_record(store.record(edit_id), chosen=chosen)
         return AppliedViewEdit(

@@ -230,7 +230,7 @@ def test_restoring_appends_a_new_entry_rather_than_deleting_one(
 
 def test_the_fourth_repair_is_refused(tmp_path: Path, fake_renderer: _FakeRenderer) -> None:
     _view_dir(tmp_path)
-    with pytest.raises(InvalidModelError, match="three times"):
+    with pytest.raises(InvalidModelError, match="3 times"):
         _apply(tmp_path, _job(attempt=3))
 
 
@@ -279,6 +279,67 @@ def test_the_log_survives_a_reread(tmp_path: Path, fake_renderer: _FakeRenderer)
     assert manifest["edits"][0]["prompt"] == "làm sạch vệt bẩn trên tường"
     assert ViewEditStore(directory).record("edit-1").created_by == "nguoi-dung"
 
+def test_a_restore_at_the_limit_leaves_the_image_alone(
+    tmp_path: Path,
+    fake_renderer: _FakeRenderer,
+) -> None:
+    """The refusal must come before the file is swapped, not after.
+
+    Checking afterwards left the view rolled back on disk, its log saying
+    `committed`, the caller holding a 500, and the gates never re-run.
+    """
+
+    directory = _view_dir(tmp_path)
+    settings = _settings(tmp_path)
+    repository, applied = _apply(tmp_path, _job())
+
+    # Spend the rest of the budget without touching this view again.
+    spent = repository.get("job-edit").model_copy(update={"attempt": 3})
+    repository.save(spent)
+    current = ViewEditStore(directory).current_image().read_bytes()
+
+    with pytest.raises(InvalidModelError, match="3 times"):
+        RestoreViewEdit().execute(
+            settings=settings,
+            repository=repository,
+            job=spent,
+            view_id=VIEW_ID,
+            source_edit_id=applied.record.edit_id,
+            edit_id="edit-2",
+            created_by="nguoi-dung",
+        )
+
+    store = ViewEditStore(directory)
+    assert store.current_image().read_bytes() == current
+    assert [record.edit_id for record in store.records()] == ["edit-1"]
+
+
+def test_a_commit_at_the_limit_leaves_the_pending_edit_pending(
+    tmp_path: Path,
+    fake_renderer: _FakeRenderer,
+) -> None:
+    fake_renderer.count = 2
+    directory = _view_dir(tmp_path)
+    settings = _settings(tmp_path)
+    repository, _ = _apply(tmp_path, _job(), candidates=2)
+
+    spent = repository.get("job-edit").model_copy(update={"attempt": 3})
+    repository.save(spent)
+    current = ViewEditStore(directory).current_image().read_bytes()
+
+    with pytest.raises(InvalidModelError, match="3 times"):
+        CommitViewEdit().execute(
+            settings=settings,
+            repository=repository,
+            job=spent,
+            view_id=VIEW_ID,
+            edit_id="edit-1",
+            chosen=1,
+        )
+
+    store = ViewEditStore(directory)
+    assert store.current_image().read_bytes() == current
+    assert store.record("edit-1").state == "pending"
 
 # -- provider ------------------------------------------------------------
 

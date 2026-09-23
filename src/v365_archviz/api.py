@@ -1259,6 +1259,11 @@ def _edit_errors() -> Iterator[None]:
         yield
     except (ConfigurationError, InvalidModelError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        # A domain invariant the checks above did not anticipate — a refused
+        # workflow transition, say. Still about what was asked, so still 409
+        # rather than a 500 that reads like the service broke.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ProviderError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 

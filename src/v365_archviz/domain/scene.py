@@ -43,6 +43,11 @@ class SemanticRole(str, Enum):
     #: awnings a LOD200 model draws along a building edge. Kept apart from ROOF
     #: so a roof finish is not applied to the canopies instead of the roof.
     CANOPY = "canopy"
+    #: A dock door. It is evidence that goods move through this facade, but it
+    #: is a part of the building rather than a piece of ground: pointed at as if
+    #: it were a yard, the camera stands against a three-metre door and fills the
+    #: frame with it.
+    LOADING_DOCK = "loading_dock"
     #: A wall. It is part of a building's skin, never a building of its own; the
     #: geometric mass rules must not see it, or a shed's own cladding is counted
     #: as a dozen utility buildings standing on the site.

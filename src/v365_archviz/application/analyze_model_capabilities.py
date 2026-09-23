@@ -44,7 +44,11 @@ class AnalyzeModelDesignCapabilities:
             self._component(
                 "logistics",
                 "Khu logistics",
-                (*by_role[SemanticRole.LOADING_ZONE], *by_role[SemanticRole.SERVICE_YARD]),
+                (
+                    *by_role[SemanticRole.LOADING_ZONE],
+                    *by_role[SemanticRole.SERVICE_YARD],
+                    *by_role[SemanticRole.LOADING_DOCK],
+                ),
                 "Có loading zone hoặc service yard authored.",
                 "Không có vùng logistics authored; không được tự thêm cửa dock.",
             ),

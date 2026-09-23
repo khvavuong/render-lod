@@ -27,6 +27,7 @@ FOCUS_ROLES = frozenset(
         "roof",
         "canopy",
         "envelope_panel",
+        "loading_dock",
         "primary_facade",
         "design_detail",
     }

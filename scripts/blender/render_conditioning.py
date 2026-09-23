@@ -2531,6 +2531,7 @@ def render_masks(view_dir: Path) -> None:
         # well clear of the 36 the coverage reader matches within.
         "envelope_panel": (0.55, 0.85, 0.95, 1.0),
         "canopy": (0.30, 0.12, 0.58, 1.0),
+        "loading_dock": (0.05, 0.35, 0.35, 1.0),
         "primary_facade": (0.82, 0.42, 0.16, 1.0),
         "facade_secondary": (0.58, 0.16, 0.72, 1.0),
         "glazing": (0.10, 0.52, 0.78, 1.0),

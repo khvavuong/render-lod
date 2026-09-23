@@ -163,7 +163,7 @@ def _semantic_role(
     if entity_type.startswith("IfcWall"):
         return SemanticRole.ENVELOPE_PANEL, 0.85
     if entity_type == "IfcDoor" and max(width, depth) >= DOCK_DOOR_MIN_WIDTH_M:
-        return SemanticRole.LOADING_ZONE, 0.8
+        return SemanticRole.LOADING_DOCK, 0.8
     if entity_type in {"IfcDoor", "IfcWindow"}:
         return SemanticRole.UNKNOWN, 0.4
     if height <= ROOF_MAX_THICKNESS_M and base_height >= ROOF_MIN_HEIGHT_M:

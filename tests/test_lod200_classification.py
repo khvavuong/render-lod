@@ -95,12 +95,13 @@ class TestLod200:
             is SemanticRole.ENVELOPE_PANEL
         )
 
-    def test_a_rolling_door_is_loading_evidence(self) -> None:
+    def test_a_rolling_door_is_a_dock_and_not_a_yard(self) -> None:
         # DO-STE-ROL, 3500 by 4000. The capability gate reported no logistics
-        # while eighteen of these were authored.
-        assert (
-            role("IfcDoor", width=3.5, depth=0.8, height=4.0) is SemanticRole.LOADING_ZONE
-        )
+        # while eighteen of these were authored, so a dock is evidence. But it
+        # is not a piece of ground: called a loading zone, the camera planner
+        # aimed the loading view at a three-metre door and filled the frame
+        # with it — focus coverage 0.0, circulation 1.0.
+        assert role("IfcDoor", width=3.5, depth=0.8, height=4.0) is SemanticRole.LOADING_DOCK
 
     def test_an_ordinary_door_is_not(self) -> None:
         # DO-STE-01W, 2200 by 1100.

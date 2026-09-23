@@ -17,6 +17,7 @@ from v365_archviz.application.build_correspondence import BuildCorrespondenceInd
 from v365_archviz.application.compose_viewset_board import ComposeViewSetBoard
 from v365_archviz.application.create_certification_report import CreateCertificationReport
 from v365_archviz.application.evaluate_consistency import EvaluateConsistency
+from v365_archviz.application.plan_cameras import PlanStandardCameras
 from v365_archviz.application.promote_quality_baseline import PromoteQualityBaseline
 from v365_archviz.application.protect_refinement import ProtectRefinement
 from v365_archviz.application.refine_viewset import RefineViewSet, select_master_view_ids
@@ -99,7 +100,7 @@ class RunGenerationJob:
             return run_proposal(repository, job, settings, paths, view_set)
 
         if job.state in {WorkflowState.RENDERING_PASSES, WorkflowState.GENERATING_VIEWSET}:
-            self._ensure_conditioning(paths, view_set, job, settings)
+            view_set = self._ensure_conditioning(paths, view_set, job, settings)
 
         if job.state is WorkflowState.RENDERING_PASSES:
             job = self._advance(
@@ -631,7 +632,23 @@ class RunGenerationJob:
         view_set: ViewSet,
         job: GenerationJob,
         settings: Settings,
-    ) -> None:
+    ) -> ViewSet:
+        """Render the conditioning passes and refuse to spend money on a bad frame.
+
+        Returns the view set the passes were taken through, which is not always
+        the one that came in: a job that carries no snapshot of its own points at
+        the design's shared camera file, and that file is whatever the planner
+        wrote the last time anyone asked. A job created before a planner fix and
+        retried after it was still framed by the old answer, so the fix could not
+        reach it and the same views failed with the same numbers.
+        """
+
+        if not job.view_set_snapshot:
+            view_set = PlanStandardCameras().execute(
+                paths.scene,
+                paths.design_dna,
+                output_path=paths.view_set,
+            )
         pack = _authored_style(job)
         facade_mode = (
             "envelope_program"
@@ -653,7 +670,7 @@ class RunGenerationJob:
         if (
             not script_matches
             or not mode_matches
-            or not self._conditioning_complete(paths.render_root, view_set)
+            or not self._conditioning_complete(paths, view_set)
         ):
             create_conditioning_renderer(settings.conditioning_backend).execute(
                 paths.scene,
@@ -678,6 +695,7 @@ class RunGenerationJob:
         if not conditioning_qa.passed:
             failed = ", ".join(conditioning_qa.failed_view_ids)
             raise V365Error(f"camera preflight rejected views before paid generation: {failed}")
+        return view_set
 
     @staticmethod
     def _advance(
@@ -692,7 +710,8 @@ class RunGenerationJob:
         return updated
 
     @staticmethod
-    def _conditioning_complete(render_root: Path, view_set: ViewSet) -> bool:
+    def _conditioning_complete(paths: _JobPaths, view_set: ViewSet) -> bool:
+        render_root = paths.render_root
         manifest_path = render_root / "render_manifest.json"
         if not manifest_path.is_file():
             return False
@@ -704,6 +723,23 @@ class RunGenerationJob:
         # The versioned view-set identity is therefore part of the conditioning cache key.
         if manifest.get("view_set_id") != view_set.view_set_id:
             return False
+        # And the identity can remain equal while the camera values change: it is
+        # built from the design revision and a version tag, neither of which moves
+        # when the planner is corrected. A job retried after such a correction
+        # re-used renders taken through the old cameras and was then judged
+        # against the new ones — which is how a fixed camera kept failing with the
+        # exact numbers of the fault that had been fixed. The inputs the renderer
+        # hashed are what decides whether its output still stands.
+        for key, source in (
+            ("view_set_sha256", paths.view_set),
+            ("scene_sha256", paths.scene),
+            ("design_dna_sha256", paths.design_dna),
+        ):
+            recorded = manifest.get(key)
+            if not isinstance(recorded, str) or not source.is_file():
+                return False
+            if recorded != hashlib.sha256(source.read_bytes()).hexdigest():
+                return False
         names = (
             "base_rgb.png",
             "depth.png",

@@ -95,7 +95,9 @@ def test_generation_stops_after_site_and_facade_masters_until_approval(
         return SimpleNamespace(manifest_path=manifest)
 
     protected = tmp_path / "generated" / "model" / "design" / "protected_composite_manifest.json"
-    monkeypatch.setattr(RunGenerationJob, "_ensure_conditioning", lambda *_args: None)
+    # Skips the Blender render but keeps the plan: the real method returns the
+    # view set it rendered through, which is not always the one it was given.
+    monkeypatch.setattr(RunGenerationJob, "_ensure_conditioning", lambda *args: args[2])
     monkeypatch.setattr(
         "v365_archviz.application.run_generation_job.build_refinement_prompt",
         lambda *_args, **kwargs: ({}, "prompt"),

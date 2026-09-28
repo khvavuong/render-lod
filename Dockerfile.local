@@ -54,6 +54,7 @@ COPY resource/logo ./resource/logo
 COPY resource/photography_packs ./resource/photography_packs
 COPY resource/style_packs ./resource/style_packs
 COPY resource/concept_presets ./resource/concept_presets
+COPY resource/studio_references ./resource/studio_references
 
 RUN mkdir -p /app/.artifacts && chown -R v365:v365 /app/.artifacts
 

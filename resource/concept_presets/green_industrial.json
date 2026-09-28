@@ -1,17 +1,17 @@
 {
   "schema_version": "1.0.0",
-  "preset_id": "refined_minimal",
-  "order": 5,
-  "name": "Refined Minimal",
-  "summary": "White-grey flat panels, precise lines and a restrained, clean site.",
+  "preset_id": "green_industrial",
+  "order": 2,
+  "name": "Green Industrial",
+  "summary": "Light grey sheds, green walls at the office, rooftop solar and dense tree rows.",
   "brief": {
     "schema_version": "1.0.0",
     "design_language": {
-      "style": "refined minimal industrial architecture in Vietnam with disciplined facade rhythm",
-      "primary_material": "white-grey flat composite panels",
-      "secondary_material": "anthracite shadow-gap detailing",
-      "office_material": "frameless glazing with a thin projecting canopy",
-      "accent": "a single restrained line at the entrance only"
+      "style": "climate-responsive green industrial campus suitable for Vietnam",
+      "primary_material": "light grey insulated metal panels",
+      "secondary_material": "dark grey steel frames with planted green facade screens",
+      "office_material": "solar-controlled glazing behind vertical green walls",
+      "accent": "living green walls at the office and entrance bays"
     },
     "environment": {
       "time": "11:30",
@@ -21,26 +21,29 @@
       "white_balance_k": 5700
     },
     "material_palette": {
-      "primary_hex": "#F0F0EE",
-      "secondary_hex": "#2B2B2E",
-      "glass_hex": "#1F3B4A",
-      "accent_hex": "#B8B5AE",
-      "paving_hex": "#ADADA8"
+      "primary_hex": "#D9DCDA",
+      "secondary_hex": "#4B5157",
+      "glass_hex": "#3C5A50",
+      "accent_hex": "#3E7C4A",
+      "paving_hex": "#A7A8A2"
     },
     "facade_articulation": {
       "plinth_height_m": 1.1,
       "parapet_band_height_m": 0.65,
-      "office_glazing_ratio": 0.6,
+      "office_glazing_ratio": 0.68,
       "feature_frame_depth_m": 1.2,
       "entrance_canopy_projection_m": 3.6,
-      "vertical_fin_count": 0,
-      "accent_bay_interval": 0,
-      "clerestory_band_height_m": 1.6
+      "vertical_fin_count": 4,
+      "accent_bay_interval": 8,
+      "clerestory_band_height_m": 1.6,
+      "biophilic_bay_interval": 5,
+      "biophilic_bay_width_m": 2.0,
+      "biophilic_screen_depth_m": 0.6
     },
     "presentation": {
-      "landscape_character": "restrained rows of tropical shade trees (sao đen, dầu, bàng) along roads and boundaries; clean lawn strips",
+      "landscape_character": "dense rows of tropical shade trees (sao đen, dầu, bàng) along roads and boundaries; planted buffers and bioswales",
       "paving_character": "dark asphalt on every external and perimeter road; light-grey industrial concrete with joints, drainage and light dust on internal yards and loading aprons",
-      "entourage_density": "low"
+      "entourage_density": "medium"
     },
     "panel_module_m": 1.2,
     "loading_docks_per_main_facade": 3,
@@ -51,7 +54,7 @@
     "roof_ridge_orientation": "long_axis",
     "roof_grouping_mode": "continuous_rows",
     "roof_group_gap_tolerance_m": 10.0,
-    "solar_panels": false,
+    "solar_panels": true,
     "site_design": {
       "preserve_transport_geometry": true,
       "preserve_landscape_boundaries": true,
@@ -64,13 +67,13 @@
     "grammar_version": "industrial-grammar-v3-continuous-roof",
     "asset_library_version": "baseline-assets-v2",
     "design_preferences": {
-      "style_preset": "refined_high_tech",
-      "decor_level": "minimal",
-      "design_package": "minimal_logistics",
-      "envelope_kit": "sandwich_panel_flat",
-      "office_entrance_kit": "canopy_entry",
-      "facade_rhythm_kit": "horizontal_restrained",
-      "accent_coverage_percent": 3
+      "style_preset": "sustainable_industrial",
+      "decor_level": "balanced",
+      "design_package": "tropical_industrial",
+      "envelope_kit": "panel_concrete_plinth",
+      "office_entrance_kit": "climate_screen",
+      "facade_rhythm_kit": "vertical_bays",
+      "accent_coverage_percent": 6
     }
   }
 }

@@ -50,7 +50,19 @@ from v365_archviz.domain.workflow import (
 from v365_archviz.errors import InvalidModelError
 from v365_archviz.providers.contracts import JobRepository
 
-PRESET_DIRECTORY = Path(__file__).resolve().parents[3] / "resource" / "concept_presets"
+RESOURCE_DIRECTORY = Path(__file__).resolve().parents[3] / "resource"
+PRESET_DIRECTORY = RESOURCE_DIRECTORY / "concept_presets"
+#: Vietnamese place, climate and photographic register over the marketing geometry contract.
+STUDIO_STYLE_PACK = RESOURCE_DIRECTORY / "style_packs" / "vietnam_marketing.json"
+#: A real photograph of a Vietnamese industrial park. It anchors photographic realism and the
+#: surroundings; the prompt forbids taking palette, facade or layout from it, so the five
+#: concepts still differ.
+STUDIO_REFERENCES: tuple[tuple[Path, str], ...] = (
+    (
+        RESOURCE_DIRECTORY / "studio_references" / "vietnam_industrial_context.jpg",
+        "context_realism_reference",
+    ),
+)
 HERO_VIEW_ID = "view-01"
 MAX_SHOTS = 11
 DEFAULT_SENSOR_WIDTH_MM = 36.0
@@ -158,6 +170,9 @@ class StartConcepts:
                 profile=GenerationProfile.MARKETING_HERO,
                 render_profile=RenderProfile.STANDARD_EEVEE,
                 image_provider=settings.image_provider,
+                reference_image_refs=tuple(str(path) for path, _role in STUDIO_REFERENCES),
+                reference_roles=tuple(role for _path, role in STUDIO_REFERENCES),
+                style_pack_ref=str(STUDIO_STYLE_PACK),
             )
             job = created.job
             if created.created:
@@ -291,6 +306,8 @@ class StartImageSet:
             profile=concept.profile,
             render_profile=concept.render_profile,
             image_provider=concept.image_provider,
+            reference_image_refs=concept.reference_image_refs,
+            reference_roles=concept.reference_roles,
             style_pack_ref=concept.style_pack_ref,
         )
         job = created.job

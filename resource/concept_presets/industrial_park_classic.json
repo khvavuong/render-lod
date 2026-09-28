@@ -1,36 +1,36 @@
 {
   "schema_version": "1.0.0",
-  "preset_id": "refined_minimal",
-  "order": 5,
-  "name": "Refined Minimal",
-  "summary": "White-grey flat panels, precise lines and a restrained, clean site.",
+  "preset_id": "industrial_park_classic",
+  "order": 1,
+  "name": "Industrial Park Classic",
+  "summary": "Navy-blue profiled metal sheds with a crisp white office block, as in Vietnam's best-run parks.",
   "brief": {
     "schema_version": "1.0.0",
     "design_language": {
-      "style": "refined minimal industrial architecture in Vietnam with disciplined facade rhythm",
-      "primary_material": "white-grey flat composite panels",
-      "secondary_material": "anthracite shadow-gap detailing",
-      "office_material": "frameless glazing with a thin projecting canopy",
-      "accent": "a single restrained line at the entrance only"
+      "style": "contemporary Vietnamese industrial park factory, pre-engineered steel shed with a clean white office block",
+      "primary_material": "navy-blue profiled metal wall cladding above a concrete plinth",
+      "secondary_material": "white painted steel trims, gutters and canopies",
+      "office_material": "white rendered concrete office block with aluminium windows and simple sun shading",
+      "accent": "thin yellow or white band at the eave only"
     },
     "environment": {
-      "time": "11:30",
-      "weather": "bright tropical late morning with scattered cumulus",
-      "sun_azimuth_deg": 160.0,
-      "sun_elevation_deg": 62.0,
-      "white_balance_k": 5700
+      "time": "09:00",
+      "weather": "clear humid tropical morning with light haze",
+      "sun_azimuth_deg": 120.0,
+      "sun_elevation_deg": 42.0,
+      "white_balance_k": 5600
     },
     "material_palette": {
-      "primary_hex": "#F0F0EE",
-      "secondary_hex": "#2B2B2E",
-      "glass_hex": "#1F3B4A",
-      "accent_hex": "#B8B5AE",
-      "paving_hex": "#ADADA8"
+      "primary_hex": "#23407A",
+      "secondary_hex": "#F2F2EF",
+      "glass_hex": "#3E5566",
+      "accent_hex": "#E0B43A",
+      "paving_hex": "#A9A9A3"
     },
     "facade_articulation": {
       "plinth_height_m": 1.1,
       "parapet_band_height_m": 0.65,
-      "office_glazing_ratio": 0.6,
+      "office_glazing_ratio": 0.4,
       "feature_frame_depth_m": 1.2,
       "entrance_canopy_projection_m": 3.6,
       "vertical_fin_count": 0,
@@ -38,9 +38,9 @@
       "clerestory_band_height_m": 1.6
     },
     "presentation": {
-      "landscape_character": "restrained rows of tropical shade trees (sao đen, dầu, bàng) along roads and boundaries; clean lawn strips",
+      "landscape_character": "rows of tropical shade trees (sao đen, dầu, bàng) along roads and boundaries; trimmed lawn and low hedges at the office forecourt",
       "paving_character": "dark asphalt on every external and perimeter road; light-grey industrial concrete with joints, drainage and light dust on internal yards and loading aprons",
-      "entourage_density": "low"
+      "entourage_density": "medium"
     },
     "panel_module_m": 1.2,
     "loading_docks_per_main_facade": 3,
@@ -64,10 +64,10 @@
     "grammar_version": "industrial-grammar-v3-continuous-roof",
     "asset_library_version": "baseline-assets-v2",
     "design_preferences": {
-      "style_preset": "refined_high_tech",
-      "decor_level": "minimal",
-      "design_package": "minimal_logistics",
-      "envelope_kit": "sandwich_panel_flat",
+      "style_preset": "contemporary_industrial",
+      "decor_level": "subtle",
+      "design_package": "premium_practical",
+      "envelope_kit": "profiled_metal_vertical",
       "office_entrance_kit": "canopy_entry",
       "facade_rhythm_kit": "horizontal_restrained",
       "accent_coverage_percent": 3

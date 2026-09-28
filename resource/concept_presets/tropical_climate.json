@@ -1,44 +1,44 @@
 {
   "schema_version": "1.0.0",
-  "preset_id": "corporate_identity",
-  "order": 3,
-  "name": "Corporate Identity",
-  "summary": "White and grey panels, a confident brand-colour band and a glazed office entrance.",
+  "preset_id": "tropical_climate",
+  "order": 4,
+  "name": "Tropical Climate",
+  "summary": "Deep roof overhangs, raised ventilated roofs, sun louvres and lush planting.",
   "brief": {
     "schema_version": "1.0.0",
     "design_language": {
-      "style": "professional corporate industrial campus in Vietnam with a clear arrival identity",
-      "primary_material": "white insulated metal panels",
-      "secondary_material": "dark graphite steel framing",
-      "office_material": "large shaded curtain-wall glazing at the office",
-      "accent": "brand-colour band along the eave and at entrance bays"
+      "style": "tropical climate-responsive factory for Vietnam with deep overhangs and natural ventilation",
+      "primary_material": "light warm-grey profiled metal with a ventilated raised roof",
+      "secondary_material": "deep steel canopies and aluminium sun louvres",
+      "office_material": "recessed glazing shaded by louvres and deep eaves",
+      "accent": "timber-look louvres at the office only"
     },
     "environment": {
-      "time": "09:00",
-      "weather": "clear humid tropical morning with light haze",
-      "sun_azimuth_deg": 120.0,
-      "sun_elevation_deg": 42.0,
-      "white_balance_k": 5600
+      "time": "16:00",
+      "weather": "clear late afternoon, warm low sun and humid haze",
+      "sun_azimuth_deg": 245.0,
+      "sun_elevation_deg": 30.0,
+      "white_balance_k": 5200
     },
     "material_palette": {
-      "primary_hex": "#EEEEEA",
-      "secondary_hex": "#2B3036",
-      "glass_hex": "#2F5F7A",
-      "accent_hex": "#C8452D",
-      "paving_hex": "#A6A6A1"
+      "primary_hex": "#D8D4CB",
+      "secondary_hex": "#4A4640",
+      "glass_hex": "#3F5550",
+      "accent_hex": "#9C7A52",
+      "paving_hex": "#A8A59D"
     },
     "facade_articulation": {
       "plinth_height_m": 1.1,
       "parapet_band_height_m": 0.65,
       "office_glazing_ratio": 0.68,
       "feature_frame_depth_m": 1.2,
-      "entrance_canopy_projection_m": 3.6,
-      "vertical_fin_count": 4,
-      "accent_bay_interval": 8,
+      "entrance_canopy_projection_m": 4.2,
+      "vertical_fin_count": 6,
+      "accent_bay_interval": 0,
       "clerestory_band_height_m": 1.6
     },
     "presentation": {
-      "landscape_character": "rows of tropical shade trees (sao đen, dầu, bàng) along roads and boundaries; ordered palms and flowering shrubs at the arrival court",
+      "landscape_character": "lush layered tropical planting with rows of tropical shade trees (sao đen, dầu, bàng) along roads and boundaries",
       "paving_character": "dark asphalt on every external and perimeter road; light-grey industrial concrete with joints, drainage and light dust on internal yards and loading aprons",
       "entourage_density": "medium"
     },
@@ -64,13 +64,13 @@
     "grammar_version": "industrial-grammar-v3-continuous-roof",
     "asset_library_version": "baseline-assets-v2",
     "design_preferences": {
-      "style_preset": "corporate_industrial",
+      "style_preset": "sustainable_industrial",
       "decor_level": "balanced",
-      "design_package": "corporate_identity",
-      "envelope_kit": "sandwich_panel_flat",
-      "office_entrance_kit": "framed_glazed_bay",
-      "facade_rhythm_kit": "vertical_bays",
-      "accent_coverage_percent": 7
+      "design_package": "tropical_industrial",
+      "envelope_kit": "profiled_metal_vertical",
+      "office_entrance_kit": "climate_screen",
+      "facade_rhythm_kit": "mixed_restrained",
+      "accent_coverage_percent": 4
     }
   }
 }

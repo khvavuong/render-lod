@@ -130,15 +130,16 @@ def test_every_concept_preset_is_a_valid_brief() -> None:
     presets = load_concept_presets()
 
     assert [preset.preset_id for preset in presets] == [
+        "industrial_park_classic",
+        "green_industrial",
         "corporate_identity",
-        "tropical_biophilic",
+        "tropical_climate",
         "refined_minimal",
-        "warm_industrial",
-        "high_tech_glass",
     ]
     for preset in presets:
         brief = DesignBrief.model_validate({**preset.brief, "project_id": "p"})
-        assert brief.site_design.surrounding_context_mode == "authored_only"
+        # The industrial-park context draws estate roads and lots into the conditioning render.
+        assert brief.site_design.surrounding_context_mode == "conceptual_industrial_park"
 
 
 def test_concepts_start_one_single_camera_job_per_preset(artifacts: Path) -> None:
@@ -159,6 +160,10 @@ def test_concepts_start_one_single_camera_job_per_preset(artifacts: Path) -> Non
         view_set = ViewSet.model_validate_json(job.view_set_snapshot or "")
         assert [camera.view_id for camera in view_set.cameras] == ["view-01"]
         assert view_set.cameras[0].role is ViewRole.OVERALL
+        # Vietnamese register and a real park photograph anchor every concept.
+        assert job.style_pack_ref and job.style_pack_ref.endswith("vietnam_marketing.json")
+        assert job.reference_roles == ("context_realism_reference",)
+        assert all(Path(ref).is_file() for ref in job.reference_image_refs)
 
     again = client.post(
         "/v1/studio/concepts", json={"model_revision": revision, "project_id": "project-1"}
@@ -236,6 +241,9 @@ def test_image_set_is_anchored_to_the_chosen_concept(artifacts: Path) -> None:
         ("view-02", "custom"),
         ("view-03", "detail"),
     ]
+    concept = repository.get_by_view_set(concept_id)
+    assert job.reference_image_refs == concept.reference_image_refs
+    assert job.style_pack_ref == concept.style_pack_ref
     review = json.loads((paths.generated_root / "design_master_review.json").read_text())
     assert review["approved"] is True
     assert review["view_set_id"] == job.view_set_id

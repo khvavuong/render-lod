@@ -18,6 +18,7 @@ from typing import Any
 
 from PIL import Image, UnidentifiedImageError
 
+from v365_archviz.application.run_generation_job import _JobPaths
 from v365_archviz.application.view_edit_store import ViewEditRecord, ViewEditStore
 from v365_archviz.config import Settings
 from v365_archviz.domain.jobs import GenerationJob
@@ -67,9 +68,8 @@ class AppliedViewEdit:
 
 
 def view_directory(settings: Settings, job: GenerationJob, view_id: str) -> Path:
-    directory = (
-        settings.artifact_dir / "generated" / job.model_revision / job.design_revision / view_id
-    )
+    # Through the job's own paths: a job with a style pack writes under its output namespace.
+    directory = _JobPaths.from_job(settings.artifact_dir, job).generated_root / view_id
     if not directory.is_dir():
         raise InvalidModelError(f"{view_id} has no generated output in this view set")
     return directory

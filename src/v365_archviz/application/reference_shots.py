@@ -21,7 +21,7 @@ from v365_archviz.application.reference_led_input import source_envelopes
 from v365_archviz.application.run_reference_proposal import write_json
 from v365_archviz.artifacts import atomic_write
 from v365_archviz.domain.photography_pack import PhotographyPack
-from v365_archviz.domain.workflow import Camera, RenderProfile, ViewRole, ViewSet
+from v365_archviz.domain.workflow import PLANNED_ROLES, Camera, RenderProfile, ViewRole, ViewSet
 from v365_archviz.errors import V365Error
 from v365_archviz.providers.docker_conditioning import DockerConditioningRenderer
 
@@ -41,7 +41,7 @@ def search_shots(paths, job):
         write_json(root / "history/ranking-v1.json", old)
     root.mkdir(parents=True, exist_ok=True)
     candidates = []
-    for role in ViewRole:
+    for role in PLANNED_ROLES:
         elements = focus
         if role in {ViewRole.OFFICE_HERO, ViewRole.LOADING_DETAIL, ViewRole.HERO}:
             preferred = "office_block" if role is ViewRole.OFFICE_HERO else "main_shed"

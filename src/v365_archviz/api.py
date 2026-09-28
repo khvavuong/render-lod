@@ -46,6 +46,7 @@ from v365_archviz.application.compile_user_intent import CompileUserRenderIntent
 from v365_archviz.application.create_generation_job import CreateGenerationJob
 from v365_archviz.application.create_video_job import CreateVideoJob
 from v365_archviz.application.extract_ifc import ExtractIfc
+from v365_archviz.application.import_scene_upload import ImportSceneUpload
 from v365_archviz.application.inspect_model import InspectModel
 from v365_archviz.application.plan_cameras import PlanStandardCameras
 from v365_archviz.application.plan_design import PlanDesign
@@ -61,6 +62,15 @@ from v365_archviz.application.reference_delivery import (
 )
 from v365_archviz.application.restore_view_edit import RestoreViewEdit
 from v365_archviz.application.run_generation_job import _JobPaths
+from v365_archviz.application.studio import (
+    FinalizeImageSet,
+    RegenerateView,
+    ShotSpec,
+    StartConcepts,
+    StartImageSet,
+    load_concept_presets,
+    proposed_shots,
+)
 from v365_archviz.application.sync_view_edit import SyncViewEdit
 from v365_archviz.application.view_edit_store import (
     ViewEditRecord,
@@ -81,8 +91,16 @@ from v365_archviz.domain.render_intent import (
     UserRenderIntent,
 )
 from v365_archviz.domain.scene import CanonicalScene
+from v365_archviz.domain.scene_upload import SceneUpload
 from v365_archviz.domain.video_jobs import VideoJob, VideoJobState
-from v365_archviz.domain.workflow import GenerationProfile, RenderProfile, ViewSet, WorkflowState
+from v365_archviz.domain.workflow import (
+    Camera,
+    GenerationProfile,
+    RenderProfile,
+    ViewRole,
+    ViewSet,
+    WorkflowState,
+)
 from v365_archviz.errors import (
     ConfigurationError,
     InvalidModelError,
@@ -123,7 +141,7 @@ app.add_middleware(
     allow_headers=["Content-Type", "X-Filename"],
 )
 
-_generation_dispatcher = LocalGenerationDispatcher()
+_generation_dispatcher = LocalGenerationDispatcher(workers=Settings.from_env().generation_workers)
 _video_dispatcher = LocalVideoDispatcher()
 _edit_dispatcher = LocalEditDispatcher()
 
@@ -1961,3 +1979,320 @@ def sync_view_edit(
 
     _edit_dispatcher.start(sync_id, work)
     return StartViewEditResponse(edit_id=sync_id, view_id=view_id, view_set_id=view_set_id)
+
+
+# -- render studio ---------------------------------------------------------
+#
+# The flow an embedding editor drives: send the site plan, get five concepts,
+# pick one, send the shots, finalize, then request the video. See
+# `application/studio.py` for how each step maps onto the pipeline above.
+
+
+class SceneImportResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    model_revision: str
+    created: bool
+    element_count: int
+    surface_count: int
+
+
+class ConceptPresetResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    preset_id: str
+    name: str
+    summary: str
+
+
+class StartConceptsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    model_revision: str = Field(pattern=SAFE_IDENTIFIER_PATTERN)
+    project_id: str = Field(pattern=SAFE_IDENTIFIER_PATTERN)
+    preset_ids: tuple[str, ...] | None = Field(default=None, min_length=1, max_length=8)
+    #: A new number asks for new images of the same presets; the same number
+    #: returns the jobs already started, so a repeated request costs nothing.
+    variant: int = Field(default=1, ge=1, le=99)
+
+
+class ConceptJobResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    preset_id: str
+    name: str
+    summary: str
+    design_revision: str
+    view_set_id: str
+    state: WorkflowState
+    created: bool
+
+
+class StartConceptsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    concepts: tuple[ConceptJobResponse, ...]
+
+
+class ShotCameraResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    view_id: str
+    role: str
+    position: tuple[float, float, float]
+    target: tuple[float, float, float]
+    focal_length_mm: float
+    sensor_width_mm: float
+    aspect_ratio: str
+
+
+class ProposedShotsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    cameras: tuple[ShotCameraResponse, ...]
+
+
+class ShotRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    position: tuple[float, float, float]
+    target: tuple[float, float, float]
+    focal_length_mm: float = Field(ge=10, le=300)
+    role: str = Field(default="custom")
+    sensor_width_mm: float = Field(default=36.0, gt=0, le=100)
+    aspect_ratio: str = Field(default="16:9", pattern=r"^(16:9|3:2|4:3)$")
+
+
+class StartImageSetRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    concept_view_set_id: str = Field(pattern=SAFE_IDENTIFIER_PATTERN)
+    shots: tuple[ShotRequest, ...] = Field(min_length=1, max_length=11)
+
+
+class RegenerateViewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    instruction: str = Field(default="", max_length=500)
+
+
+def _studio_errors(exc: Exception) -> HTTPException:
+    if isinstance(exc, OSError):
+        return HTTPException(status_code=404, detail=str(exc) or "not found")
+    return HTTPException(status_code=409, detail=str(exc))
+
+
+def _dispatch(job: GenerationJob) -> None:
+    if _settings().local_worker_enabled and job.state not in {
+        WorkflowState.COMPLETED,
+        WorkflowState.FAILED,
+        WorkflowState.HUMAN_REVIEW,
+        WorkflowState.DESIGN_MASTER_REVIEW,
+    }:
+        _generation_dispatcher.submit(job.job_id)
+
+
+@app.post(
+    "/v1/scenes",
+    response_model=SceneImportResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["studio"],
+)
+def import_scene(upload: SceneUpload) -> SceneImportResponse:
+    """Accept a site plan whose objects already carry their roles."""
+
+    imported = ImportSceneUpload().execute(upload, _settings().artifact_dir)
+    return SceneImportResponse(
+        model_revision=imported.model_revision,
+        created=imported.created,
+        element_count=len(imported.scene.elements),
+        surface_count=len(imported.scene.surfaces),
+    )
+
+
+@app.get(
+    "/v1/studio/concept-presets",
+    response_model=tuple[ConceptPresetResponse, ...],
+    tags=["studio"],
+)
+def concept_presets() -> tuple[ConceptPresetResponse, ...]:
+    return tuple(
+        ConceptPresetResponse(preset_id=preset.preset_id, name=preset.name, summary=preset.summary)
+        for preset in load_concept_presets()
+    )
+
+
+@app.post(
+    "/v1/studio/concepts",
+    response_model=StartConceptsResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    tags=["studio"],
+)
+async def start_concepts(request: StartConceptsRequest) -> StartConceptsResponse:
+    settings = _settings()
+    preset_ids = request.preset_ids or tuple(preset.preset_id for preset in load_concept_presets())
+    try:
+        started = await run_in_threadpool(
+            StartConcepts().execute,
+            settings,
+            _repository(settings),
+            model_revision=request.model_revision,
+            project_id=request.project_id,
+            preset_ids=preset_ids,
+            variant=request.variant,
+        )
+    except (OSError, ValueError, V365Error) as exc:
+        raise _studio_errors(exc) from exc
+    for concept in started:
+        _dispatch(concept.job)
+    return StartConceptsResponse(
+        concepts=tuple(
+            ConceptJobResponse(
+                preset_id=concept.preset.preset_id,
+                name=concept.preset.name,
+                summary=concept.preset.summary,
+                design_revision=concept.job.design_revision,
+                view_set_id=concept.job.view_set_id,
+                state=concept.job.state,
+                created=concept.created,
+            )
+            for concept in started
+        )
+    )
+
+
+@app.get(
+    "/v1/studio/models/{model_revision}/designs/{design_revision}/shots",
+    response_model=ProposedShotsResponse,
+    tags=["studio"],
+)
+def studio_proposed_shots(model_revision: str, design_revision: str) -> ProposedShotsResponse:
+    _require_safe_identifier(model_revision, "model_revision")
+    _require_safe_identifier(design_revision, "design_revision")
+    try:
+        view_set = proposed_shots(_settings(), model_revision, design_revision)
+    except (OSError, ValueError) as exc:
+        raise _studio_errors(exc) from exc
+    return ProposedShotsResponse(cameras=tuple(_shot_camera(camera) for camera in view_set.cameras))
+
+
+def _shot_camera(camera: Camera) -> ShotCameraResponse:
+    return ShotCameraResponse(
+        view_id=camera.view_id,
+        role=camera.role.value,
+        position=camera.position,
+        target=camera.target,
+        focal_length_mm=camera.focal_length_mm,
+        sensor_width_mm=camera.sensor_width_mm,
+        aspect_ratio=camera.aspect_ratio,
+    )
+
+
+@app.post(
+    "/v1/studio/image-sets",
+    response_model=ViewSetJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    tags=["studio"],
+)
+def start_image_set(request: StartImageSetRequest) -> ViewSetJobResponse:
+    settings = _settings()
+    try:
+        shots = tuple(
+            ShotSpec(
+                position=shot.position,
+                target=shot.target,
+                focal_length_mm=shot.focal_length_mm,
+                role=ViewRole(shot.role),
+                sensor_width_mm=shot.sensor_width_mm,
+                aspect_ratio=shot.aspect_ratio,
+            )
+            for shot in request.shots
+        )
+        job, created = StartImageSet().execute(
+            settings,
+            _repository(settings),
+            concept_view_set_id=request.concept_view_set_id,
+            shots=shots,
+        )
+    except (OSError, ValueError, V365Error) as exc:
+        raise _studio_errors(exc) from exc
+    _dispatch(job)
+    response = get_view_set(job.view_set_id)
+    return response.model_copy(update={"created": created})
+
+
+@app.post(
+    "/v1/studio/view-sets/{view_set_id}/finalize",
+    response_model=ViewSetJobResponse,
+    tags=["studio"],
+)
+def finalize_image_set(view_set_id: str) -> ViewSetJobResponse:
+    _require_safe_identifier(view_set_id, "view_set_id")
+    settings = _settings()
+    try:
+        FinalizeImageSet().execute(settings, _repository(settings), view_set_id)
+    except (OSError, ValueError, V365Error) as exc:
+        raise _studio_errors(exc) from exc
+    return get_view_set(view_set_id)
+
+
+@app.post(
+    "/v1/studio/view-sets/{view_set_id}/views/{view_id}/regenerate",
+    response_model=ViewSetJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    tags=["studio"],
+)
+def regenerate_view(
+    view_set_id: str, view_id: str, request: RegenerateViewRequest
+) -> ViewSetJobResponse:
+    _require_safe_identifier(view_set_id, "view_set_id")
+    _require_safe_identifier(view_id, "view_id")
+    settings = _settings()
+    try:
+        job = RegenerateView().execute(
+            settings, _repository(settings), view_set_id, view_id, request.instruction
+        )
+    except (OSError, ValueError, V365Error) as exc:
+        raise _studio_errors(exc) from exc
+    _dispatch(job)
+    return get_view_set(view_set_id)
+
+
+class EditStatusResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    edit_id: str
+    state: Literal["running", "completed", "failed"]
+    message: str | None = None
+
+
+@app.get("/v1/studio/edits/{edit_id}", response_model=EditStatusResponse, tags=["studio"])
+def studio_edit_status(edit_id: str) -> EditStatusResponse:
+    """Whether an edit started here is still running, and why it failed if it did."""
+
+    _require_safe_identifier(edit_id, "edit_id")
+    stream = _edit_dispatcher.stream(edit_id)
+    if stream is None:
+        raise HTTPException(status_code=404, detail="edit run is no longer available")
+    state, message = stream.outcome()
+    return EditStatusResponse(edit_id=edit_id, state=state, message=message)  # type: ignore[arg-type]
+
+
+@app.get(
+    "/v1/studio/view-sets/{view_set_id}/cameras",
+    response_model=ProposedShotsResponse,
+    tags=["studio"],
+)
+def studio_view_set_cameras(view_set_id: str) -> ProposedShotsResponse:
+    """The cameras one job renders, in order."""
+
+    _require_safe_identifier(view_set_id, "view_set_id")
+    settings = _settings()
+    try:
+        job = _repository(settings).get_by_view_set(view_set_id)
+        view_set = ViewSet.model_validate_json(
+            _JobPaths.from_job(settings.artifact_dir, job).view_set.read_text(encoding="utf-8")
+        )
+    except (OSError, ValueError) as exc:
+        raise _studio_errors(exc) from exc
+    return ProposedShotsResponse(cameras=tuple(_shot_camera(camera) for camera in view_set.cameras))

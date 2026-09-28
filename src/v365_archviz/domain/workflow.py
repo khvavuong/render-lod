@@ -16,6 +16,16 @@ class ViewRole(str, Enum):
     DETAIL = "detail"
     OFFICE_HERO = "office_hero"
     LOADING_DETAIL = "loading_detail"
+    #: A camera the user placed. It carries no planned purpose, so it gets no
+    #: role-specific directive or target, only the checks every frame needs.
+    CUSTOM = "custom"
+
+
+#: The purposes the camera planner fills, one camera each. A custom camera is
+#: never planned, so a "one per purpose" rule counts only these.
+PLANNED_ROLES: tuple[ViewRole, ...] = tuple(
+    role for role in ViewRole if role is not ViewRole.CUSTOM
+)
 
 
 class Camera(DomainModel):

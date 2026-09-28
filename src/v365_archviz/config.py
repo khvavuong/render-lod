@@ -52,6 +52,11 @@ class Settings:
     veo_poll_interval_seconds: float = 10.0
     veo_timeout_seconds: float = 900.0
     auto_appearance_baseline: bool = False
+    #: Stamp the brand logo on delivered images and videos. An embedding product
+    #: that delivers under its own name turns this off.
+    brand_watermark: bool = True
+    #: How many generation jobs run at once. Concept batches are independent jobs.
+    generation_workers: int = 1
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -96,6 +101,8 @@ class Settings:
             auto_appearance_baseline=_as_bool(
                 os.getenv("V365_AUTO_APPEARANCE_BASELINE"), default=False
             ),
+            brand_watermark=_as_bool(os.getenv("V365_BRAND_WATERMARK"), default=True),
+            generation_workers=max(1, int(os.getenv("V365_GENERATION_WORKERS", "1"))),
         )
 
     @property

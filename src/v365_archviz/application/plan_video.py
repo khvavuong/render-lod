@@ -41,6 +41,10 @@ MOTION_PROMPTS = {
         "circulation space, always outside the building envelope. Existing adults and vehicles "
         "move slowly and naturally without approaching the camera."
     ),
+    "custom": (
+        "A slow, stable cinematic push forward from this exact viewpoint, keeping the framed "
+        "architecture readable. Existing vehicles and people move subtly; foliage barely moves."
+    ),
 }
 
 PRESERVATION_PROMPT = (
@@ -95,9 +99,17 @@ class PlanVideo:
         for index, camera in enumerate(view_set.cameras, start=1):
             view_root = generated_root / camera.view_id
             provider_sources = sorted(view_root.glob("provider_source.*"))
-            source = (
-                provider_sources[0] if len(provider_sources) == 1 else view_root / "refined.jpg"
-            )
+            refined = sorted(view_root.glob("refined.*"))
+            if not settings.brand_watermark and len(refined) == 1:
+                # Unbranded deliveries keep `refined` clean, and it is the only file an edit
+                # rewrites; the raw provider image would bring an edited view back unedited.
+                source = refined[0]
+            else:
+                source = (
+                    provider_sources[0]
+                    if len(provider_sources) == 1
+                    else view_root / "refined.jpg"
+                )
             if not source.is_file():
                 raise InvalidModelError(f"missing approved source image: {source}")
             role = camera.role.value

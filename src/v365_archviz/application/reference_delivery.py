@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from v365_archviz.application.reference_led_input import BRIEF, REGIONAL_CONTEXT, VERSION
 from v365_archviz.application.run_reference_proposal import write_json
 from v365_archviz.artifacts import atomic_write
-from v365_archviz.domain.workflow import ViewRole, WorkflowState
+from v365_archviz.domain.workflow import PLANNED_ROLES, WorkflowState
 from v365_archviz.errors import V365Error
 from v365_archviz.providers.contracts import ViewConditioningInput
 from v365_archviz.providers.image_factory import create_image_renderer
@@ -142,7 +142,7 @@ def select_shots(job, paths, request: SelectShotsRequest):
     if len(set(request.candidate_ids)) != 6 or any(c not in rows for c in request.candidate_ids):
         raise V365Error("Choose six distinct existing candidates")
     selected = [rows[c] for c in request.candidate_ids]
-    if {r["camera"]["role"] for r in selected} != {r.value for r in ViewRole}:
+    if {r["camera"]["role"] for r in selected} != {r.value for r in PLANNED_ROLES}:
         raise V365Error("Choose one camera for each purpose")
     if any(not r["measurement"]["feasible"] or r["score"] <= 0 for r in selected):
         raise V365Error("Selected camera failed source composition preflight")

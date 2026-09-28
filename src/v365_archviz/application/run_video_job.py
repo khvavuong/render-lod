@@ -81,7 +81,7 @@ class RunVideoJob:
                 plan_path,
                 video_root,
                 video_root / "showreel.mp4",
-                watermark=BrandWatermark(),
+                watermark=BrandWatermark() if settings.brand_watermark else None,
             )
             refs = tuple(
                 dict.fromkeys(

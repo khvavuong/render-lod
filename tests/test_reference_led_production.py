@@ -22,7 +22,14 @@ from v365_archviz.application.reference_led_input import (
 )
 from v365_archviz.application.run_generation_job import RunGenerationJob, _JobPaths
 from v365_archviz.config import Settings
-from v365_archviz.domain.workflow import Camera, GenerationProfile, ViewRole, ViewSet, WorkflowState
+from v365_archviz.domain.workflow import (
+    PLANNED_ROLES,
+    Camera,
+    GenerationProfile,
+    ViewRole,
+    ViewSet,
+    WorkflowState,
+)
 from v365_archviz.providers.contracts import GeneratedImage, ViewConditioningInput
 from v365_archviz.providers.gemini import GeminiImageRenderer
 from v365_archviz.providers.local_jobs import LocalJobRepository
@@ -290,7 +297,7 @@ def prepare_registered(pilot, monkeypatch):
     paths = _JobPaths.from_job(settings.artifact_dir, result)
     family = register_design(result, paths, RegisterDesignRequest(anchor="site", reviewer="client"))
     rows = []
-    for role in ViewRole:
+    for role in PLANNED_ROLES:
         evidence = paths.generated_root / f"evidence-{role.value}.png"
         evidence.write_bytes(image_bytes())
         rows.append(
@@ -305,7 +312,7 @@ def prepare_registered(pilot, monkeypatch):
     ranking = paths.generated_root / "shots/ranking.json"
     ranking.parent.mkdir(exist_ok=True)
     ranking.write_text(json.dumps({"candidates": rows}))
-    select_shots(result, paths, SelectShotsRequest(candidate_ids=[r.value for r in ViewRole]))
+    select_shots(result, paths, SelectShotsRequest(candidate_ids=[r.value for r in PLANNED_ROLES]))
 
     class Renderer:
         def __enter__(self):

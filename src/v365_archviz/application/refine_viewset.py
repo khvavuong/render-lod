@@ -75,6 +75,13 @@ VIEW_DIRECTIVES = {
         "a modest number of people and vehicles. Keep facade materials neutral and technically "
         "legible; no cinematic fantasy colours, wet-road spectacle or night-time darkness."
     ),
+    ViewRole.CUSTOM: (
+        "VIEW PURPOSE — USER-COMPOSED VIEW: the client placed this camera deliberately. Preserve "
+        "its exact position, height, direction and lens, and photograph whatever authored "
+        "architecture, site and landscape it frames with the same approved design identity as "
+        "the Design Master. Do not re-frame it into a standard hero, aerial or entrance view, and "
+        "do not invent architecture outside the authored geometry."
+    ),
 }
 
 

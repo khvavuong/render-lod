@@ -14,17 +14,22 @@ logger = logging.getLogger(__name__)
 class LocalGenerationDispatcher:
     """Serialize expensive local jobs without blocking HTTP request threads."""
 
-    def __init__(self, runner: RunGenerationJob | None = None) -> None:
+    def __init__(self, runner: RunGenerationJob | None = None, workers: int = 1) -> None:
         self._runner = runner or RunGenerationJob()
         self._queue: queue.Queue[str] = queue.Queue()
         self._lock = threading.Lock()
         self._scheduled: set[str] = set()
-        self._thread = threading.Thread(
-            target=self._consume,
-            name="v365-generation-worker",
-            daemon=True,
+        # A job id is scheduled at most once, so several workers never run the same job.
+        self._threads = tuple(
+            threading.Thread(
+                target=self._consume,
+                name=f"v365-generation-worker-{index}",
+                daemon=True,
+            )
+            for index in range(max(1, workers))
         )
-        self._thread.start()
+        for thread in self._threads:
+            thread.start()
 
     def submit(self, job_id: str) -> bool:
         with self._lock:

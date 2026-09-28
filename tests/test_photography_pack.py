@@ -5,7 +5,7 @@ import pytest
 from pydantic import ValidationError
 
 from v365_archviz.domain.photography_pack import PhotographyPack, RoleFraming
-from v365_archviz.domain.workflow import ViewRole
+from v365_archviz.domain.workflow import PLANNED_ROLES, ViewRole
 
 PACK_DIRECTORY = Path("resource/photography_packs")
 
@@ -35,7 +35,8 @@ def test_checked_in_packs_cover_every_standard_role() -> None:
 
     assert len(packs) >= 2
     for pack in packs:
-        for role in ViewRole:
+        # A custom camera is placed by the user, never planned from a pack.
+        for role in PLANNED_ROLES:
             assert pack.framing_for(role) is not None
 
 

@@ -103,6 +103,8 @@ ROLE_TARGETS: dict[ViewRole, frozenset[str]] = {
             "primary_facade",
         }
     ),
+    # A user-placed camera has no planned subject to look for.
+    ViewRole.CUSTOM: frozenset(),
 }
 
 # Deliberately lenient hard-reject thresholds. They catch empty, excessively distant, or badly
@@ -117,6 +119,8 @@ ROLE_THRESHOLDS: dict[ViewRole, tuple[float, float, float]] = {
     # than a drone-visible yard. Count authored entrances as circulation and keep the
     # threshold high enough to reject a hidden or cropped access point.
     ViewRole.LOADING_DETAIL: (0.12, 0.90, 0.01),
+    # Only an empty or fully blocked frame is refused: the user chose this composition.
+    ViewRole.CUSTOM: (0.02, 0.98, 0.0),
 }
 
 

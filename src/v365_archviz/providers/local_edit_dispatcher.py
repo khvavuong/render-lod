@@ -57,6 +57,15 @@ class EditStream:
         with self._condition:
             return self._closed
 
+    def outcome(self) -> tuple[str, str | None]:
+        """`running`, `completed` or `failed`, with the failure's message."""
+
+        with self._condition:
+            failure = next((e for e in self._events if e["type"] == "error"), None)
+            if failure is not None:
+                return "failed", str(failure.get("message") or "the edit failed")
+            return ("completed" if self._closed else "running"), None
+
     def read(self) -> Iterator[str]:
         """Every event so far, then each new one, then end when the run is over."""
 

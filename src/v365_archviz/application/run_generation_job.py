@@ -6,6 +6,7 @@ import hashlib
 import io
 import json
 import logging
+from collections.abc import Callable
 from pathlib import Path
 
 from PIL import Image
@@ -20,6 +21,11 @@ from v365_archviz.application.evaluate_consistency import EvaluateConsistency
 from v365_archviz.application.plan_cameras import PlanStandardCameras
 from v365_archviz.application.promote_quality_baseline import PromoteQualityBaseline
 from v365_archviz.application.protect_refinement import ProtectRefinement
+from v365_archviz.application.realism_parity import (
+    CheckRealismParity,
+    correction_prompt,
+    record_regeneration,
+)
 from v365_archviz.application.refine_viewset import RefineViewSet, select_master_view_ids
 from v365_archviz.application.refinement_prompt import build_refinement_prompt
 from v365_archviz.application.validate_conditioning import ValidateConditioningViewSet
@@ -30,11 +36,15 @@ from v365_archviz.domain.jobs import GenerationJob
 from v365_archviz.domain.style_pack import StylePack
 from v365_archviz.domain.workflow import Camera, ViewRole, ViewSet, WorkflowState
 from v365_archviz.errors import V365Error
+from v365_archviz.providers.gemini_realism_judge import GeminiRealismJudge
 from v365_archviz.providers.image_factory import create_image_renderer
 from v365_archviz.providers.local_blender_conditioning import create_conditioning_renderer
 from v365_archviz.providers.local_jobs import LocalJobRepository
 
 logger = logging.getLogger(__name__)
+
+#: Each studio view judged against the concept master, and whether it was generated again.
+REALISM_REPORT = "realism_parity.json"
 
 
 def _authored_style(job: GenerationJob) -> StylePack | None:
@@ -341,33 +351,56 @@ class RunGenerationJob:
                     ),
                 )
                 with create_image_renderer(settings, job.image_provider) as renderer:
-                    generated = None
-                    for master_type, group_view_ids in remaining_groups:
-                        if not group_view_ids:
-                            continue
-                        generated = RefineViewSet().execute(
-                            renderer,
-                            paths.render_root,
-                            paths.generated_root,
-                            paths.view_set,
-                            paths.design_dna,
-                            job.model_revision,
-                            prompt,
-                            profile=job.profile,
-                            view_ids=group_view_ids,
-                            style_pack=style_pack,
-                            attach_context_guide=style_pack is None
-                            or style_pack.context_policy.sends_composition_guide,
-                            reference_images=(),
-                            reference_images_by_view=reference_images_by_view,
-                            approved_master_path=master_refs.get(master_type, master_path),
-                            approved_master_view_id=typed_master_ids.get(
-                                master_type, master_view_id
-                            ),
-                            quality_standard_path=facade_quality_standard,
+
+                    def generate(view_ids: tuple[str, ...], view_prompt: str) -> Path | None:
+                        manifest_path = None
+                        for master_type, group_view_ids in remaining_groups:
+                            selected = tuple(item for item in group_view_ids if item in view_ids)
+                            if not selected:
+                                continue
+                            manifest_path = (
+                                RefineViewSet()
+                                .execute(
+                                    renderer,
+                                    paths.render_root,
+                                    paths.generated_root,
+                                    paths.view_set,
+                                    paths.design_dna,
+                                    job.model_revision,
+                                    view_prompt,
+                                    profile=job.profile,
+                                    view_ids=selected,
+                                    style_pack=style_pack,
+                                    attach_context_guide=style_pack is None
+                                    or style_pack.context_policy.sends_composition_guide,
+                                    reference_images=(),
+                                    reference_images_by_view=reference_images_by_view,
+                                    approved_master_path=master_refs.get(master_type, master_path),
+                                    approved_master_view_id=typed_master_ids.get(
+                                        master_type, master_view_id
+                                    ),
+                                    quality_standard_path=facade_quality_standard,
+                                )
+                                .manifest_path
+                            )
+                        return manifest_path
+
+                    generated_manifest = generate(remaining_view_ids, prompt)
+                    if generated_manifest is None:
+                        raise V365Error("approved Design Masters left no views to generate")
+                    if review.get("approved_by") == "concept_selection":
+                        generated_manifest = (
+                            self._match_master_realism(
+                                settings,
+                                paths,
+                                remaining_view_ids,
+                                master_refs.get("site", master_path),
+                                lambda view_id, notes: generate(
+                                    (view_id,), correction_prompt(prompt, notes)
+                                ),
+                            )
+                            or generated_manifest
                         )
-                if generated is None:
-                    raise V365Error("approved Design Masters left no views to generate")
                 protected = ProtectRefinement().execute(
                     paths.render_root,
                     paths.generated_root,
@@ -378,8 +411,13 @@ class RunGenerationJob:
                     repository,
                     job,
                     WorkflowState.VALIDATING,
-                    generated.manifest_path,
+                    generated_manifest,
                     protected.manifest_path,
+                    *(
+                        (paths.generated_root / REALISM_REPORT,)
+                        if (paths.generated_root / REALISM_REPORT).is_file()
+                        else ()
+                    ),
                 )
 
         if job.state is WorkflowState.REPAIRING:
@@ -549,6 +587,35 @@ class RunGenerationJob:
         if job.state is WorkflowState.GENERATING_VIDEO:
             job = self._advance(repository, job, WorkflowState.COMPLETED)
         return job
+
+    def _match_master_realism(
+        self,
+        settings: Settings,
+        paths: _JobPaths,
+        view_ids: tuple[str, ...],
+        master: Path,
+        regenerate: Callable[[str, str], Path | None],
+    ) -> Path | None:
+        """Generate once more, with a correction, each view that fell short of the master.
+
+        Returns the manifest of the last regeneration, or None when nothing was regenerated.
+        Proofing needs a Gemini key; without one the set is delivered as generated.
+        """
+
+        if not settings.gemini_api_key:
+            return None
+        parity = CheckRealismParity().execute(
+            GeminiRealismJudge(settings),
+            {view_id: self._refined_image(paths.generated_root / view_id) for view_id in view_ids},
+            master,
+            paths.generated_root / REALISM_REPORT,
+        )
+        manifest = None
+        for view_id, notes in parity.failed.items():
+            manifest = regenerate(view_id, notes) or manifest
+        if parity.failed:
+            record_regeneration(parity.report_path, parity.failed)
+        return manifest
 
     @staticmethod
     def _read_master_review(path: Path) -> dict[str, object]:

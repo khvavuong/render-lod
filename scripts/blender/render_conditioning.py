@@ -1033,7 +1033,12 @@ def create_deterministic_entourage(
     if density == "none":
         return start_index, []
     density_factor = {"low": 0.65, "medium": 1.0, "high": 1.35}[density]
-    revision = str(design_data.get("design_revision", "unversioned"))
+    # Trees are scattered by the model, not the design: every design of one site plants the same
+    # trees, so studio concepts differ in their architecture rather than in where planting fell.
+    revision = str(
+        scene_data.get("source", {}).get("version_id")
+        or design_data.get("design_revision", "unversioned")
+    )
     materials = build_materials(design_data, asset_data)
     tree_asset = _geometry_asset(asset_data, "vegetation", "landscape_zone")
     car_asset = _geometry_asset(asset_data, "vehicle", "parking")

@@ -41,7 +41,11 @@ VIEW_DIRECTIVES = {
         "authored vehicle path from outside the main gate. Clearly show the truck-capable opening, "
         "connected fence, entrance identity zone, office block, facade recognition, landscape and "
         "arrival axis. Keep the 28-35 mm documentary perspective; never make the gate decorative, "
-        "too narrow, blocked or detached from the road. Do not invent readable signage or logos."
+        "too narrow, blocked or detached from the road. Do not invent readable signage or logos. "
+        "At this distance every surface is read up close: replace the flat conditioning render "
+        "with real construction — profiled panel ribs and joints, fixings, gutters and "
+        "downpipes, plinth texture, road kerbs, drainage, paving joints, light wear and natural "
+        "planting — at the photographic quality of the approved Design Master."
     ),
     ViewRole.HERO: (
         "VIEW PURPOSE — LOGISTICS / OPERATION: prove that the project can operate. Preserve the "
@@ -51,11 +55,13 @@ VIEW_DIRECTIVES = {
         "This is a credible working yard, not a showroom, residential street or office frontage."
     ),
     ViewRole.DETAIL: (
-        "VIEW PURPOSE — OPPOSITE AERIAL / SECONDARY MASSING: preserve the drone position on the "
-        "opposite side of the Hero Aerial, not a small pan from it. Confirm rear facades, internal "
-        "roads, setbacks, planting, utility/service areas and the relationship between all "
-        "authored "
-        "masses. Keep the same project identity as VIEW-01 and expose inconsistencies rather than "
+        "VIEW PURPOSE — SECONDARY AERIAL / MASSING FROM ANOTHER SIDE: preserve this drone "
+        "position, which looks at the project from a different bearing than the Hero Aerial, not "
+        "a small pan from it. Confirm the facades seen from this side, internal roads, setbacks, "
+        "planting, utility/service areas and the relationship between all authored masses. Match "
+        "VIEW-01's photographic detail, material texture, daylight and colour grade exactly: this "
+        "is the same photo shoot from another drone position, never a softer or more rendered "
+        "image. Keep the same project identity and expose inconsistencies rather than "
         "redesigning unseen sides."
     ),
     ViewRole.OFFICE_HERO: (

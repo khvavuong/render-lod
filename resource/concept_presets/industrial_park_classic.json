@@ -14,11 +14,11 @@
       "accent": "thin yellow or white band at the eave only"
     },
     "environment": {
-      "time": "09:00",
-      "weather": "clear humid tropical morning with light haze",
-      "sun_azimuth_deg": 120.0,
-      "sun_elevation_deg": 42.0,
-      "white_balance_k": 5600
+      "time": "11:30",
+      "weather": "bright tropical late morning with scattered cumulus",
+      "sun_azimuth_deg": 160.0,
+      "sun_elevation_deg": 62.0,
+      "white_balance_k": 5700
     },
     "material_palette": {
       "primary_hex": "#23407A",

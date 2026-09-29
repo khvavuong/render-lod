@@ -2,15 +2,15 @@
 
 This module composes the existing pipeline rather than adding a parallel one:
 
-1. A concept is an ordinary job with a one-camera view set (the planned hero
-   aerial) for one preset's design brief. The worker renders its passes and
-   generates the Design Master, then stops at DESIGN_MASTER_REVIEW. That master
-   is the concept image.
+1. A concept is an ordinary job with a one-camera view set (the hero aerial,
+   planned from the model alone and shared by every preset) for one preset's
+   design brief. The worker renders its passes and generates the Design Master,
+   then stops at DESIGN_MASTER_REVIEW. That master is the concept image.
 2. Choosing a concept starts a second job for the same design revision whose
-   view set is the concept's hero camera followed by the user's shots. The
-   concept's master is copied in and recorded as already approved, so the
-   worker renders every camera and generates only the remaining views, anchored
-   to the image the user chose.
+   view set is the concept's hero camera followed by the user's shots (proposed
+   as four more aerials and one entrance view). The concept's master is copied
+   in and recorded as already approved, so the worker renders every camera and
+   generates only the remaining views, anchored to the image the user chose.
 3. The set is finalized without branding: the board is composed and the job is
    completed, which is what the video endpoint requires.
 """
@@ -56,15 +56,25 @@ PRESET_DIRECTORY = RESOURCE_DIRECTORY / "concept_presets"
 STUDIO_STYLE_PACK = RESOURCE_DIRECTORY / "style_packs" / "vietnam_marketing.json"
 #: A real photograph of a Vietnamese industrial park. It anchors photographic realism and the
 #: surroundings; the prompt forbids taking palette, facade or layout from it, so the five
-#: concepts still differ.
+#: concepts still differ. The same photograph is also the construction-detail reference for the
+#: eye-level entrance view: without one, that view's only guide was the aerial master, and it
+#: kept the flat surfaces of the conditioning render.
+STUDIO_PHOTOGRAPH = RESOURCE_DIRECTORY / "studio_references" / "vietnam_industrial_context.jpg"
 STUDIO_REFERENCES: tuple[tuple[Path, str], ...] = (
-    (
-        RESOURCE_DIRECTORY / "studio_references" / "vietnam_industrial_context.jpg",
-        "context_realism_reference",
-    ),
+    (STUDIO_PHOTOGRAPH, "context_realism_reference"),
+    (STUDIO_PHOTOGRAPH, "factory_design_reference"),
 )
 HERO_VIEW_ID = "view-01"
 MAX_SHOTS = 11
+#: The studio set after the concept: four more aerials around the project, then one eye-level
+#: view at the entrance. Bearings are measured from the concept camera, so every aerial keeps its
+#: distance and framing and only the side it looks from changes.
+AERIAL_ORBIT_DEG: tuple[float, ...] = (90.0, 180.0, 270.0)
+#: The fifth aerial looks from between the concept and the first orbit, higher, so it reads as
+#: the masterplan rather than as a fifth three-quarter view.
+MASTERPLAN_BEARING_DEG = 45.0
+MASTERPLAN_PITCH_DEG = 58.0
+MASTERPLAN_DISTANCE_SCALE = 1.1
 DEFAULT_SENSOR_WIDTH_MM = 36.0
 DEFAULT_ASPECT_RATIO = "16:9"
 #: How much wider than the buildings' diagonal the concept aerial frames. The
@@ -116,6 +126,10 @@ def _design_directory(settings: Settings, model_revision: str, design_revision: 
     return settings.artifact_dir / "scenes" / model_revision / "designs" / design_revision
 
 
+def _studio_directory(settings: Settings, model_revision: str) -> Path:
+    return settings.artifact_dir / "scenes" / model_revision / "studio"
+
+
 def _refined(directory: Path) -> Path:
     images = tuple(path for path in directory.glob("refined.*") if path.is_file())
     if len(images) != 1:
@@ -143,6 +157,8 @@ class StartConcepts:
         presets = {preset.preset_id: preset for preset in load_concept_presets()}
         if unknown := [preset_id for preset_id in preset_ids if preset_id not in presets]:
             raise InvalidModelError(f"unknown concept presets: {unknown}")
+        # One camera for every concept of this model, so the five differ only in their design.
+        hero = studio_hero(settings, scene, scene_path, model_revision)
         started: list[StartedConcept] = []
         for preset_id in preset_ids:
             preset = presets[preset_id]
@@ -154,7 +170,7 @@ class StartConcepts:
                     "context_building_ids": list(context_element_ids(scene)),
                 }
             )
-            hero = self._hero_camera(settings, scene, scene_path, model_revision, brief)
+            self._plan_design(settings, scene, scene_path, model_revision, brief)
             revision = PlanDesign.revision(scene, brief)
             concept_set = ViewSet(
                 view_set_id=f"{revision}-concept-{variant}",
@@ -182,13 +198,15 @@ class StartConcepts:
         return tuple(started)
 
     @staticmethod
-    def _hero_camera(
+    def _plan_design(
         settings: Settings,
         scene: CanonicalScene,
         scene_path: Path,
         model_revision: str,
         brief: DesignBrief,
-    ) -> Camera:
+    ) -> None:
+        """Compile the preset's design and its planned cameras, which the entrance view uses."""
+
         revision = PlanDesign.revision(scene, brief)
         design_directory = _design_directory(settings, model_revision, revision)
         brief_path = design_directory / "design_brief.json"
@@ -199,21 +217,61 @@ class StartConcepts:
             PlanDesign().execute(scene_path, brief_path)
         if not view_set_path.is_file():
             PlanStandardCameras().execute(scene_path, design_path, output_path=view_set_path)
-        planned = ViewSet.model_validate_json(view_set_path.read_text(encoding="utf-8"))
-        hero = next(
-            (camera for camera in planned.cameras if camera.role is ViewRole.OVERALL),
-            planned.cameras[0],
-        )
-        return frame_buildings(hero, scene).model_copy(update={"view_id": HERO_VIEW_ID})
+
+
+def studio_hero(
+    settings: Settings, scene: CanonicalScene, scene_path: Path, model_revision: str
+) -> Camera:
+    """The concept camera: planned from the model alone, so no preset can move it."""
+
+    view_set_path = _studio_directory(settings, model_revision) / "view_set.json"
+    if not view_set_path.is_file():
+        PlanStandardCameras().execute(scene_path, output_path=view_set_path)
+    planned = ViewSet.model_validate_json(view_set_path.read_text(encoding="utf-8"))
+    hero = next(
+        (camera for camera in planned.cameras if camera.role is ViewRole.OVERALL),
+        planned.cameras[0],
+    )
+    return frame_buildings(hero, scene).model_copy(update={"view_id": HERO_VIEW_ID})
+
+
+def orbit(
+    camera: Camera,
+    bearing_deg: float,
+    *,
+    pitch_deg: float | None = None,
+    distance_scale: float = 1.0,
+) -> Camera:
+    """Move a camera around its target's vertical axis, optionally steeper and further away."""
+
+    offset = [camera.position[axis] - camera.target[axis] for axis in range(3)]
+    ground = math.hypot(offset[0], offset[1])
+    distance = math.sqrt(ground * ground + offset[2] * offset[2]) * distance_scale
+    if ground <= 0 or distance <= 0:
+        return camera
+    heading = math.atan2(offset[1], offset[0]) + math.radians(bearing_deg)
+    pitch = math.radians(pitch_deg) if pitch_deg is not None else math.atan2(offset[2], ground)
+    position = (
+        camera.target[0] + math.cos(heading) * math.cos(pitch) * distance,
+        camera.target[1] + math.sin(heading) * math.cos(pitch) * distance,
+        camera.target[2] + math.sin(pitch) * distance,
+    )
+    return camera.model_copy(update={"position": position})
 
 
 def frame_buildings(camera: Camera, scene: CanonicalScene) -> Camera:
-    """Keep the planned bearing and angle, but stand close enough to read the buildings."""
+    """Keep the planned bearing and angle, but stand close enough to read the buildings.
+
+    Every authored building counts, utility blocks included: a site plan's office drawn as a
+    plain box arrives as one, and framing the shed alone cropped it out of the concept, which
+    left the provider to invent the rest of the campus differently for each concept.
+    """
 
     buildings = [
         element
         for element in scene.elements
-        if element.semantic_role in {SemanticRole.MAIN_SHED, SemanticRole.OFFICE_BLOCK}
+        if element.semantic_role
+        in {SemanticRole.MAIN_SHED, SemanticRole.OFFICE_BLOCK, SemanticRole.UTILITY_BLOCK}
     ]
     if not buildings:
         return camera
@@ -239,12 +297,45 @@ def frame_buildings(camera: Camera, scene: CanonicalScene) -> Camera:
 
 
 def proposed_shots(settings: Settings, model_revision: str, design_revision: str) -> ViewSet:
-    """The cameras the planner found for this design, hero first."""
+    """The studio set for this design: the concept aerial, four more aerials, the entrance.
 
-    path = _design_directory(settings, model_revision, design_revision) / "view_set.json"
-    if not path.is_file():
+    The planner's standard set is two aerials and four eye-level views. Close views show the
+    most conditioning render per pixel, and they were the ones that came back looking like CGI
+    next to the concept; the studio keeps one, at the entrance, and photographs the rest from
+    the air at the concept's own distance.
+    """
+
+    planned_path = _design_directory(settings, model_revision, design_revision) / "view_set.json"
+    scene_path = _scene_path(settings, model_revision)
+    if not planned_path.is_file() or not scene_path.is_file():
         raise FileNotFoundError("no planned cameras for this design")
-    return ViewSet.model_validate_json(path.read_text(encoding="utf-8"))
+    scene = CanonicalScene.model_validate_json(scene_path.read_text(encoding="utf-8"))
+    planned = ViewSet.model_validate_json(planned_path.read_text(encoding="utf-8"))
+    hero = studio_hero(settings, scene, scene_path, model_revision)
+    aerials = (
+        *(orbit(hero, bearing) for bearing in AERIAL_ORBIT_DEG),
+        orbit(
+            hero,
+            MASTERPLAN_BEARING_DEG,
+            pitch_deg=MASTERPLAN_PITCH_DEG,
+            distance_scale=MASTERPLAN_DISTANCE_SCALE,
+        ),
+    )
+    entrance = next(
+        (camera for camera in planned.cameras if camera.role is ViewRole.CONTEXT),
+        planned.cameras[-1],
+    )
+    cameras = (
+        hero,
+        *(
+            camera.model_copy(update={"view_id": f"view-{index + 2:02d}", "role": ViewRole.DETAIL})
+            for index, camera in enumerate(aerials)
+        ),
+        entrance.model_copy(
+            update={"view_id": f"view-{len(aerials) + 2:02d}", "role": ViewRole.CONTEXT}
+        ),
+    )
+    return planned.model_copy(update={"cameras": cameras})
 
 
 class StartImageSet:

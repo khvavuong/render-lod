@@ -40,7 +40,7 @@
     "presentation": {
       "landscape_character": "restrained rows of tropical shade trees (sao đen, dầu, bàng) along roads and boundaries; clean lawn strips",
       "paving_character": "dark asphalt on every external and perimeter road; light-grey industrial concrete with joints, drainage and light dust on internal yards and loading aprons",
-      "entourage_density": "low"
+      "entourage_density": "medium"
     },
     "panel_module_m": 1.2,
     "loading_docks_per_main_facade": 3,

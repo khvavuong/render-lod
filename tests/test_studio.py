@@ -1,4 +1,5 @@
 import json
+import math
 from pathlib import Path
 
 import numpy as np
@@ -154,16 +155,20 @@ def test_concepts_start_one_single_camera_job_per_preset(artifacts: Path) -> Non
     assert len(concepts) == 5
     assert len({concept["design_revision"] for concept in concepts}) == 5
     repository = LocalJobRepository(artifacts / "metadata")
+    heroes = []
     for concept in concepts:
         assert concept["state"] == "rendering_passes"
         job = repository.get_by_view_set(concept["view_set_id"])
         view_set = ViewSet.model_validate_json(job.view_set_snapshot or "")
         assert [camera.view_id for camera in view_set.cameras] == ["view-01"]
         assert view_set.cameras[0].role is ViewRole.OVERALL
+        heroes.append(view_set.cameras[0])
         # Vietnamese register and a real park photograph anchor every concept.
         assert job.style_pack_ref and job.style_pack_ref.endswith("vietnam_marketing.json")
-        assert job.reference_roles == ("context_realism_reference",)
+        assert job.reference_roles == ("context_realism_reference", "factory_design_reference")
         assert all(Path(ref).is_file() for ref in job.reference_image_refs)
+    # Every concept is photographed through the same camera, so they differ only in design.
+    assert all(hero == heroes[0] for hero in heroes)
 
     again = client.post(
         "/v1/studio/concepts", json={"model_revision": revision, "project_id": "project-1"}
@@ -179,7 +184,65 @@ def test_concepts_start_one_single_camera_job_per_preset(artifacts: Path) -> Non
         f"/v1/studio/models/{revision}/designs/{concepts[0]['design_revision']}/shots"
     )
     assert shots.status_code == 200
-    assert len(shots.json()["cameras"]) == 6
+    cameras = shots.json()["cameras"]
+    assert [camera["role"] for camera in cameras] == [
+        "overall",
+        "detail",
+        "detail",
+        "detail",
+        "detail",
+        "context",
+    ]
+    assert [camera["view_id"] for camera in cameras] == [f"view-0{index}" for index in range(1, 7)]
+    assert cameras[0]["position"] == pytest.approx(list(heroes[0].position))
+    # Five aerials from five different sides, all looking at the concept's target.
+    bearings = {
+        round(
+            math.degrees(
+                math.atan2(
+                    camera["position"][1] - camera["target"][1],
+                    camera["position"][0] - camera["target"][0],
+                )
+            )
+        )
+        % 360
+        for camera in cameras[:5]
+    }
+    assert len(bearings) == 5
+    assert all(camera["target"] == cameras[0]["target"] for camera in cameras[:5])
+
+
+def test_every_concept_preset_shares_the_same_daylight() -> None:
+    environments = {
+        json.dumps(preset.brief["environment"], sort_keys=True) for preset in load_concept_presets()
+    }
+
+    assert len(environments) == 1
+    assert json.loads(environments.pop())["time"] == "11:30"
+
+
+def test_orbit_keeps_distance_and_target_and_can_climb() -> None:
+    from v365_archviz.application.studio import orbit
+    from v365_archviz.domain.workflow import Camera
+
+    camera = Camera(
+        view_id="view-01",
+        role=ViewRole.OVERALL,
+        position=(100.0, 0.0, 50.0),
+        target=(0.0, 0.0, 0.0),
+        focal_length_mm=28,
+        sensor_width_mm=36,
+        aspect_ratio="16:9",
+    )
+
+    turned = orbit(camera, 90)
+    assert turned.position == pytest.approx((0.0, 100.0, 50.0))
+    assert turned.target == camera.target
+
+    raised = orbit(camera, 0, pitch_deg=60, distance_scale=1.1)
+    distance = math.dist(camera.position, camera.target) * 1.1
+    assert math.dist(raised.position, raised.target) == pytest.approx(distance)
+    assert raised.position[2] == pytest.approx(distance * math.sin(math.radians(60)))
 
 
 def test_unknown_scene_is_not_found(artifacts: Path) -> None:
@@ -320,8 +383,6 @@ def test_custom_role_has_lenient_checks_and_no_planned_target() -> None:
 
 
 def test_concept_hero_frames_the_buildings_from_the_planned_bearing(artifacts: Path) -> None:
-    import math
-
     from v365_archviz.application.studio import frame_buildings
     from v365_archviz.domain.workflow import Camera
 
@@ -347,6 +408,12 @@ def test_concept_hero_frames_the_buildings_from_the_planned_bearing(artifacts: P
     assert math.dist(framed.position, framed.target) < math.dist(planned.position, planned.target)
     # The rotated office widens the extent: x from -87.0 to 70, y from -43.0 to 45.
     assert framed.target[:2] == pytest.approx((-8.5, 1.0), abs=0.1)
+
+    # An office drawn as a plain box arrives as a utility block and still belongs in the frame.
+    upload = _upload()
+    upload["buildings"][1]["role"] = "utility_block"  # type: ignore[index]
+    plain = ImportSceneUpload().execute(SceneUpload.model_validate(upload), artifacts).scene
+    assert frame_buildings(planned, plain).target[:2] == pytest.approx((-8.5, 1.0), abs=0.1)
 
 
 def test_job_cameras_are_readable(artifacts: Path) -> None:

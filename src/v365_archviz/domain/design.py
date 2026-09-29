@@ -123,6 +123,9 @@ class DesignPreferences(DomainModel):
     decor_level: DecorLevel = DecorLevel.BALANCED
     requested_office_storeys: int | None = Field(default=None, ge=1, le=8)
     creative_prompt: str | None = Field(default=None, max_length=1000)
+    #: The client's own description of the look. When present it decides style, materials,
+    #: colours and landscape in place of the preset's; it never touches geometry.
+    client_prompt: str | None = Field(default=None, max_length=1000)
     design_package: str = Field(default="premium_practical", min_length=1)
     envelope_kit: str = Field(default="profiled_metal_vertical", min_length=1)
     office_entrance_kit: str = Field(default="preserve_model", min_length=1)

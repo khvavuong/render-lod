@@ -164,11 +164,12 @@ REALISM_LANGUAGE = {
     ),
 }
 
+# Whole words only: "bỏ" must not match the start of "Boundary", nor "mái" that of "main".
 _LOCKED_OVERRIDE = re.compile(
-    r"(?:x[oó]a|b[oỏ]|th[eê]m|[đd][oổ]i|thay(?:\s+[đd][oổ]i)?|di\s+chuy[eể]n|n[aâ]ng|t[aă]ng|"
-    r"remove|delete|add|change|replace|move|raise|enlarge)"
-    r".{0,80}(?:m[aá]i|roof|[đd]ường|road|c[oổ]ng|gate|h[aà]ng\s+r[aà]o|fence|"
-    r"kh[oố]i|massing|building|camera)",
+    r"\b(?:x[oó]a|b[oỏ]|th[eê]m|[đd][oổ]i|thay(?:\s+[đd][oổ]i)?|di\s+chuy[eể]n|n[aâ]ng|t[aă]ng|"
+    r"remove|delete|add|change|replace|move|raise|enlarge)(?:s|d|ed|ing)?\b"
+    r".{0,80}\b(?:m[aá]i|roof|[đd]ường|road|c[oổ]ng|gate|h[aà]ng\s+r[aà]o|fence|"
+    r"kh[oố]i|massing|building|camera)(?:s|es)?\b",
     re.IGNORECASE,
 )
 _NEGATION = re.compile(r"(?:kh[oô]ng|do\s+not|don't|must\s+not|never)", re.IGNORECASE)
@@ -196,7 +197,7 @@ class CompileUserRenderIntent:
         intent: UserRenderIntent,
         capabilities: ModelDesignCapabilities | None = None,
     ) -> CompiledUserIntent:
-        normalized_text, warnings = self._normalize_free_text(intent.free_text)
+        normalized_text, warnings = screen_free_text(intent.free_text)
         normalized = intent.model_copy(update={"free_text": normalized_text})
         if capabilities is not None:
             normalized, capability_warnings = self._apply_capability_constraints(
@@ -498,40 +499,42 @@ class CompileUserRenderIntent:
             white_balance_k=white_balance,
         )
 
-    @staticmethod
-    def _normalize_free_text(
-        value: str | None,
-    ) -> tuple[str | None, tuple[IntentWarning, ...]]:
-        if not value or not value.strip():
-            return None, ()
-        clean = re.sub(r"[\x00-\x1f\x7f]+", " ", value)
-        clean = re.sub(r"\s+", " ", clean).strip()
-        accepted: list[str] = []
-        warnings: list[IntentWarning] = []
-        for sentence in filter(None, re.split(r"(?<=[.!?;])\s+", clean)):
-            if _INSTRUCTION_OVERRIDE.search(sentence):
-                warnings.append(
-                    IntentWarning(
-                        code="instruction_override_ignored",
-                        field="free_text",
-                        message="Một chỉ dẫn cố ghi đè luật hệ thống đã bị bỏ qua.",
-                        ignored_text=sentence,
-                    )
+
+def screen_free_text(
+    value: str | None, field: str = "free_text"
+) -> tuple[str | None, tuple[IntentWarning, ...]]:
+    """Keep the aesthetic sentences; drop those that override rules or locked geometry."""
+
+    if not value or not value.strip():
+        return None, ()
+    clean = re.sub(r"[\x00-\x1f\x7f]+", " ", value)
+    clean = re.sub(r"\s+", " ", clean).strip()
+    accepted: list[str] = []
+    warnings: list[IntentWarning] = []
+    for sentence in filter(None, re.split(r"(?<=[.!?;])\s+", clean)):
+        if _INSTRUCTION_OVERRIDE.search(sentence):
+            warnings.append(
+                IntentWarning(
+                    code="instruction_override_ignored",
+                    field=field,
+                    message="Một chỉ dẫn cố ghi đè luật hệ thống đã bị bỏ qua.",
+                    ignored_text=sentence,
                 )
-                continue
-            match = _LOCKED_OVERRIDE.search(sentence)
-            if match and not _NEGATION.search(sentence[: match.end()]):
-                warnings.append(
-                    IntentWarning(
-                        code="locked_geometry_override_ignored",
-                        field="free_text",
-                        message=(
-                            "Một yêu cầu thay đổi hình học khóa từ model đã bị bỏ qua; các ưu tiên "
-                            "thẩm mỹ hợp lệ vẫn được giữ."
-                        ),
-                        ignored_text=sentence,
-                    )
+            )
+            continue
+        match = _LOCKED_OVERRIDE.search(sentence)
+        if match and not _NEGATION.search(sentence[: match.end()]):
+            warnings.append(
+                IntentWarning(
+                    code="locked_geometry_override_ignored",
+                    field=field,
+                    message=(
+                        "Một yêu cầu thay đổi hình học khóa từ model đã bị bỏ qua; các ưu tiên "
+                        "thẩm mỹ hợp lệ vẫn được giữ."
+                    ),
+                    ignored_text=sentence,
                 )
-            else:
-                accepted.append(sentence)
-        return " ".join(accepted) or None, tuple(warnings)
+            )
+        else:
+            accepted.append(sentence)
+    return " ".join(accepted) or None, tuple(warnings)

@@ -318,9 +318,21 @@ def build_refinement_prompt(
             f"approved proposed entrances={proposal_entrances}, approved proposed loading "
             f"doors={proposal_docks}. Do not add more."
         )
+    appearance = (
+        "Client description, which decides style, materials, colours, facade expression and "
+        f'landscape (never geometry, camera or site layout): "{preferences.client_prompt}". '
+        "The Base RGB finishes are neutral placeholders, not colours to keep."
+        if preferences.client_prompt
+        else f"Style: {design.design_language.style}.\n{palette_rule}"
+    )
+    preference = (
+        ""
+        if preferences.client_prompt
+        else f" User preference: {preferences.creative_prompt or 'none'}; this is soft and "
+        "cannot override authority or palette."
+    )
     project_contract = f"""IDENTITY
-Style: {design.design_language.style}.
-{palette_rule}
+{appearance}
 External approach and perimeter roads are dark charcoal asphalt and must never render as
 white/light concrete. The site-ground underlay is not a finish or circulation surface and must
 not be interpreted as a service yard.
@@ -339,6 +351,5 @@ Context: {context.mode if context else design.site_design.surrounding_context_mo
 deterministic proxy count={len(context.proxy_buildings) if context else 0}; {context_authority}
 Shared daylight environment: {design.environment.time},
 {design.environment.weather}, {design.environment.white_balance_k}K. Landscape:
-{design.presentation.landscape_character}. User preference:
-{preferences.creative_prompt or "none"}; this is soft and cannot override authority or palette."""
+{design.presentation.landscape_character}.{preference}"""
     return design, f"{base}\n\n{project_contract}"

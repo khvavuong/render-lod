@@ -101,6 +101,13 @@ def load_concept_presets(directory: Path = PRESET_DIRECTORY) -> tuple[ConceptPre
     return tuple(sorted(presets, key=lambda preset: (preset.order, preset.preset_id)))
 
 
+def find_concept_presets(preset_ids: tuple[str, ...]) -> tuple[ConceptPreset, ...]:
+    presets = {preset.preset_id: preset for preset in load_concept_presets()}
+    if unknown := [preset_id for preset_id in preset_ids if preset_id not in presets]:
+        raise InvalidModelError(f"unknown concept presets: {unknown}")
+    return tuple(presets[preset_id] for preset_id in preset_ids)
+
+
 @dataclass(frozen=True, slots=True)
 class StartedConcept:
     preset: ConceptPreset
@@ -147,21 +154,17 @@ class StartConcepts:
         *,
         model_revision: str,
         project_id: str,
-        preset_ids: tuple[str, ...],
+        presets: tuple[ConceptPreset, ...],
         variant: int = 1,
     ) -> tuple[StartedConcept, ...]:
         scene_path = _scene_path(settings, model_revision)
         if not scene_path.is_file():
             raise FileNotFoundError("canonical scene not found")
         scene = CanonicalScene.model_validate_json(scene_path.read_text(encoding="utf-8"))
-        presets = {preset.preset_id: preset for preset in load_concept_presets()}
-        if unknown := [preset_id for preset_id in preset_ids if preset_id not in presets]:
-            raise InvalidModelError(f"unknown concept presets: {unknown}")
         # One camera for every concept of this model, so the five differ only in their design.
         hero = studio_hero(settings, scene, scene_path, model_revision)
         started: list[StartedConcept] = []
-        for preset_id in preset_ids:
-            preset = presets[preset_id]
+        for preset in presets:
             brief = DesignBrief.model_validate(
                 {
                     **preset.brief,

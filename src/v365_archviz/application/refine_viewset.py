@@ -241,13 +241,22 @@ def _identity_contract(design: DesignDNA) -> tuple[dict[str, object], str]:
             "loading_door_families": loading_door_families,
         },
     }
-    prompt = (
-        "PROJECT DESIGN IDENTITY — immutable across all six cameras: "
-        f"style={design.design_language.style}; "
+    client_prompt = design.design_preferences.client_prompt
+    # A described concept keeps the look its master shows, not the neutral preset under it.
+    appearance = (
+        f'appearance=the client description "{client_prompt}" exactly as the approved Design '
+        "Master renders it; "
+        if client_prompt
+        else f"style={design.design_language.style}; "
         f"materials={design.design_language.primary_material}, "
         f"{design.design_language.secondary_material}, "
         f"{design.design_language.office_material}; "
         f"palette={', '.join(str(value) for value in palette.values())}; "
+    )
+    material_roles = "as in the approved Design Master" if client_prompt else material_role_contract
+    prompt = (
+        "PROJECT DESIGN IDENTITY — immutable across all six cameras: "
+        f"{appearance}"
         f"base daylight={environment['time']} {environment['weather']} (VIEW-06 may override only "
         "photography time to restrained golden/blue hour), "
         f"white balance={environment['white_balance_k']}K. "
@@ -257,7 +266,7 @@ def _identity_contract(design: DesignDNA) -> tuple[dict[str, object], str]:
         f"user direction={design.design_preferences.creative_prompt or 'none'}. "
         f"solar panels={solar_policy}. "
         f"facade grammar={facade_grammar} "
-        f"material roles={material_role_contract}. "
+        f"material roles={material_roles}. "
         f"site boundary family={site_boundary_contract}. "
         f"context policy={context_contract}. "
         "All roads outside the fence and all public/perimeter approach roads remain dark asphalt; "

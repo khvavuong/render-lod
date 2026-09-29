@@ -45,6 +45,7 @@ from v365_archviz.application.build_canonical_scene import BuildCanonicalScene
 from v365_archviz.application.compile_user_intent import CompileUserRenderIntent
 from v365_archviz.application.create_generation_job import CreateGenerationJob
 from v365_archviz.application.create_video_job import CreateVideoJob
+from v365_archviz.application.custom_concept import prompt_preset
 from v365_archviz.application.extract_ifc import ExtractIfc
 from v365_archviz.application.import_scene_upload import ImportSceneUpload
 from v365_archviz.application.inspect_model import InspectModel
@@ -63,11 +64,13 @@ from v365_archviz.application.reference_delivery import (
 from v365_archviz.application.restore_view_edit import RestoreViewEdit
 from v365_archviz.application.run_generation_job import _JobPaths
 from v365_archviz.application.studio import (
+    ConceptPreset,
     FinalizeImageSet,
     RegenerateView,
     ShotSpec,
     StartConcepts,
     StartImageSet,
+    find_concept_presets,
     load_concept_presets,
     proposed_shots,
 )
@@ -2014,6 +2017,8 @@ class StartConceptsRequest(BaseModel):
     #: A new number asks for new images of the same presets; the same number
     #: returns the jobs already started, so a repeated request costs nothing.
     variant: int = Field(default=1, ge=1, le=99)
+    #: One concept from the user's own description instead of the presets.
+    prompt: str | None = Field(default=None, min_length=3, max_length=1000)
 
 
 class ConceptJobResponse(BaseModel):
@@ -2130,7 +2135,10 @@ def concept_presets() -> tuple[ConceptPresetResponse, ...]:
 )
 async def start_concepts(request: StartConceptsRequest) -> StartConceptsResponse:
     settings = _settings()
-    preset_ids = request.preset_ids or tuple(preset.preset_id for preset in load_concept_presets())
+    try:
+        presets = _concept_presets(request)
+    except InvalidModelError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     try:
         started = await run_in_threadpool(
             StartConcepts().execute,
@@ -2138,7 +2146,7 @@ async def start_concepts(request: StartConceptsRequest) -> StartConceptsResponse
             _repository(settings),
             model_revision=request.model_revision,
             project_id=request.project_id,
-            preset_ids=preset_ids,
+            presets=presets,
             variant=request.variant,
         )
     except (OSError, ValueError, V365Error) as exc:
@@ -2158,6 +2166,14 @@ async def start_concepts(request: StartConceptsRequest) -> StartConceptsResponse
             )
             for concept in started
         )
+    )
+
+
+def _concept_presets(request: StartConceptsRequest) -> tuple[ConceptPreset, ...]:
+    if request.prompt is not None:
+        return (prompt_preset(request.prompt),)
+    return find_concept_presets(
+        request.preset_ids or tuple(preset.preset_id for preset in load_concept_presets())
     )
 
 

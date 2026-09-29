@@ -1,4 +1,4 @@
-from v365_archviz.application.compile_user_intent import CompileUserRenderIntent
+from v365_archviz.application.compile_user_intent import CompileUserRenderIntent, screen_free_text
 from v365_archviz.domain.design import MaterialPalette
 from v365_archviz.domain.render_intent import (
     DESIGN_OPTIONS,
@@ -75,6 +75,19 @@ def test_compiler_ignores_only_free_text_that_overrides_locked_geometry() -> Non
     assert len(locked_warnings) == 1
     assert "Xóa đường" not in (compiled.brief.design_preferences.creative_prompt or "")
     assert "độ nhám tự nhiên" in (compiled.brief.design_preferences.creative_prompt or "")
+
+
+def test_screening_matches_whole_words_only() -> None:
+    kept, warnings = screen_free_text(
+        "Boundary and gate share the charcoal colour. The main entrance glows at dusk. "
+        "Removed the east gates. Bỏ mái che cổng."
+    )
+
+    assert kept == ("Boundary and gate share the charcoal colour. The main entrance glows at dusk.")
+    assert [warning.ignored_text for warning in warnings] == [
+        "Removed the east gates.",
+        "Bỏ mái che cổng.",
+    ]
 
 
 def test_preserve_existing_policy_does_not_author_new_docks() -> None:

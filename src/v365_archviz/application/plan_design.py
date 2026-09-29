@@ -44,7 +44,7 @@ def _loading_docks(surface: SceneSurface, count: int) -> tuple[LoadingDock, ...]
             u=(index + 1) / (count + 1),
             width_m=clear_width,
             clear_height_m=min(5.0, max(4.2, clear_width * 1.05)),
-            door_type="sectional_overhead",
+            door_type="roller_shutter",
             threshold_type="grade_level",
             canopy_projection_m=1.35,
             include_safety_bollards=True,

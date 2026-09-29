@@ -24,7 +24,7 @@ def test_loading_dock_must_be_on_surface_interval() -> None:
 def test_loading_dock_defaults_to_buildable_industrial_door_kit() -> None:
     dock = LoadingDock(dock_id="dock-01", u=0.5, width_m=4.8)
 
-    assert dock.door_type == "sectional_overhead"
+    assert dock.door_type == "roller_shutter"
     assert dock.clear_height_m == 4.5
     assert dock.threshold_type == "grade_level"
     assert dock.canopy_projection_m == 1.2

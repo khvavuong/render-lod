@@ -49,7 +49,7 @@ VIEW_DIRECTIVES = {
     ),
     ViewRole.HERO: (
         "VIEW PURPOSE — LOGISTICS / OPERATION: prove that the project can operate. Preserve the "
-        "authored loading facade, truck apron, industrial shutter or sectional doors, docks, "
+        "authored loading facade, yard, grade-level roller shutter doors and their slim "
         "canopies, bollards, turning clearance and service circulation. Add only sparse correctly "
         "scaled operational trucks, pallets and workers where they do not hide doors or geometry. "
         "This is a credible working yard, not a showroom, residential street or office frontage."
@@ -162,8 +162,8 @@ def _identity_contract(design: DesignDNA) -> tuple[dict[str, object], str]:
     )
     facade_grammar = (
         f"cladding module={','.join(f'{value:g}m' for value in panel_modules) or 'model-derived'}; "
-        f"office entrance bays={len(entrance_facades)}; loading docks={loading_dock_count}. "
-        f"loading door families={loading_door_families}. "
+        f"office entrance bays={len(entrance_facades)}; large vehicle doors={loading_dock_count}. "
+        f"vehicle door families={loading_door_families}. "
         f"{articulation_grammar}"
         "Confine office glazing and feature fins to authored entrance/design-detail bays; do not "
         "spread an office glazing ratio across plain factory elevations or shed end walls."
@@ -440,9 +440,9 @@ def _visible_facade_directive(design: DesignDNA, camera: Camera) -> str:
     dock_count = sum(len(facade.loading_docks) for facade in facades)
     return (
         f"PRIMARY VISIBLE FACADE — {direction}: approved generated office entrance bays="
-        f"{entrance_count}, approved generated loading docks={dock_count}. Preserve every opening "
-        "already visible in the Base RGB, but do not add or copy any extra entrance, dock, large "
-        "glazed bay or feature frame from the Design Master onto this facade."
+        f"{entrance_count}, approved generated large vehicle doors={dock_count}. Preserve every "
+        "opening already visible in the Base RGB, but do not add or copy any extra entrance, "
+        "large door, large glazed bay or feature frame from the Design Master onto this facade."
     )
 
 

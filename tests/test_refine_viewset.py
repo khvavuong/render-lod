@@ -193,7 +193,7 @@ def test_refines_an_ordered_view_set_as_one_unit(tmp_path: Path) -> None:
     assert "site boundary family=" in renderer.last_request.identity_prompt
     assert "context policy=" in renderer.last_request.identity_prompt
     assert "PRIMARY VISIBLE FACADE" in renderer.last_request.views[0].prompt
-    assert "approved generated loading docks=0" in renderer.last_request.views[0].prompt
+    assert "approved generated large vehicle doors=0" in renderer.last_request.views[0].prompt
     first_references = renderer.last_request.views[0].reference_images
     assert first_references[-1].name == "context_composition_guide.png"
     assert first_references[-1].is_file()

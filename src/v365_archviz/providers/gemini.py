@@ -51,7 +51,7 @@ _STRUCTURE_AUTHORITY_BY_FREEDOM = {
     ),
     "detail_within_envelope": (
         "MONOCHROME STRUCTURE AUTHORITY — preserve its project silhouette, roof continuity and "
-        "the position and count of every vehicular opening and dock. The facade bay lines are "
+        "the position and count of every vehicular opening. The facade bay lines are "
         "where emphasis belongs, not a finished design: you may develop how each bay is "
         "composed, framed and shaded within them. It is a constraint image, not a material or "
         "style target. Any outlined off-site proxy is reserved for deterministic post-composite; "
@@ -59,7 +59,7 @@ _STRUCTURE_AUTHORITY_BY_FREEDOM = {
     ),
     "design_within_envelope": (
         "MONOCHROME STRUCTURE AUTHORITY — preserve its project silhouette, its footprint and the "
-        "position of every vehicular opening, so trucks still reach the same docks. Everything "
+        "position of every vehicular opening, so trucks still reach the same doors. Everything "
         "drawn inside that outline is massing study, not design: bay lines, stripes and panel "
         "divisions are placeholders you are expected to replace. It is a constraint image, not a "
         "material or style target. Any outlined off-site proxy is reserved for deterministic "

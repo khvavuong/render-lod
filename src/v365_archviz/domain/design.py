@@ -23,7 +23,7 @@ class LoadingDock(DomainModel):
     width_m: PositiveMeters
     clear_height_m: PositiveMeters = Field(default=4.5, ge=3.2, le=6.5)
     door_type: str = Field(
-        default="sectional_overhead", pattern=r"^(sectional_overhead|roller_shutter)$"
+        default="roller_shutter", pattern=r"^(sectional_overhead|roller_shutter)$"
     )
     threshold_type: str = Field(default="grade_level", pattern=r"^(grade_level|dock_high)$")
     canopy_projection_m: float = Field(default=1.2, ge=0.0, le=4.0)

@@ -1817,11 +1817,12 @@ def create_design_details(
                     detail_index,
                     semantic_role="loading_zone",
                 )
-                # A recessed dark frame plus a lighter sectional shutter reads as a real
-                # industrial door at both aerial and human eye-level views.
+                # A roller shutter filling its opening under a slim steel frame. A wide dark
+                # rim around a lighter door reads as a padded truck dock seal, which Vietnamese
+                # factories do not have, and the image model draws one.
                 detail_index += 1
-                shutter_width = max(0.8, dock["width_m"] - 0.46)
-                shutter_height = max(3.0, clear_height - 0.34)
+                shutter_width = max(0.8, dock["width_m"] - 0.12)
+                shutter_height = max(3.0, clear_height - 0.12)
                 _detail_box(
                     f"{dock['dock_id']}:shutter",
                     surface,
@@ -1855,7 +1856,7 @@ def create_design_details(
                 v_axis = Vector(frame["v_axis"])
                 normal = Vector(frame["normal"])
                 dock_u = dock["u"] * width
-                frame_width = 0.22
+                frame_width = 0.12
                 # Explicit jambs/head stop the opening reading as a generic black rectangle.
                 for frame_name, frame_u, frame_z, member_width, member_height in (
                     (
@@ -1882,7 +1883,7 @@ def create_design_details(
                         frame_z,
                         member_width,
                         member_height,
-                        0.28,
+                        0.1,
                         detail_materials["secondary"],
                         detail_index,
                         semantic_role="loading_zone",

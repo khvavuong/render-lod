@@ -7,6 +7,15 @@ from pathlib import Path
 from v365_archviz.domain.design import DesignDNA
 from v365_archviz.domain.style_pack import ContextPolicy, DesignFreedom, StylePack
 
+#: Vietnamese factories load at grade. Left to "loading dock", image models draw the raised,
+#: sealed truck docks of European and American warehouses, which are not built here.
+VIETNAMESE_DOOR_RULE = (
+    "VEHICLE DOORS: every large door is a grade-level steel roller shutter or sliding door set in "
+    "the wall plane, with at most a slim steel canopy above it, and the floor inside meets the "
+    "yard at the same level. Never draw dock shelters or padded truck seals, dock levellers, "
+    "raised loading platforms or ramps, dock bumpers or truck bays recessed into the building."
+)
+
 LAYERED_BASE_PROMPT = """TASK
 Photorealistically refine this exact camera render into a bid-quality photograph of a buildable
 Vietnamese industrial project.
@@ -84,14 +93,14 @@ _AUTHORITY_BY_FREEDOM = {
     DesignFreedom.PHOTOREAL_ONLY: """\
 The current Base RGB fixes camera, project massing, roof geometry, footprint, authored roads,
 yards, landscape zones, gate openings and fence runs. Preserve all of them exactly: same camera
-position and framing, same silhouette, and the same number and placement of openings, docks and
-bays. Facade articulation already present in Base RGB is approved design and must stay in its
-authored locations as one consistent kit across every camera. Geometry is not negotiable.""",
+position and framing, same silhouette, and the same number and placement of openings, large
+doors and bays. Facade articulation already present in Base RGB is approved design and must stay
+in its authored locations as one consistent kit across every camera. Geometry is not negotiable.""",
     DesignFreedom.DETAIL_WITHIN_ENVELOPE: """\
 The current Base RGB fixes camera, project massing, roof geometry, footprint, authored roads,
 yards, landscape zones, gate openings and fence runs. Preserve all of them exactly: same camera
 position and framing, same silhouette, same roof line, and the same number and placement of
-loading docks, gates and vehicular openings.
+large vehicle doors, gates and other vehicular openings.
 
 Inside that fixed envelope the facade is yours to develop. The articulation in Base RGB is a
 placed schematic, not a finished design: it marks where emphasis belongs, at what rhythm, and
@@ -116,7 +125,7 @@ expected on a building of this kind and is welcome, as long as it is generic and
 
 Two limits hold the design to the envelope: the outline the building cuts against the sky must
 still match Base RGB, and every vehicular opening the Base RGB shows must remain, at truck scale,
-in the same place — trucks have to reach the same docks. Whatever you design has to hold across
+in the same place — trucks have to reach the same doors. Whatever you design has to hold across
 every camera in the set as one coherent building.""",
 }
 
@@ -129,7 +138,7 @@ image; references inform photographic quality only. Keep one material, lighting 
 identity across all views in the set.""",
     DesignFreedom.DETAIL_WITHIN_ENVELOPE: """\
 No camera movement, reframing, zoom or crop. No change to massing or roof topology. No relocated
-or duplicated gate, no missing fence or road, no added or removed loading dock. No real brand
+or duplicated gate, no missing fence or road, no added or removed large door. No real brand
 names, logos or watermarks. Do not copy the layout, massing, facade or composition of any
 reference image; references inform photographic quality only. Keep one material, lighting and
 colour-grade identity across all views in the set.""",
@@ -338,6 +347,7 @@ white/light concrete. The site-ground underlay is not a finish or circulation su
 not be interpreted as a service yard.
 Roof: {", ".join(roofs)}; {len(design.roof_assemblies)} continuous assemblies, long-axis ridges.
 {facade_rule}
+{VIETNAMESE_DOOR_RULE}
 Boundary/gate: {preferences.boundary_kit}, {preferences.gate_kit}. Whatever boundary wall, fence
 or gate the Base RGB shows must survive exactly, at its authored position and opening width, as a
 moderate-height low wall with open steel infill whose vehicular opening reads at truck-capable

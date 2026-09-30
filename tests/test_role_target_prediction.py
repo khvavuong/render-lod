@@ -26,7 +26,10 @@ from v365_archviz.application.camera_framing import (
     projected_frame_fraction,
     projected_frame_union,
 )
-from v365_archviz.application.validate_conditioning import ValidateConditioningViewSet
+from v365_archviz.application.validate_conditioning import (
+    ValidateConditioningViewSet,
+    _surface_triangles,
+)
 
 IDENTITY = [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
 #: A dock door as PA-HATAY-3 draws them: 4.4 m across, 4.0 m tall, set in a wall.
@@ -75,6 +78,50 @@ class TestUnion:
 
     def test_nothing_predicts_nothing(self) -> None:
         assert projected_frame_union((0.0, 0.0, 2.0), (0.0, 30.0, 2.0), [], 35.0) == 0.0
+
+    def test_a_planted_strip_round_a_site_predicts_its_strip_not_its_box(self) -> None:
+        # Its box is the whole 200 x 120 m site; the planting is a 4 m band along the edge.
+        camera = ((100.0, -160.0, 120.0), (100.0, 60.0, 0.0))
+        strips = [
+            ((0.0, 0.0), (200.0, 4.0)),
+            ((0.0, 116.0), (200.0, 120.0)),
+            ((0.0, 4.0), (4.0, 116.0)),
+            ((196.0, 4.0), (200.0, 116.0)),
+        ]
+        triangles = [
+            triangle
+            for (x0, y0), (x1, y1) in strips
+            for triangle in (
+                ((x0, y0, 0.0), (x1, y0, 0.0), (x1, y1, 0.0)),
+                ((x0, y0, 0.0), (x1, y1, 0.0), (x0, y1, 0.0)),
+            )
+        ]
+        box = ((0.0, 0.0, 0.0), (200.0, 120.0, 0.0))
+
+        as_box = projected_frame_union(*camera, [box], 35.0)
+        as_strip = projected_frame_union(*camera, [], 35.0, triangles=triangles)
+
+        assert as_box > 0.3
+        assert 0.0 < as_strip < as_box / 4
+
+
+def test_the_gate_reads_a_flat_surface_from_its_mesh_and_a_volume_from_its_box(
+    tmp_path: Path,
+) -> None:
+    from v365_archviz.domain.scene import SceneElement
+
+    np.savez(
+        tmp_path / "yard.npz",
+        vertices=np.array([[0, 0, 0], [10, 0, 0], [10, 2, 0]], dtype=float),
+        faces=np.array([[0, 1, 2]]),
+    )
+    yard = SceneElement.model_validate(element("yard", ((0, 0, 0), (10, 10, 0)), "service_yard"))
+    shed = SceneElement.model_validate(element("shed", ((0, 0, 0), (10, 10, 8)), "main_shed"))
+    missing = SceneElement.model_validate(element("gone", ((0, 0, 0), (10, 10, 0)), "parking"))
+
+    assert _surface_triangles(tmp_path, yard) == [((0, 0, 0), (10, 0, 0), (10, 2, 0))]
+    assert _surface_triangles(tmp_path, shed) == []
+    assert _surface_triangles(tmp_path, missing) == []
 
 
 def element(identifier: str, box: tuple, role: str) -> dict:

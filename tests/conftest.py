@@ -1,5 +1,6 @@
 import pytest
 
+from v365_archviz.application import studio
 from v365_archviz.domain.scene import (
     BoundingBox,
     CanonicalScene,
@@ -16,6 +17,13 @@ from v365_archviz.providers.ifc import IDENTITY_4X4
 @pytest.fixture(autouse=True)
 def disable_local_worker(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("V365_ENABLE_LOCAL_WORKER", "0")
+
+
+@pytest.fixture(autouse=True)
+def accept_planned_concept_camera(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Checking a concept camera renders with Blender, which unit tests do not run."""
+
+    monkeypatch.setattr(studio, "first_accepted_camera", lambda *_args: None)
 
 
 @pytest.fixture

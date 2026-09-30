@@ -12,6 +12,7 @@ neighbouring volumes are in the way — are measured downstream by the condition
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 
 Vector3 = tuple[float, float, float]
 Bounds = tuple[Vector3, Vector3]
@@ -423,18 +424,38 @@ def _projected_polygon(
     tan_horizontal = math.tan(math.radians(horizontal))
     tan_vertical = math.tan(math.radians(vertical))
     minimum, maximum = bounds
+    return _projected_hull(
+        (
+            (minimum[0], minimum[1], minimum[2]),
+            (minimum[0], minimum[1], maximum[2]),
+            (minimum[0], maximum[1], minimum[2]),
+            (minimum[0], maximum[1], maximum[2]),
+            (maximum[0], minimum[1], minimum[2]),
+            (maximum[0], minimum[1], maximum[2]),
+            (maximum[0], maximum[1], minimum[2]),
+            (maximum[0], maximum[1], maximum[2]),
+        ),
+        forward,
+        right,
+        up,
+        position,
+        tan_horizontal,
+        tan_vertical,
+    )
+
+
+def _projected_hull(
+    points: Sequence[Vector3],
+    forward: Vector3,
+    right: Vector3,
+    up: Vector3,
+    position: Vector3,
+    tan_horizontal: float,
+    tan_vertical: float,
+) -> list[tuple[float, float]]:
     projected: list[tuple[float, float]] = []
     ahead = False
-    for corner in (
-        (minimum[0], minimum[1], minimum[2]),
-        (minimum[0], minimum[1], maximum[2]),
-        (minimum[0], maximum[1], minimum[2]),
-        (minimum[0], maximum[1], maximum[2]),
-        (maximum[0], minimum[1], minimum[2]),
-        (maximum[0], minimum[1], maximum[2]),
-        (maximum[0], maximum[1], minimum[2]),
-        (maximum[0], maximum[1], maximum[2]),
-    ):
+    for corner in points:
         offset = tuple(corner[axis] - position[axis] for axis in range(3))
         depth = sum(offset[axis] * forward[axis] for axis in range(3))
         if depth >= NEAR_PLANE_M:
@@ -495,6 +516,7 @@ def projected_frame_union(
     *,
     sensor_width_mm: float = 36.0,
     aspect_ratio: float = 16 / 9,
+    triangles: Sequence[tuple[Vector3, Vector3, Vector3]] = (),
 ) -> float:
     """What share of the frame a set of boxes would fill between them, counted once.
 
@@ -503,6 +525,10 @@ def projected_frame_union(
     slabs would predict half a frame of planting where there is a quarter, and
     the ratio a threshold reads from it would move with the model rather than
     with the photograph.
+
+    Flat surfaces are better given as their triangles: a planted strip round the
+    edge of a site has the whole site as its box, and predicting that much of it
+    refused every camera of a model whose only planting was such a strip.
     """
 
     polygons = [
@@ -514,14 +540,36 @@ def projected_frame_union(
             )
         )
     ]
+    basis = _camera_basis(position, target)
+    if triangles and basis is not None:
+        horizontal, vertical = half_fov_deg(focal_length_mm, sensor_width_mm, aspect_ratio)
+        tan_horizontal = math.tan(math.radians(horizontal))
+        tan_vertical = math.tan(math.radians(vertical))
+        polygons.extend(
+            polygon
+            for triangle in triangles
+            if (
+                polygon := _projected_hull(triangle, *basis, position, tan_horizontal, tan_vertical)
+            )
+        )
     if not polygons:
         return 0.0
     columns, rows = UNION_GRID
-    covered = 0
-    for row in range(rows):
-        y = -1.0 + (row + 0.5) * 2.0 / rows
-        for column in range(columns):
-            x = -1.0 + (column + 0.5) * 2.0 / columns
-            if any(_contains(polygon, x, y) for polygon in polygons):
-                covered += 1
-    return covered / (columns * rows)
+    covered: set[tuple[int, int]] = set()
+    for polygon in polygons:
+        # Only the cells under the polygon's extent can be inside it.
+        xs = [x for x, _y in polygon]
+        ys = [y for _x, y in polygon]
+        first_column = max(0, math.floor((min(xs) + 1.0) / 2.0 * columns))
+        last_column = min(columns - 1, math.ceil((max(xs) + 1.0) / 2.0 * columns))
+        first_row = max(0, math.floor((min(ys) + 1.0) / 2.0 * rows))
+        last_row = min(rows - 1, math.ceil((max(ys) + 1.0) / 2.0 * rows))
+        for row in range(first_row, last_row + 1):
+            y = -1.0 + (row + 0.5) * 2.0 / rows
+            for column in range(first_column, last_column + 1):
+                if (column, row) in covered:
+                    continue
+                x = -1.0 + (column + 0.5) * 2.0 / columns
+                if _contains(polygon, x, y):
+                    covered.add((column, row))
+    return len(covered) / (columns * rows)

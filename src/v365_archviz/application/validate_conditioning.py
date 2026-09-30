@@ -13,7 +13,7 @@ from PIL import Image, UnidentifiedImageError
 
 from v365_archviz.application.camera_framing import projected_frame_union
 from v365_archviz.artifacts import atomic_write
-from v365_archviz.domain.scene import CanonicalScene, SemanticRole
+from v365_archviz.domain.scene import CanonicalScene, SceneElement, SemanticRole
 from v365_archviz.domain.workflow import ViewRole, ViewSet
 from v365_archviz.errors import InvalidModelError
 
@@ -83,6 +83,8 @@ MAXIMUM_CENTRAL_OCCLUDER_COVERAGE = 0.12
 #: failures it has to keep catching sit at 0.00 to 0.03: an office block behind
 #: the shed it belongs to, an entrance hidden by a neighbour.
 MINIMUM_VISIBLE_FRACTION_OF_PREDICTED = 0.10
+#: Thinner than this, an element is a surface and is predicted from its own triangles.
+FLAT_SURFACE_HEIGHT_M = 0.5
 
 ROLE_TARGETS: dict[ViewRole, frozenset[str]] = {
     ViewRole.OVERALL: frozenset({"site_road", "landscape_zone", "main_entrance"}),
@@ -122,6 +124,30 @@ ROLE_THRESHOLDS: dict[ViewRole, tuple[float, float, float]] = {
     # Only an empty or fully blocked frame is refused: the user chose this composition.
     ViewRole.CUSTOM: (0.02, 0.98, 0.0),
 }
+
+
+Triangle = tuple[tuple[float, float, float], tuple[float, float, float], tuple[float, float, float]]
+
+
+def _surface_triangles(scene_root: Path, element: SceneElement) -> list[Triangle]:
+    """A flat element's own triangles, or nothing for a volume or an unreadable mesh.
+
+    Meshes are stored in scene coordinates; every element carries the identity transform.
+    """
+
+    box = element.bounding_box
+    if box.maximum[2] - box.minimum[2] > FLAT_SURFACE_HEIGHT_M:
+        return []
+    try:
+        with np.load(scene_root / element.mesh_ref) as mesh:
+            vertices = np.asarray(mesh["vertices"], dtype=float)
+            faces = np.asarray(mesh["faces"], dtype=int)
+    except (OSError, KeyError, ValueError):
+        return []
+    return [
+        tuple(tuple(float(value) for value in vertices[index]) for index in face)  # type: ignore[misc]
+        for face in faces
+    ]
 
 
 def _aspect_ratio(notation: str) -> float:
@@ -204,17 +230,28 @@ class ValidateConditioningViewSet:
             )
             available_role_targets = ROLE_TARGETS[camera.role] & authored_role_names
             role_target_coverage = sum(coverage.get(role, 0.0) for role in available_role_targets)
+            targets = [
+                element
+                for element in scene.elements
+                if element.semantic_role.value in available_role_targets
+            ]
+            surfaces = {
+                element.scene_element_id: triangles
+                for element in targets
+                if (triangles := _surface_triangles(scene_path.parent, element))
+            }
             predicted_role_target = projected_frame_union(
                 camera.position,
                 camera.target,
                 [
                     (element.bounding_box.minimum, element.bounding_box.maximum)
-                    for element in scene.elements
-                    if element.semantic_role.value in available_role_targets
+                    for element in targets
+                    if element.scene_element_id not in surfaces
                 ],
                 camera.focal_length_mm,
                 sensor_width_mm=camera.sensor_width_mm,
                 aspect_ratio=_aspect_ratio(camera.aspect_ratio),
+                triangles=[triangle for group in surfaces.values() for triangle in group],
             )
             central_occluder = sum(
                 central_coverage.get(role, 0.0) for role in FOREGROUND_OCCLUDER_ROLES

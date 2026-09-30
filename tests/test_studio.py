@@ -139,8 +139,8 @@ def test_every_concept_preset_is_a_valid_brief() -> None:
     ]
     for preset in presets:
         brief = DesignBrief.model_validate({**preset.brief, "project_id": "p"})
-        # The industrial-park context draws estate roads and lots into the conditioning render.
-        assert brief.site_design.surrounding_context_mode == "conceptual_industrial_park"
+        # Surroundings come from the editor as translucent context, never invented by the engine.
+        assert brief.site_design.surrounding_context_mode == "authored_only"
 
 
 def test_concepts_start_one_single_camera_job_per_preset(artifacts: Path) -> None:

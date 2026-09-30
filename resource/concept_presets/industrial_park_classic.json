@@ -3,14 +3,14 @@
   "preset_id": "industrial_park_classic",
   "order": 1,
   "name": "Industrial Park Classic",
-  "summary": "Navy-blue profiled metal sheds with a crisp white office block, as in Vietnam's best-run parks.",
+  "summary": "Navy-blue profiled metal sheds with crisp white trims, as in Vietnam's best-run parks.",
   "brief": {
     "schema_version": "1.0.0",
     "design_language": {
-      "style": "contemporary Vietnamese industrial park factory, pre-engineered steel shed with a clean white office block",
+      "style": "contemporary Vietnamese industrial park factory, pre-engineered steel sheds with clean white trims",
       "primary_material": "navy-blue profiled metal wall cladding above a concrete plinth",
       "secondary_material": "white painted steel trims, gutters and canopies",
-      "office_material": "white rendered concrete office block with aluminium windows and simple sun shading",
+      "office_material": "where the model has an office: white rendered concrete with aluminium windows and simple sun shading",
       "accent": "thin yellow or white band at the eave only"
     },
     "environment": {
@@ -49,17 +49,17 @@
     "roof_slope_deg": 7.0,
     "roof_eave_overhang_m": 0.75,
     "roof_ridge_orientation": "long_axis",
-    "roof_grouping_mode": "continuous_rows",
+    "roof_grouping_mode": "per_element",
     "roof_group_gap_tolerance_m": 10.0,
     "solar_panels": false,
     "site_design": {
       "preserve_transport_geometry": true,
       "preserve_landscape_boundaries": true,
       "context_render_mode": "translucent_massing",
-      "context_opacity": 0.24,
-      "surrounding_context_mode": "conceptual_industrial_park",
-      "surrounding_context_count": 6,
-      "surrounding_landscape_buffer": true
+      "context_opacity": 0.45,
+      "surrounding_context_mode": "authored_only",
+      "surrounding_context_count": 0,
+      "surrounding_landscape_buffer": false
     },
     "grammar_version": "industrial-grammar-v3-continuous-roof",
     "asset_library_version": "baseline-assets-v2",

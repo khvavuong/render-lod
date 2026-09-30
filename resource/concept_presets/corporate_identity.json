@@ -49,17 +49,17 @@
     "roof_slope_deg": 7.0,
     "roof_eave_overhang_m": 0.75,
     "roof_ridge_orientation": "long_axis",
-    "roof_grouping_mode": "continuous_rows",
+    "roof_grouping_mode": "per_element",
     "roof_group_gap_tolerance_m": 10.0,
     "solar_panels": false,
     "site_design": {
       "preserve_transport_geometry": true,
       "preserve_landscape_boundaries": true,
       "context_render_mode": "translucent_massing",
-      "context_opacity": 0.24,
-      "surrounding_context_mode": "conceptual_industrial_park",
-      "surrounding_context_count": 6,
-      "surrounding_landscape_buffer": true
+      "context_opacity": 0.45,
+      "surrounding_context_mode": "authored_only",
+      "surrounding_context_count": 0,
+      "surrounding_landscape_buffer": false
     },
     "grammar_version": "industrial-grammar-v3-continuous-roof",
     "asset_library_version": "baseline-assets-v2",

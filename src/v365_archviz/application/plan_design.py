@@ -262,15 +262,11 @@ class PlanDesign:
                     surface_id=surface.surface_id,
                     panel_module_m=brief.panel_module_m,
                     office_entrance=(
-                        Entrance(
-                            u=(0.1 if element.semantic_role is SemanticRole.MAIN_SHED else 0.5),
-                            width_m=min(2.4, surface.width_m * 0.25),
-                        )
+                        Entrance(u=0.5, width_m=min(2.4, surface.width_m * 0.25))
+                        # Only an office the model has: a glazed entrance on a shed was drawn
+                        # up into an office block the design does not have.
                         if brief.add_office_entrances
-                        and (
-                            element.semantic_role is SemanticRole.OFFICE_BLOCK
-                            or (element.semantic_role is SemanticRole.MAIN_SHED and not offices)
-                        )
+                        and element.semantic_role is SemanticRole.OFFICE_BLOCK
                         and front_surface is not None
                         and surface.surface_id == front_surface.surface_id
                         else None

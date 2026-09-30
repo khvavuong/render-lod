@@ -31,6 +31,10 @@ class ContextPolicy(str, Enum):
     #: Photoreal ground, roads, planting and sky, but neighbouring buildings stay deterministic
     #: translucent massing composited afterwards, so context reads as context.
     TRANSLUCENT_MASSING = "translucent_massing"
+    #: As above, but the provider paints the translucent massing from the camera-registered
+    #: guide. Composited afterwards, massing lands where the conditioning camera saw it; when the
+    #: provider moved the horizon, far volumes were pasted into the sky.
+    PAINTED_MASSING = "painted_massing"
     #: Resolve authored context proxies into believable neighbouring built form.
     RESOLVE_PROXIES = "resolve_proxies"
     #: Build a plausible surrounding estate wherever the horizon is empty.
@@ -46,11 +50,11 @@ class ContextPolicy(str, Enum):
     def sends_composition_guide(self) -> bool:
         """Whether the camera-registered proxy guide is sent to the provider.
 
-        Only the policy that wants placeholder massing turned into real buildings benefits from
-        it. Everywhere else the guide is reproduced literally as translucent slabs.
+        The provider reproduces it literally as translucent slabs, which is what painted massing
+        asks for and what resolving proxies into real buildings has to overcome.
         """
 
-        return self is ContextPolicy.RESOLVE_PROXIES
+        return self in {ContextPolicy.RESOLVE_PROXIES, ContextPolicy.PAINTED_MASSING}
 
 
 class DesignFreedom(str, Enum):

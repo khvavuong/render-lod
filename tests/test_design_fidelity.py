@@ -80,9 +80,20 @@ def test_the_studio_style_keeps_the_layout_and_surroundings_translucent() -> Non
 
     # Roads, yards, planting and openings stay as designed; the skin is still the provider's.
     assert pack.design_freedom is DesignFreedom.DETAIL_WITHIN_ENVELOPE
-    # Neighbours are composited as translucent massing, never painted as real buildings.
-    assert pack.context_policy is ContextPolicy.TRANSLUCENT_MASSING
-    assert pack.context_policy.composites_proxies
+    # Neighbours are painted as translucent massing from the camera-registered guide, in the
+    # provider's own perspective, rather than pasted afterwards where its horizon may have moved.
+    assert pack.context_policy is ContextPolicy.PAINTED_MASSING
+    assert pack.context_policy.sends_composition_guide
+    assert not pack.context_policy.composites_proxies
+
+
+def test_painted_massing_asks_for_grounded_translucent_volumes() -> None:
+    from v365_archviz.application.refinement_prompt import _CONTEXT_INSTRUCTION
+
+    instruction = _CONTEXT_INSTRUCTION[ContextPolicy.PAINTED_MASSING]
+
+    assert "translucent volume" in instruction
+    assert "never let one float" in instruction
 
 
 @pytest.fixture(autouse=True)

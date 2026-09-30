@@ -194,6 +194,15 @@ _CONTEXT_INSTRUCTION = {
         "Any flat or translucent block visible in the conditioning images is that placeholder: "
         "do not photograph it as a real building and do not keep it."
     ),
+    ContextPolicy.PAINTED_MASSING: (
+        "This project sits on one serviced lot inside an established industrial estate. Paint the "
+        "estate around it as a real photograph: roads, kerbs, fences, verges, planting, fields and "
+        "sky. The neighbouring buildings are not real in this image: paint each one shown in the "
+        "context guide as a simple, grounded, neutral white translucent volume standing on its own "
+        "lot at exactly that position and size, like an architect's massing model placed into the "
+        "photograph. Never give them windows, doors, roofs or colour, never draw them solid, and "
+        "never let one float above the ground or in the sky."
+    ),
     ContextPolicy.RESOLVE_PROXIES: (
         "Treat flat or translucent context massing in the conditioning images as a placement "
         "hint for where neighbouring built form belongs, and resolve it into believable real "

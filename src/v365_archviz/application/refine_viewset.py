@@ -193,22 +193,16 @@ def _identity_contract(design: DesignDNA) -> tuple[dict[str, object], str]:
         "consistency": "same height, leaf count, spacing, material and color in every view",
         "prohibited": "floating portal, disconnected frame, duplicate or relocated gate",
     }
-    context_contract = {
+    context_contract: dict[str, object] = {
         "mode": design.site_design.surrounding_context_mode,
         "allowed_geometry": "only context geometry visible in base RGB or semantic passes",
         "estate_topology": (
-            "same gate-aligned external roads, approach connections, vegetation zones and proxy "
-            "positions in every camera"
-        ),
-        "proxy_appearance": (
-            "uniform neutral translucent massing at opacity "
-            f"{design.site_design.context_opacity:g}; "
-            "no facade, door, window, sign, roof equipment or opaque photoreal conversion"
+            "same gate-aligned external roads, approach connections and vegetation zones in every "
+            "camera"
         ),
         "reference_rule": (
             "context reference controls only road scale, planting realism and industrial-estate "
-            "atmosphere; the camera-registered context composition guide controls proxy location "
-            "and translucency; never copy or reconstruct any reference building"
+            "atmosphere; never copy or reconstruct any reference building"
         ),
         "free_pixels": "sky, atmospheric continuity and neutral ground only",
         "prohibited": (
@@ -216,6 +210,15 @@ def _identity_contract(design: DesignDNA) -> tuple[dict[str, object], str]:
             "context object"
         ),
     }
+    # Proxy massing is described only when the estate has some; otherwise the words alone made
+    # the provider draw translucent slabs around a project that has no neighbours.
+    if design.industrial_context and design.industrial_context.proxy_buildings:
+        context_contract["proxy_appearance"] = (
+            "uniform neutral translucent massing at opacity "
+            f"{design.site_design.context_opacity:g}, positioned by the camera-registered context "
+            "composition guide; no facade, door, window, sign, roof equipment or opaque "
+            "photoreal conversion"
+        )
     contract: dict[str, object] = {
         "project_id": design.project_id,
         "design_revision": design.design_revision,

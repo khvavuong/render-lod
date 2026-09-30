@@ -75,25 +75,34 @@ def test_every_preset_keeps_its_buildings_separate_and_invents_no_surroundings()
         assert brief.site_design.surrounding_context_mode == "authored_only", preset.preset_id
 
 
-def test_the_studio_style_keeps_the_layout_and_surroundings_translucent() -> None:
+def test_the_studio_style_keeps_the_layout_and_leaves_neighbours_out() -> None:
     pack = StylePack.load(STUDIO_STYLE_PACK)
 
     # Roads, yards, planting and openings stay as designed; the skin is still the provider's.
     assert pack.design_freedom is DesignFreedom.DETAIL_WITHIN_ENVELOPE
-    # Neighbours are painted as translucent massing from the camera-registered guide, in the
-    # provider's own perspective, rather than pasted afterwards where its horizon may have moved.
-    assert pack.context_policy is ContextPolicy.PAINTED_MASSING
-    assert pack.context_policy.sends_composition_guide
+    # The project is the only building: no neighbour, painted or composited, reaches the image.
+    assert pack.context_policy is ContextPolicy.OPEN_ESTATE
+    assert not pack.context_policy.sends_composition_guide
     assert not pack.context_policy.composites_proxies
 
 
-def test_painted_massing_asks_for_grounded_translucent_volumes() -> None:
+def test_an_open_estate_asks_for_no_neighbouring_building() -> None:
     from v365_archviz.application.refinement_prompt import _CONTEXT_INSTRUCTION
 
-    instruction = _CONTEXT_INSTRUCTION[ContextPolicy.PAINTED_MASSING]
+    instruction = _CONTEXT_INSTRUCTION[ContextPolicy.OPEN_ESTATE]
 
-    assert "translucent volume" in instruction
-    assert "never let one float" in instruction
+    assert "the only building in the image" in instruction
+    assert "no other building" in instruction
+
+
+def test_a_project_without_neighbours_is_not_told_about_translucent_massing(
+    tmp_path: Path,
+) -> None:
+    from v365_archviz.application.refine_viewset import _identity_contract
+
+    _, set_prompt = _identity_contract(_plan(tmp_path, _upload()))
+
+    assert "translucent" not in set_prompt
 
 
 @pytest.fixture(autouse=True)

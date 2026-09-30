@@ -415,6 +415,20 @@ def test_concept_hero_frames_the_buildings_from_the_planned_bearing(artifacts: P
     plain = ImportSceneUpload().execute(SceneUpload.model_validate(upload), artifacts).scene
     assert frame_buildings(planned, plain).target[:2] == pytest.approx((-8.5, 1.0), abs=0.1)
 
+    # A box left far outside the site must not drag the frame after it.
+    upload["buildings"].append(  # type: ignore[union-attr]
+        {
+            "id": "stray",
+            "role": "utility_block",
+            "center": [400, 300],
+            "width_m": 20,
+            "length_m": 20,
+            "height_m": 8,
+        }
+    )
+    stray = ImportSceneUpload().execute(SceneUpload.model_validate(upload), artifacts).scene
+    assert frame_buildings(planned, stray).target[:2] == pytest.approx((-8.5, 1.0), abs=0.1)
+
 
 def test_job_cameras_are_readable(artifacts: Path) -> None:
     concept_id = _ready_concept(artifacts)

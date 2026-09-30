@@ -38,7 +38,7 @@ from v365_archviz.config import Settings
 from v365_archviz.domain.common import DomainModel, Vec3
 from v365_archviz.domain.design import DesignBrief
 from v365_archviz.domain.jobs import GenerationJob
-from v365_archviz.domain.scene import CanonicalScene, SemanticRole
+from v365_archviz.domain.scene import CanonicalScene, SceneElement, SemanticRole
 from v365_archviz.domain.workflow import (
     Camera,
     GenerationProfile,
@@ -267,14 +267,33 @@ def frame_buildings(camera: Camera, scene: CanonicalScene) -> Camera:
 
     Every authored building counts, utility blocks included: a site plan's office drawn as a
     plain box arrives as one, and framing the shed alone cropped it out of the concept, which
-    left the provider to invent the rest of the campus differently for each concept.
+    left the provider to invent the rest of the campus differently for each concept. Only
+    buildings standing on the site count: one box left a hundred metres outside it stretched the
+    frame until the site filled too little of it to pass the camera check, on every retry.
     """
+
+    grounds = [
+        element.bounding_box
+        for element in scene.elements
+        if element.semantic_role is SemanticRole.SITE_GROUND
+    ]
+
+    def on_site(element: SceneElement) -> bool:
+        box = element.bounding_box
+        x = (box.minimum[0] + box.maximum[0]) / 2
+        y = (box.minimum[1] + box.maximum[1]) / 2
+        return not grounds or any(
+            ground.minimum[0] <= x <= ground.maximum[0]
+            and ground.minimum[1] <= y <= ground.maximum[1]
+            for ground in grounds
+        )
 
     buildings = [
         element
         for element in scene.elements
         if element.semantic_role
         in {SemanticRole.MAIN_SHED, SemanticRole.OFFICE_BLOCK, SemanticRole.UTILITY_BLOCK}
+        and on_site(element)
     ]
     if not buildings:
         return camera

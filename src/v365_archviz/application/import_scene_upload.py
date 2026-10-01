@@ -93,7 +93,14 @@ class ImportSceneUpload:
             corners = _box_corners(building)
             mesh = _prism(corners, building.base_z, building.base_z + building.height_m)
             elements.append(
-                self._element(root, building.id, SemanticRole(building.role), mesh, building.name)
+                self._element(
+                    root,
+                    building.id,
+                    SemanticRole(building.role),
+                    mesh,
+                    building.name,
+                    storeys=building.floors,
+                )
             )
             surfaces.extend(
                 _ring_surfaces(building.id, corners, building.base_z, building.height_m)
@@ -130,7 +137,12 @@ class ImportSceneUpload:
 
     @staticmethod
     def _element(
-        root: Path, element_id: str, role: SemanticRole, mesh: _Mesh, name: str
+        root: Path,
+        element_id: str,
+        role: SemanticRole,
+        mesh: _Mesh,
+        name: str,
+        storeys: int | None = None,
     ) -> SceneElement:
         mesh_ref = f"meshes/{element_id}.npz"
         buffer = io.BytesIO()
@@ -154,6 +166,7 @@ class ImportSceneUpload:
             semantic_role=role,
             # The editor states every role; nothing here is inferred.
             semantic_confidence=1.0,
+            storeys=storeys,
         )
 
 

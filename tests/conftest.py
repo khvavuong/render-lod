@@ -1,6 +1,7 @@
 import pytest
 
 from v365_archviz.application import studio
+from v365_archviz.application.run_generation_job import RunGenerationJob
 from v365_archviz.domain.scene import (
     BoundingBox,
     CanonicalScene,
@@ -24,6 +25,13 @@ def accept_planned_concept_camera(monkeypatch: pytest.MonkeyPatch) -> None:
     """Checking a concept camera renders with Blender, which unit tests do not run."""
 
     monkeypatch.setattr(studio, "first_accepted_camera", lambda *_args: None)
+
+
+@pytest.fixture(autouse=True)
+def skip_framing_proofing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Proofing a camera asks Gemini, which unit tests do not call."""
+
+    monkeypatch.setattr(RunGenerationJob, "_hold_framing", lambda *_args: None)
 
 
 @pytest.fixture

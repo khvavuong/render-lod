@@ -95,6 +95,8 @@ class SceneElement(DomainModel):
     semantic_role: SemanticRole = SemanticRole.UNKNOWN
     semantic_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     constraint_level: ConstraintLevel = ConstraintLevel.HARD
+    #: Storeys, when the source model states them.
+    storeys: int | None = Field(default=None, ge=1, le=200)
 
 
 def _length(vector: Vec3) -> float:

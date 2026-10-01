@@ -7,7 +7,7 @@ from enum import Enum
 from pydantic import Field, model_validator
 
 from v365_archviz.domain.common import DomainModel, PositiveMeters, UnitInterval
-from v365_archviz.domain.scene import BoundingBox
+from v365_archviz.domain.scene import BoundingBox, SemanticRole
 
 
 class DesignEvidenceState(str, Enum):
@@ -141,6 +141,10 @@ class BuildingDesign(DomainModel):
     treatment: BuildingTreatment = BuildingTreatment.FOCUS
     roof: RoofDesign
     facades: tuple[FacadeDesign, ...] = ()
+    #: What the building is and how big, so prompts can name it; absent in older designs.
+    semantic_role: SemanticRole | None = None
+    bounding_box: BoundingBox | None = None
+    storeys: int | None = Field(default=None, ge=1, le=200)
 
 
 class RoofAssembly(DomainModel):

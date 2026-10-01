@@ -43,6 +43,8 @@ class UploadBuilding(DomainModel):
     length_m: float = Field(gt=0.5, le=2000)
     height_m: float = Field(gt=0.5, le=500)
     rotation_rad: float = 0.0
+    #: Storeys the editor gives the building; an office's floor count is part of its design.
+    floors: int | None = Field(default=None, ge=1, le=200)
 
     @model_validator(mode="after")
     def validate_finite(self) -> UploadBuilding:

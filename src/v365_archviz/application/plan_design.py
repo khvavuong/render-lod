@@ -294,6 +294,9 @@ class PlanDesign:
                         ridge_orientation=brief.roof_ridge_orientation,
                     ),
                     facades=facades if treatment is BuildingTreatment.FOCUS else (),
+                    semantic_role=element.semantic_role,
+                    bounding_box=element.bounding_box,
+                    storeys=element.storeys,
                 )
             )
         design_revision = self.revision(scene, brief)

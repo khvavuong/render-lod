@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from v365_archviz.application.brand_watermark import BrandWatermark
+from v365_archviz.application.office_brief import office_set_rule, office_view_directive
 from v365_archviz.application.refine_view import (
     PROMPT_VERSION,
     RefineView,
@@ -165,8 +166,8 @@ def _identity_contract(design: DesignDNA) -> tuple[dict[str, object], str]:
         f"office entrance bays={len(entrance_facades)}; large vehicle doors={loading_dock_count}. "
         f"vehicle door families={loading_door_families}. "
         f"{articulation_grammar}"
-        "Confine office glazing and feature fins to authored entrance/design-detail bays; do not "
-        "spread an office glazing ratio across plain factory elevations or shed end walls."
+        "Office glazing and feature design belong to the office and authored entrance bays; do "
+        "not spread them across plain factory elevations or shed end walls."
     )
     material_role_contract = {
         "continuous_profiled_metal_roof": palette["roof_hex"],
@@ -260,6 +261,7 @@ def _identity_contract(design: DesignDNA) -> tuple[dict[str, object], str]:
     prompt = (
         "PROJECT DESIGN IDENTITY — immutable across all six cameras: "
         f"{appearance}"
+        f"{office_set_rule(design)}"
         f"base daylight={environment['time']} {environment['weather']} (VIEW-06 may override only "
         "photography time to restrained golden/blue hour), "
         f"white balance={environment['white_balance_k']}K. "
@@ -441,12 +443,15 @@ def _visible_facade_directive(design: DesignDNA, camera: Camera) -> str:
     ]
     entrance_count = sum(facade.office_entrance is not None for facade in facades)
     dock_count = sum(len(facade.loading_docks) for facade in facades)
-    return (
+    directive = (
         f"PRIMARY VISIBLE FACADE — {direction}: approved generated office entrance bays="
         f"{entrance_count}, approved generated large vehicle doors={dock_count}. Preserve every "
         "opening already visible in the Base RGB, but do not add or copy any extra entrance, "
         "large door, large glazed bay or feature frame from the Design Master onto this facade."
     )
+    if office_set_rule(design):
+        directive += " The office is the exception: it carries its Design Master design."
+    return directive
 
 
 def _request_id(
@@ -589,8 +594,9 @@ class RefineViewSet:
                 edges=render_root / camera.view_id / "edges.png",
                 prompt=(
                     f"{prompt}\n\n{VIEW_DIRECTIVES[camera.role]}\n"
-                    f"{_visible_facade_directive(design, camera)}"
-                ),
+                    f"{_visible_facade_directive(design, camera)}\n"
+                    f"{office_view_directive(design, camera)}"
+                ).rstrip(),
                 role=camera.role.value,
                 context_policy=(
                     style_pack.context_policy.value if style_pack else "translucent_massing"

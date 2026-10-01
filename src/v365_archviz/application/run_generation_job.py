@@ -18,6 +18,7 @@ from v365_archviz.application.build_correspondence import BuildCorrespondenceInd
 from v365_archviz.application.compose_viewset_board import ComposeViewSetBoard
 from v365_archviz.application.create_certification_report import CreateCertificationReport
 from v365_archviz.application.evaluate_consistency import EvaluateConsistency
+from v365_archviz.application.framing_check import CheckFraming, framing_correction_prompt
 from v365_archviz.application.plan_cameras import PlanStandardCameras
 from v365_archviz.application.promote_quality_baseline import PromoteQualityBaseline
 from v365_archviz.application.protect_refinement import ProtectRefinement
@@ -32,10 +33,12 @@ from v365_archviz.application.validate_conditioning import ValidateConditioningV
 from v365_archviz.application.validate_viewset import ValidateGeneratedViewSet
 from v365_archviz.artifacts import atomic_write
 from v365_archviz.config import Settings
+from v365_archviz.domain.design import DesignDNA
 from v365_archviz.domain.jobs import GenerationJob
 from v365_archviz.domain.style_pack import StylePack
 from v365_archviz.domain.workflow import Camera, ViewRole, ViewSet, WorkflowState
 from v365_archviz.errors import V365Error
+from v365_archviz.providers.gemini_framing_judge import GeminiFramingJudge
 from v365_archviz.providers.gemini_realism_judge import GeminiRealismJudge
 from v365_archviz.providers.image_factory import create_image_renderer
 from v365_archviz.providers.local_blender_conditioning import create_conditioning_renderer
@@ -45,6 +48,7 @@ logger = logging.getLogger(__name__)
 
 #: Each studio view judged against the concept master, and whether it was generated again.
 REALISM_REPORT = "realism_parity.json"
+FRAMING_REPORT = "framing.json"
 
 
 def _authored_style(job: GenerationJob) -> StylePack | None:
@@ -159,22 +163,39 @@ class RunGenerationJob:
                             for path, role in reference_pairs
                             if role == "context_realism_reference"
                         )
-                        generated = RefineViewSet().execute(
-                            renderer,
-                            paths.render_root,
-                            paths.generated_root,
-                            paths.view_set,
-                            paths.design_dna,
-                            job.model_revision,
-                            prompt,
-                            profile=job.profile,
-                            view_ids=(site_master_id,),
-                            reference_images=site_references,
-                            style_pack=style_pack,
-                            attach_context_guide=style_pack is None
-                            or style_pack.context_policy.sends_composition_guide,
+
+                        def generate_site(site_prompt: str) -> Path:
+                            return (
+                                RefineViewSet()
+                                .execute(
+                                    renderer,
+                                    paths.render_root,
+                                    paths.generated_root,
+                                    paths.view_set,
+                                    paths.design_dna,
+                                    job.model_revision,
+                                    site_prompt,
+                                    profile=job.profile,
+                                    view_ids=(site_master_id,),
+                                    reference_images=site_references,
+                                    style_pack=style_pack,
+                                    attach_context_guide=style_pack is None
+                                    or style_pack.context_policy.sends_composition_guide,
+                                )
+                                .manifest_path
+                            )
+
+                        generated_manifest_path = generate_site(prompt)
+                        generated_manifest_path = (
+                            self._hold_framing(
+                                settings,
+                                paths,
+                                view_set,
+                                (site_master_id,),
+                                lambda _view_id: generate_site(framing_correction_prompt(prompt)),
+                            )
+                            or generated_manifest_path
                         )
-                        generated_manifest_path = generated.manifest_path
                         site_master_path = self._refined_image(
                             paths.generated_root / site_master_id
                         )
@@ -389,6 +410,8 @@ class RunGenerationJob:
                     if generated_manifest is None:
                         raise V365Error("approved Design Masters left no views to generate")
                     if review.get("approved_by") == "concept_selection":
+                        # No framing hold here yet: set views copy the master's composition
+                        # whatever their prompt says, so a corrected retry only adds cost.
                         generated_manifest = (
                             self._match_master_realism(
                                 settings,
@@ -615,6 +638,47 @@ class RunGenerationJob:
             manifest = regenerate(view_id, notes) or manifest
         if parity.failed:
             record_regeneration(parity.report_path, parity.failed)
+        return manifest
+
+    def _hold_framing(
+        self,
+        settings: Settings,
+        paths: _JobPaths,
+        view_set: ViewSet,
+        view_ids: tuple[str, ...],
+        regenerate: Callable[[str], Path | None],
+    ) -> Path | None:
+        """Generate once more, with a correction, each aerial view whose camera moved.
+
+        Returns the manifest of the last regeneration, or None when nothing was regenerated.
+        Close views are left out: too few buildings show in them to place the camera.
+        """
+
+        aerials = tuple(
+            camera.view_id
+            for camera in view_set.cameras
+            if camera.view_id in view_ids and camera.role in {ViewRole.OVERALL, ViewRole.DETAIL}
+        )
+        if not settings.gemini_api_key or not aerials:
+            return None
+        design = DesignDNA.model_validate_json(paths.design_dna.read_text(encoding="utf-8"))
+        framing = CheckFraming().execute(
+            GeminiFramingJudge(settings),
+            {
+                view_id: (
+                    paths.render_root / view_id / "base_rgb.png",
+                    self._refined_image(paths.generated_root / view_id),
+                )
+                for view_id in aerials
+            },
+            len(design.roof_assemblies),
+            paths.generated_root / FRAMING_REPORT,
+        )
+        manifest = None
+        for view_id in framing.failed:
+            manifest = regenerate(view_id) or manifest
+        if framing.failed:
+            record_regeneration(framing.report_path, dict.fromkeys(framing.failed, ""))
         return manifest
 
     @staticmethod

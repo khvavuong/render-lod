@@ -73,9 +73,10 @@ curbs, drainage, verges and low industrial skyline—not forest, rural wildernes
 render or luxury architecture.
 
 PROHIBITED
-No camera or topology drift; no roof subdivision; no relocated/duplicate gate; no missing fence or
-road; no invented opening; no saturated fantasy colour; no copied reference layout, facade or
-palette; no text or logos. Keep one material, lighting and colour-grade identity across all six
+No camera or topology drift; no roof subdivision; no raised ridge cap, ridge vent, roof monitor,
+skylight strip or rib along the ridge, which is only the thin flush line where the two roof slopes
+meet; no relocated/duplicate gate; no missing fence or road; no invented opening; no saturated
+fantasy colour; no copied reference layout, facade or palette; no text or logos. Keep one material, lighting and colour-grade identity across all six
 views, except that VIEW-06 preserves those materials under its explicitly required late-afternoon
 golden-hour photography."""
 
@@ -232,7 +233,7 @@ def massing_contract(design: DesignDNA) -> str:
     return (
         "MASSING\n"
         f"The project has exactly {volumes} continuous roof{plural}, so exactly {volumes} main "
-        f"building volume{plural}. Before you draw anything, count the long roof ridges in Base "
+        f"building volume{plural}. Before you draw anything, count the long roofs in Base "
         f"RGB: there are {volumes}. The finished image must show the same {volumes} and no more. "
         "Counting is the check that matters here, because a single long shed under one "
         "continuous roof stays one volume however many bays, doors or dock canopies it carries. "
@@ -355,7 +356,8 @@ def build_refinement_prompt(
 External approach and perimeter roads are dark charcoal asphalt and must never render as
 white/light concrete. The site-ground underlay is not a finish or circulation surface and must
 not be interpreted as a service yard.
-Roof: {", ".join(roofs)}; {len(design.roof_assemblies)} continuous assemblies, long-axis ridges.
+Roof: {", ".join(roofs)}; {len(design.roof_assemblies)} continuous assemblies, ridge along the long
+axis; the two slopes meet at a thin flush line, never a raised ridge cap, vent or rib.
 {facade_rule}
 {VIETNAMESE_DOOR_RULE}
 Boundary/gate: {preferences.boundary_kit}, {preferences.gate_kit}. Whatever boundary wall, fence

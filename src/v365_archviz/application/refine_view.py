@@ -38,6 +38,8 @@ clerestory ribbon; shaded office glazing and a practical entrance canopy. Keep t
 datum lines, accent spacing and opening family in every camera. Preserve each approved continuous
 roof assembly as one uninterrupted
 longitudinal roof; never subdivide it into repeated transverse roofs at source-element seams.
+Its two slopes meet at a thin flush ridge line: no raised ridge cap, ridge vent, roof monitor,
+skylight strip or rib along it.
 Avoid flat-box roof imagery, luxury-resort styling, parametric fantasy forms, excessive glass,
 arbitrary curves and decorative
 features without construction logic. Use a coherent material palette across every view.

@@ -48,6 +48,17 @@
     "BuildingDesign": {
       "additionalProperties": false,
       "properties": {
+        "bounding_box": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BoundingBox"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "building_id": {
           "minLength": 1,
           "title": "Building Id",
@@ -63,6 +74,31 @@
         },
         "roof": {
           "$ref": "#/$defs/RoofDesign"
+        },
+        "semantic_role": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SemanticRole"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "storeys": {
+          "anyOf": [
+            {
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Storeys"
         },
         "treatment": {
           "$ref": "#/$defs/BuildingTreatment",
@@ -222,6 +258,19 @@
           "minLength": 1,
           "title": "Boundary Kit",
           "type": "string"
+        },
+        "client_prompt": {
+          "anyOf": [
+            {
+              "maxLength": 1000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Client Prompt"
         },
         "creative_prompt": {
           "anyOf": [
@@ -586,7 +635,7 @@
           "type": "string"
         },
         "door_type": {
-          "default": "sectional_overhead",
+          "default": "roller_shutter",
           "pattern": "^(sectional_overhead|roller_shutter)$",
           "title": "Door Type",
           "type": "string"
@@ -772,6 +821,31 @@
       ],
       "title": "RoofDesign",
       "type": "object"
+    },
+    "SemanticRole": {
+      "enum": [
+        "unknown",
+        "main_shed",
+        "office_block",
+        "loading_zone",
+        "service_yard",
+        "site_ground",
+        "site_road",
+        "sidewalk",
+        "utility_block",
+        "parking",
+        "main_entrance",
+        "secondary_entrance",
+        "landscape_zone",
+        "roof",
+        "site_boundary",
+        "primary_facade",
+        "canopy",
+        "loading_dock",
+        "envelope_panel"
+      ],
+      "title": "SemanticRole",
+      "type": "string"
     },
     "SiteDesign": {
       "additionalProperties": false,

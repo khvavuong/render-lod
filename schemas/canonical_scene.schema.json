@@ -206,6 +206,20 @@
         "source": {
           "$ref": "#/$defs/SourceElementRef"
         },
+        "storeys": {
+          "anyOf": [
+            {
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Storeys"
+        },
         "transform": {
           "maxItems": 4,
           "minItems": 4,
@@ -359,7 +373,10 @@
         "landscape_zone",
         "roof",
         "site_boundary",
-        "primary_facade"
+        "primary_facade",
+        "canopy",
+        "loading_dock",
+        "envelope_panel"
       ],
       "title": "SemanticRole",
       "type": "string"

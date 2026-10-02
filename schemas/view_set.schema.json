@@ -80,7 +80,8 @@
         "hero",
         "detail",
         "office_hero",
-        "loading_detail"
+        "loading_detail",
+        "custom"
       ],
       "title": "ViewRole",
       "type": "string"

@@ -72,6 +72,19 @@
           "title": "Boundary Kit",
           "type": "string"
         },
+        "client_prompt": {
+          "anyOf": [
+            {
+              "maxLength": 1000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Client Prompt"
+        },
         "creative_prompt": {
           "anyOf": [
             {

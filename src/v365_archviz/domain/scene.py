@@ -7,6 +7,7 @@ from enum import Enum
 
 from pydantic import Field, model_validator
 
+from v365_archviz.domain.building_kind import BuildingFeatures, BuildingKind, Compass
 from v365_archviz.domain.common import DomainModel, Matrix4x4, PositiveMeters, Vec3
 
 
@@ -97,6 +98,10 @@ class SceneElement(DomainModel):
     constraint_level: ConstraintLevel = ConstraintLevel.HARD
     #: Storeys, when the source model states them.
     storeys: int | None = Field(default=None, ge=1, le=200)
+    #: What the building is, its front and the parts drawn on it, when the source states them.
+    kind: BuildingKind | None = None
+    front: Compass | None = None
+    features: BuildingFeatures | None = None
 
 
 def _length(vector: Vec3) -> float:

@@ -12,6 +12,7 @@ from typing import Literal
 
 from pydantic import Field, model_validator
 
+from v365_archviz.domain.building_kind import BuildingFeatures, BuildingKind, Compass
 from v365_archviz.domain.common import DomainModel
 
 SCENE_UPLOAD_VERSION: Literal["site-forma-scene-v1"] = "site-forma-scene-v1"
@@ -45,6 +46,11 @@ class UploadBuilding(DomainModel):
     rotation_rad: float = 0.0
     #: Storeys the editor gives the building; an office's floor count is part of its design.
     floors: int | None = Field(default=None, ge=1, le=200)
+    #: What the building is (a warehouse, a guard house...), so prompts can name it.
+    kind: BuildingKind | None = None
+    #: The side its front faces after rotation: doors, glazing and canopies are on it.
+    front: Compass | None = None
+    features: BuildingFeatures | None = None
 
     @model_validator(mode="after")
     def validate_finite(self) -> UploadBuilding:

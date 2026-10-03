@@ -297,6 +297,9 @@ class PlanDesign:
                     semantic_role=element.semantic_role,
                     bounding_box=element.bounding_box,
                     storeys=element.storeys,
+                    kind=element.kind,
+                    front=element.front,
+                    features=element.features,
                 )
             )
         design_revision = self.revision(scene, brief)

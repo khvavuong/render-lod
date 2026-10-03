@@ -77,7 +77,8 @@ PROHIBITED
 No camera or topology drift; no roof subdivision; no raised ridge cap, ridge vent, roof monitor,
 skylight strip or rib along the ridge, which is only the thin flush line where the two roof slopes
 meet; no relocated/duplicate gate; no missing fence or road; no invented opening; no saturated
-fantasy colour; no copied reference layout, facade or palette; no text or logos. Keep one material, lighting and colour-grade identity across all six
+fantasy colour; no copied reference layout, facade or palette; no text or logos.
+Keep one material, lighting and colour-grade identity across all six
 views, except that VIEW-06 preserves those materials under its explicitly required late-afternoon
 golden-hour photography."""
 

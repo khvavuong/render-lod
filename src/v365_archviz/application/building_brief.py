@@ -13,6 +13,7 @@ from __future__ import annotations
 from v365_archviz.application.camera_framing import _camera_basis
 from v365_archviz.domain.building_kind import BuildingFeatures
 from v365_archviz.domain.design import BuildingDesign, BuildingTreatment, DesignDNA
+from v365_archviz.domain.scene import BoundingBox
 from v365_archviz.domain.workflow import Camera
 
 _NAMES = {
@@ -180,16 +181,14 @@ def building_contract(design: DesignDNA) -> str:
     return "\n".join(lines)
 
 
-def _frame_side(building: BuildingDesign, camera: Camera) -> str | None:
-    """Left, centre or right of the frame, or None when the camera does not see it."""
+def frame_side(box: BoundingBox, camera: Camera) -> str | None:
+    """Left, centre or right of the frame, or None when the camera does not see the box."""
 
     basis = _camera_basis(camera.position, camera.target)
     if basis is None:
         return None
     forward, right, _ = basis
     tan_horizontal = camera.sensor_width_mm / (2 * camera.focal_length_mm)
-    box = building.bounding_box
-    assert box is not None
     centre = tuple((box.minimum[axis] + box.maximum[axis]) / 2 for axis in range(3))
     offset = tuple(centre[axis] - camera.position[axis] for axis in range(3))
     depth = sum(offset[axis] * forward[axis] for axis in range(3))
@@ -210,7 +209,7 @@ def building_view_directive(design: DesignDNA, camera: Camera) -> str:
     placed = [
         (labels[building.building_id], side)
         for building in buildings
-        if (side := _frame_side(building, camera))
+        if building.bounding_box and (side := frame_side(building.bounding_box, camera))
     ]
     if not placed:
         return ""

@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from v365_archviz.application.building_brief import building_contract
+from v365_archviz.application.gate_brief import gate_contract
 from v365_archviz.application.office_brief import office_contract
 from v365_archviz.domain.design import DesignDNA
 from v365_archviz.domain.style_pack import ContextPolicy, DesignFreedom, StylePack
@@ -263,6 +264,8 @@ def compose_style_prompt(pack: StylePack, design: DesignDNA | None = None) -> st
             sections.insert(3, office)
         if buildings := building_contract(design):
             sections.insert(4 if office else 3, buildings)
+        if gates := gate_contract(design):
+            sections.insert(3 + bool(office) + bool(buildings), gates)
     context = _CONTEXT_INSTRUCTION[pack.context_policy]
     if pack.context_direction:
         context = f"{context} {pack.context_direction}"

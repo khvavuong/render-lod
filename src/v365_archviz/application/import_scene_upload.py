@@ -21,6 +21,7 @@ import numpy as np
 from v365_archviz.artifacts import atomic_write
 from v365_archviz.domain.building_kind import BuildingFeatures, BuildingKind, Compass
 from v365_archviz.domain.common import Matrix4x4, Vec3
+from v365_archviz.domain.gate import GatePart
 from v365_archviz.domain.scene import (
     BoundingBox,
     CanonicalScene,
@@ -34,9 +35,9 @@ from v365_archviz.domain.scene import (
     SurfaceFrame,
 )
 from v365_archviz.domain.scene_upload import (
+    PLOT_BOUNDARY_ID,
     Point2,
     SceneUpload,
-    UploadBuilding,
     UploadSurface,
 )
 
@@ -82,6 +83,11 @@ def _upload_digest(upload: SceneUpload) -> str:
         for field in _LATER_BUILDING_FIELDS:
             if building.get(field) is None:
                 building.pop(field, None)
+    # Scene fields added later, left out the same way while unused.
+    if payload.get("plot_boundary") is None:
+        payload.pop("plot_boundary", None)
+    if not payload.get("gates"):
+        payload.pop("gates", None)
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
@@ -99,7 +105,9 @@ class ImportSceneUpload:
         elements: list[SceneElement] = []
         surfaces: list[SceneSurface] = []
         for building in upload.buildings:
-            corners = _box_corners(building)
+            corners = _box_corners(
+                building.center, building.width_m, building.length_m, building.rotation_rad
+            )
             mesh = _prism(corners, building.base_z, building.base_z + building.height_m)
             elements.append(
                 self._element(
@@ -126,6 +134,35 @@ class ImportSceneUpload:
         for surface in upload.surfaces:
             elements.append(
                 self._element(root, surface.id, SemanticRole(surface.role), _flat(surface), "")
+            )
+        if upload.plot_boundary:
+            ring = _counter_clockwise(upload.plot_boundary)
+            elements.append(
+                self._element(
+                    root,
+                    PLOT_BOUNDARY_ID,
+                    SemanticRole.SITE_BOUNDARY,
+                    # A hairline under the fence: the fence is built along the outline.
+                    _ribbon(ring, 0.05, 0.0, 0.01),
+                    "",
+                    outline=tuple(ring),
+                )
+            )
+        for gate in upload.gates:
+            corners = _box_corners(gate.center, gate.width_m, gate.depth_m, gate.rotation_rad)
+            elements.append(
+                self._element(
+                    root,
+                    gate.id,
+                    SemanticRole.MAIN_ENTRANCE
+                    if gate.role == "main"
+                    else SemanticRole.SECONDARY_ENTRANCE,
+                    # The opening is a flat pad; the gate itself is its parts.
+                    _prism(corners, gate.base_z, gate.base_z + 0.02),
+                    gate.name,
+                    outline=tuple(corners),
+                    gate_parts=gate.parts or None,
+                )
             )
 
         scene = CanonicalScene(
@@ -158,6 +195,8 @@ class ImportSceneUpload:
         kind: BuildingKind | None = None,
         front: Compass | None = None,
         features: BuildingFeatures | None = None,
+        outline: tuple[Point2, ...] | None = None,
+        gate_parts: tuple[GatePart, ...] | None = None,
     ) -> SceneElement:
         mesh_ref = f"meshes/{element_id}.npz"
         buffer = io.BytesIO()
@@ -185,15 +224,38 @@ class ImportSceneUpload:
             kind=kind,
             front=front,
             features=features,
+            outline=outline,
+            gate_parts=gate_parts,
         )
 
 
-def _box_corners(building: UploadBuilding) -> list[Point2]:
-    cos, sin = math.cos(building.rotation_rad), math.sin(building.rotation_rad)
-    half_w, half_l = building.width_m / 2, building.length_m / 2
-    cx, cy = building.center
+def _box_corners(center: Point2, width: float, length: float, rotation: float) -> list[Point2]:
+    """A rectangle turned counter-clockwise about its centre, its corners counter-clockwise."""
+
+    cos, sin = math.cos(rotation), math.sin(rotation)
+    half_w, half_l = width / 2, length / 2
+    cx, cy = center
     local = ((-half_w, -half_l), (half_w, -half_l), (half_w, half_l), (-half_w, half_l))
     return [(cx + x * cos - y * sin, cy + x * sin + y * cos) for x, y in local]
+
+
+def _ribbon(ring: list[Point2], width: float, bottom: float, top: float) -> _Mesh:
+    """A thin strip along each edge of a closed ring."""
+
+    vertices: list[Vec3] = []
+    faces: list[tuple[int, int, int]] = []
+    for index, start in enumerate(ring):
+        end = ring[(index + 1) % len(ring)]
+        length = math.hypot(end[0] - start[0], end[1] - start[1])
+        if length < 1e-6:
+            continue
+        center = ((start[0] + end[0]) / 2, (start[1] + end[1]) / 2)
+        rotation = math.atan2(end[1] - start[1], end[0] - start[0])
+        strip = _prism(_box_corners(center, length, width, rotation), bottom, top)
+        offset = len(vertices)
+        faces.extend((a + offset, b + offset, c + offset) for a, b, c in strip.faces)
+        vertices.extend(strip.vertices)
+    return _Mesh(vertices, faces)
 
 
 def _signed_area(ring: list[Point2] | tuple[Point2, ...]) -> float:

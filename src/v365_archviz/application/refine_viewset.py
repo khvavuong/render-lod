@@ -10,6 +10,7 @@ from pathlib import Path
 
 from v365_archviz.application.brand_watermark import BrandWatermark
 from v365_archviz.application.building_brief import building_set_rule, building_view_directive
+from v365_archviz.application.gate_brief import gate_set_rule, gate_view_directive
 from v365_archviz.application.office_brief import office_set_rule, office_view_directive
 from v365_archviz.application.refine_view import (
     PROMPT_VERSION,
@@ -264,6 +265,7 @@ def _identity_contract(design: DesignDNA) -> tuple[dict[str, object], str]:
         f"{appearance}"
         f"{office_set_rule(design)}"
         f"{building_set_rule(design)}"
+        f"{gate_set_rule(design)}"
         f"base daylight={environment['time']} {environment['weather']} (VIEW-06 may override only "
         "photography time to restrained golden/blue hour), "
         f"white balance={environment['white_balance_k']}K. "
@@ -598,7 +600,8 @@ class RefineViewSet:
                     f"{prompt}\n\n{VIEW_DIRECTIVES[camera.role]}\n"
                     f"{_visible_facade_directive(design, camera)}\n"
                     f"{office_view_directive(design, camera)}\n"
-                    f"{building_view_directive(design, camera)}"
+                    f"{building_view_directive(design, camera)}\n"
+                    f"{gate_view_directive(design, camera)}"
                 ).rstrip(),
                 role=camera.role.value,
                 context_policy=(

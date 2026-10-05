@@ -1247,6 +1247,71 @@ def _subtract_intervals(
     return [run for run in runs if run[1] - run[0] >= 0.6]
 
 
+# A gate's blocks in the editor's own colours (site-fe viewport-theme.ts).
+_GATE_COLOURS = {
+    "pillar": "#94a3b8",
+    "cap": "#475569",
+    "rest": "#475569",
+    "cabinet": "#f59e0b",
+    "arm_red": "#dc2626",
+    "arm_white": "#f8fafc",
+}
+
+
+def _create_gate_parts(entrance: dict, index: int) -> int:
+    """Build a gate from the blocks its source draws it with: Site Forma's capped pillars,
+    barrier cabinet, striped arm and rest post, each kind in its own colour."""
+
+    up = Vector((0, 0, 1))
+    for number, part in enumerate(entrance["gate_parts"], start=1):
+        kind = part["kind"]
+        cos, sin = math.cos(part["rotation_rad"]), math.sin(part["rotation_rad"])
+        along, across, height = part["size"]
+        name = f"gate_{kind}"
+        metallic = 0.2 if kind in ("pillar", "cap", "rest") else 0.0
+        gate_material = bpy.data.materials.get(name) or material(
+            name, _hex_color(_GATE_COLOURS[kind]), metallic, 0.5
+        )
+        index += 1
+        _oriented_box(
+            f"{entrance['scene_element_id']}:gate-{kind}-{number:02d}",
+            Vector(part["center"]),
+            ((Vector((cos, sin, 0)), along), (Vector((-sin, cos, 0)), across), (up, height)),
+            gate_material,
+            index,
+            semantic_role=entrance["semantic_role"],
+        )
+    return index
+
+
+def _fence_sides(boundary: dict) -> list[tuple[str, Vector, Vector, Vector, float]]:
+    """(name, start, along, across, length) of each straight side a fence runs: the boundary's
+    outline when the source states it, else the four sides of its box."""
+
+    x0, y0, _ = boundary["bounding_box"]["minimum"]
+    x1, y1, z1 = boundary["bounding_box"]["maximum"]
+    ground_z = max(0.0, z1)
+    outline = boundary.get("outline")
+    if not outline:
+        east, north = Vector((1, 0, 0)), Vector((0, 1, 0))
+        return [
+            ("south", Vector((x0, y0, ground_z)), east, north, x1 - x0),
+            ("north", Vector((x0, y1, ground_z)), east, north, x1 - x0),
+            ("west", Vector((x0, y0, ground_z)), north, east, y1 - y0),
+            ("east", Vector((x1, y0, ground_z)), north, east, y1 - y0),
+        ]
+    sides = []
+    for number, (ax, ay) in enumerate(outline, start=1):
+        bx, by = outline[number % len(outline)]
+        length = math.hypot(bx - ax, by - ay)
+        if length < 0.6:
+            continue
+        along = Vector(((bx - ax) / length, (by - ay) / length, 0))
+        across = Vector((-along.y, along.x, 0))
+        sides.append((f"edge-{number}", Vector((ax, ay, ground_z)), along, across, length))
+    return sides
+
+
 def _create_site_fence(
     scene_data: dict,
     material,
@@ -1263,45 +1328,30 @@ def _create_site_fence(
         for item in scene_data["elements"]
         if item["semantic_role"] in {"main_entrance", "secondary_entrance"}
     ]
+    # Each opening's plan footprint: its outline when the source states it, else its box.
+    footprints = []
+    for entrance in entrances:
+        gx0, gy0, _ = entrance["bounding_box"]["minimum"]
+        gx1, gy1, _ = entrance["bounding_box"]["maximum"]
+        footprints.append(
+            entrance.get("outline") or [(gx0, gy0), (gx1, gy0), (gx1, gy1), (gx0, gy1)]
+        )
     index = start_index
     up = Vector((0, 0, 1))
     for boundary in boundaries:
-        bounds = boundary["bounding_box"]
-        x0, y0, _ = bounds["minimum"]
-        x1, y1, z1 = bounds["maximum"]
-        ground_z = max(0.0, z1)
-        sides = (
-            ("south", "x", y0, x0, x1),
-            ("north", "x", y1, x0, x1),
-            ("west", "y", x0, y0, y1),
-            ("east", "y", x1, y0, y1),
-        )
-        for side_name, run_axis, fixed, run_start, run_end in sides:
+        for side_name, start, axis, cross, side_length in _fence_sides(boundary):
             gaps: list[tuple[float, float]] = []
-            for entrance in entrances:
-                gate = entrance["bounding_box"]
-                gx0, gy0, _ = gate["minimum"]
-                gx1, gy1, _ = gate["maximum"]
-                touches = (
-                    gy0 - 0.75 <= fixed <= gy1 + 0.75
-                    if run_axis == "x"
-                    else gx0 - 0.75 <= fixed <= gx1 + 0.75
-                )
-                if touches:
-                    interval = (gx0, gx1) if run_axis == "x" else (gy0, gy1)
-                    gaps.append((interval[0] - 0.35, interval[1] + 0.35))
-            axis = Vector((1, 0, 0)) if run_axis == "x" else Vector((0, 1, 0))
-            cross = Vector((0, 1, 0)) if run_axis == "x" else Vector((1, 0, 0))
+            for footprint in footprints:
+                offsets = [Vector((x - start.x, y - start.y, 0)) for x, y in footprint]
+                across = [offset.dot(cross) for offset in offsets]
+                if min(across) - 0.75 <= 0 <= max(across) + 0.75:
+                    along = [offset.dot(axis) for offset in offsets]
+                    gaps.append((min(along) - 0.35, max(along) + 0.35))
             for run_number, (left, right) in enumerate(
-                _subtract_intervals((run_start, run_end), gaps), start=1
+                _subtract_intervals((0.0, side_length), gaps), start=1
             ):
                 length = right - left
-                run_center = (left + right) / 2
-                center = (
-                    Vector((run_center, fixed, ground_z))
-                    if run_axis == "x"
-                    else Vector((fixed, run_center, ground_z))
-                )
+                center = start + axis * ((left + right) / 2)
                 index += 1
                 # A low masonry/concrete wall with open steel infill is the normal industrial
                 # boundary language here. Keep it transparent enough to present the factory.
@@ -1327,15 +1377,10 @@ def _create_site_fence(
                 post_count = max(1, int(np.ceil(length / 4.0)))
                 for post_number in range(post_count + 1):
                     position = left + length * post_number / post_count
-                    post_center = (
-                        Vector((position, fixed, ground_z + 1.10))
-                        if run_axis == "x"
-                        else Vector((fixed, position, ground_z + 1.10))
-                    )
                     index += 1
                     _oriented_box(
                         f"{boundary['scene_element_id']}:{side_name}-{run_number}:post-{post_number}",
-                        post_center,
+                        start + axis * position + up * 1.10,
                         ((axis, 0.14), (cross, 0.18), (up, 2.20)),
                         material,
                         index,
@@ -1350,16 +1395,11 @@ def _create_site_fence(
                 infill_width = 0.035 if boundary_kit == "mesh_low_plinth" else 0.055
                 for infill_number in range(1, infill_count):
                     position = left + length * infill_number / infill_count
-                    infill_center = (
-                        Vector((position, fixed, ground_z + 1.36))
-                        if run_axis == "x"
-                        else Vector((fixed, position, ground_z + 1.36))
-                    )
                     index += 1
                     _oriented_box(
                         f"{boundary['scene_element_id']}:{side_name}-{run_number}:"
                         f"infill-{infill_number}",
-                        infill_center,
+                        start + axis * position + up * 1.36,
                         ((axis, infill_width), (cross, 0.055), (up, 1.36)),
                         material,
                         index,
@@ -1480,6 +1520,9 @@ def create_design_details(
         for element in scene_data["elements"]
         if element["semantic_role"] in {"main_entrance", "secondary_entrance"}
     ):
+        if entrance.get("gate_parts"):
+            detail_index = _create_gate_parts(entrance, detail_index)
+            continue
         bounds = entrance["bounding_box"]
         x0, y0, _ = bounds["minimum"]
         x1, y1, z1 = bounds["maximum"]

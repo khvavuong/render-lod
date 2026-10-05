@@ -19,6 +19,7 @@ from pathlib import Path
 import numpy as np
 
 from v365_archviz.artifacts import atomic_write
+from v365_archviz.domain.building_kind import BuildingFeatures, BuildingKind, Compass
 from v365_archviz.domain.common import Matrix4x4, Vec3
 from v365_archviz.domain.scene import (
     BoundingBox,
@@ -70,10 +71,18 @@ def scene_upload_revision(upload: SceneUpload) -> str:
     return _upload_digest(upload)[:16]
 
 
+#: Building fields added after the first uploads: left out of the hash while unset, so an
+#: upload that does not use them keeps the revision, and the artifacts, it always had.
+_LATER_BUILDING_FIELDS = ("kind", "front", "features")
+
+
 def _upload_digest(upload: SceneUpload) -> str:
-    canonical = json.dumps(
-        upload.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), ensure_ascii=True
-    )
+    payload = upload.model_dump(mode="json")
+    for building in payload["buildings"]:
+        for field in _LATER_BUILDING_FIELDS:
+            if building.get(field) is None:
+                building.pop(field, None)
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
@@ -100,6 +109,9 @@ class ImportSceneUpload:
                     mesh,
                     building.name,
                     storeys=building.floors,
+                    kind=building.kind,
+                    front=building.front,
+                    features=building.features,
                 )
             )
             surfaces.extend(
@@ -143,6 +155,9 @@ class ImportSceneUpload:
         mesh: _Mesh,
         name: str,
         storeys: int | None = None,
+        kind: BuildingKind | None = None,
+        front: Compass | None = None,
+        features: BuildingFeatures | None = None,
     ) -> SceneElement:
         mesh_ref = f"meshes/{element_id}.npz"
         buffer = io.BytesIO()
@@ -167,6 +182,9 @@ class ImportSceneUpload:
             # The editor states every role; nothing here is inferred.
             semantic_confidence=1.0,
             storeys=storeys,
+            kind=kind,
+            front=front,
+            features=features,
         )
 
 

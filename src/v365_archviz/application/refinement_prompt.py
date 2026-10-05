@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from v365_archviz.application.building_brief import building_contract
 from v365_archviz.application.office_brief import office_contract
 from v365_archviz.domain.design import DesignDNA
 from v365_archviz.domain.style_pack import ContextPolicy, DesignFreedom, StylePack
@@ -76,9 +77,10 @@ PROHIBITED
 No camera or topology drift; no roof subdivision; no raised ridge cap, ridge vent, roof monitor,
 skylight strip or rib along the ridge, which is only the thin flush line where the two roof slopes
 meet; no relocated/duplicate gate; no missing fence or road; no invented opening; no saturated
-fantasy colour; no copied reference layout, facade or palette; no text or logos. Keep one
-material, lighting and colour-grade identity across all six views, except that VIEW-06 preserves
-those materials under its explicitly required late-afternoon golden-hour photography."""
+fantasy colour; no copied reference layout, facade or palette; no text or logos.
+Keep one material, lighting and colour-grade identity across all six
+views, except that VIEW-06 preserves those materials under its explicitly required late-afternoon
+golden-hour photography."""
 
 
 _SITE_AUTHORITY = """\
@@ -259,6 +261,8 @@ def compose_style_prompt(pack: StylePack, design: DesignDNA | None = None) -> st
         sections.insert(2, massing_contract(design))
         if office := office_contract(design):
             sections.insert(3, office)
+        if buildings := building_contract(design):
+            sections.insert(4 if office else 3, buildings)
     context = _CONTEXT_INSTRUCTION[pack.context_policy]
     if pack.context_direction:
         context = f"{context} {pack.context_direction}"

@@ -6,6 +6,7 @@ from enum import Enum
 
 from pydantic import Field, model_validator
 
+from v365_archviz.domain.building_kind import BuildingFeatures, BuildingKind, Compass
 from v365_archviz.domain.common import DomainModel, PositiveMeters, UnitInterval
 from v365_archviz.domain.scene import BoundingBox, SemanticRole
 
@@ -145,6 +146,9 @@ class BuildingDesign(DomainModel):
     semantic_role: SemanticRole | None = None
     bounding_box: BoundingBox | None = None
     storeys: int | None = Field(default=None, ge=1, le=200)
+    kind: BuildingKind | None = None
+    front: Compass | None = None
+    features: BuildingFeatures | None = None
 
 
 class RoofAssembly(DomainModel):

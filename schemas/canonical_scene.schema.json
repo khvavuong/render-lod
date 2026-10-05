@@ -45,6 +45,187 @@
       "title": "BoundingBox",
       "type": "object"
     },
+    "BuildingFeatures": {
+      "additionalProperties": false,
+      "description": "The parts the editor drew on a building; any of them may be left out.",
+      "properties": {
+        "canopy_depth_m": {
+          "anyOf": [
+            {
+              "maximum": 10,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Canopy Depth M"
+        },
+        "eave_height_m": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 500,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Eave Height M"
+        },
+        "end_wall_doors": {
+          "anyOf": [
+            {
+              "maximum": 10,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "End Wall Doors"
+        },
+        "front_doors": {
+          "anyOf": [
+            {
+              "maximum": 50,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Front Doors"
+        },
+        "glazed_sides": {
+          "anyOf": [
+            {
+              "maximum": 4,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Glazed Sides"
+        },
+        "high_windows": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "High Windows"
+        },
+        "louvers": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Louvers"
+        },
+        "mesh_doors": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mesh Doors"
+        },
+        "open_sides": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Open Sides"
+        },
+        "roof": {
+          "anyOf": [
+            {
+              "enum": [
+                "gable",
+                "mono_pitch",
+                "flat"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Roof"
+        },
+        "roof_slope_deg": {
+          "anyOf": [
+            {
+              "maximum": 45,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Roof Slope Deg"
+        },
+        "tank_lid": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tank Lid"
+        },
+        "transformer_yard": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Transformer Yard"
+        }
+      },
+      "title": "BuildingFeatures",
+      "type": "object"
+    },
     "ConstraintLevel": {
       "enum": [
         "hard",
@@ -181,6 +362,57 @@
         "constraint_level": {
           "$ref": "#/$defs/ConstraintLevel",
           "default": "hard"
+        },
+        "features": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BuildingFeatures"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "front": {
+          "anyOf": [
+            {
+              "enum": [
+                "north",
+                "east",
+                "south",
+                "west"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Front"
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "enum": [
+                "warehouse",
+                "office_block",
+                "guard_house",
+                "substation",
+                "vehicle_shed",
+                "refuse_house",
+                "pump_house",
+                "generic"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Kind"
         },
         "mesh_ref": {
           "minLength": 1,

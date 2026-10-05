@@ -343,6 +343,70 @@
       "title": "CoordinateSystem",
       "type": "object"
     },
+    "GatePart": {
+      "additionalProperties": false,
+      "description": "One upright block of a gate, turned with it.\n\n`center` is in world metres; `size` is along the opening, across it and up;\nthe opening runs along (cos, sin) of `rotation_rad`.",
+      "properties": {
+        "center": {
+          "maxItems": 3,
+          "minItems": 3,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Center",
+          "type": "array"
+        },
+        "kind": {
+          "enum": [
+            "pillar",
+            "cap",
+            "cabinet",
+            "arm_red",
+            "arm_white",
+            "rest"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "rotation_rad": {
+          "default": 0.0,
+          "title": "Rotation Rad",
+          "type": "number"
+        },
+        "size": {
+          "maxItems": 3,
+          "minItems": 3,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Size",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "center",
+        "size"
+      ],
+      "title": "GatePart",
+      "type": "object"
+    },
     "GeometryProviderKind": {
       "enum": [
         "aec_data_model",
@@ -392,6 +456,21 @@
           "default": null,
           "title": "Front"
         },
+        "gate_parts": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/GatePart"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Gate Parts"
+        },
         "kind": {
           "anyOf": [
             {
@@ -418,6 +497,32 @@
           "minLength": 1,
           "title": "Mesh Ref",
           "type": "string"
+        },
+        "outline": {
+          "anyOf": [
+            {
+              "items": {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array"
+              },
+              "minItems": 3,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Outline"
         },
         "scene_element_id": {
           "minLength": 1,

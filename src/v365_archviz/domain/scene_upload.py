@@ -14,9 +14,12 @@ from pydantic import Field, model_validator
 
 from v365_archviz.domain.building_kind import BuildingFeatures, BuildingKind, Compass
 from v365_archviz.domain.common import DomainModel
+from v365_archviz.domain.gate import GatePart, GateRole
 
 SCENE_UPLOAD_VERSION: Literal["site-forma-scene-v1"] = "site-forma-scene-v1"
 UPLOAD_IDENTIFIER_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+#: The scene element the plot boundary becomes; no uploaded object may take its ID.
+PLOT_BOUNDARY_ID = "plot-boundary"
 
 BuildingRole = Literal["main_shed", "office_block", "utility_block"]
 SurfaceRole = Literal[
@@ -74,6 +77,30 @@ class UploadContextBuilding(DomainModel):
         return self
 
 
+class UploadGate(DomainModel):
+    """A vehicle gate in the site boundary: an opening `width_m` wide and `depth_m` deep,
+    turned counter-clockwise about its base centre so the opening runs along
+    (cos, sin) of `rotation_rad`, with the blocks the editor draws it with."""
+
+    id: str = Field(pattern=UPLOAD_IDENTIFIER_PATTERN)
+    name: str = Field(default="", max_length=200)
+    role: GateRole = "main"
+    center: Point2
+    base_z: float = 0.0
+    width_m: float = Field(gt=0.5, le=200)
+    depth_m: float = Field(gt=0.0, le=50)
+    height_m: float = Field(gt=0.5, le=30)
+    rotation_rad: float = 0.0
+    parts: tuple[GatePart, ...] = Field(default=(), max_length=400)
+
+    @model_validator(mode="after")
+    def validate_finite(self) -> UploadGate:
+        values = (*self.center, self.base_z, self.rotation_rad)
+        if not all(math.isfinite(value) for value in values):
+            raise ValueError("gate coordinates must be finite")
+        return self
+
+
 class UploadSurface(DomainModel):
     """A flat ground layer inside the site, already triangulated by the editor.
 
@@ -107,16 +134,26 @@ class SceneUpload(DomainModel):
     buildings: tuple[UploadBuilding, ...] = Field(min_length=1, max_length=400)
     context_buildings: tuple[UploadContextBuilding, ...] = Field(default=(), max_length=2000)
     surfaces: tuple[UploadSurface, ...] = Field(min_length=1, max_length=2000)
+    #: The plot's boundary, the line the fence follows; when absent no fence is drawn.
+    plot_boundary: tuple[Point2, ...] | None = Field(default=None, min_length=3, max_length=2000)
+    gates: tuple[UploadGate, ...] = Field(default=(), max_length=50)
 
     @model_validator(mode="after")
     def validate_scene(self) -> SceneUpload:
+        if self.plot_boundary and not all(
+            math.isfinite(value) for point in self.plot_boundary for value in point
+        ):
+            raise ValueError("plot boundary coordinates must be finite")
         ids = [
             *(item.id for item in self.buildings),
             *(item.id for item in self.context_buildings),
             *(item.id for item in self.surfaces),
+            *(item.id for item in self.gates),
         ]
         if len(ids) != len(set(ids)):
             raise ValueError("scene object IDs must be unique")
+        if self.plot_boundary and PLOT_BOUNDARY_ID in ids:
+            raise ValueError(f"{PLOT_BOUNDARY_ID!r} is reserved for the plot boundary")
         if not any(surface.role == "site_ground" for surface in self.surfaces):
             raise ValueError("a scene needs the site ground")
         return self

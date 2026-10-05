@@ -8,6 +8,7 @@ from pydantic import Field, model_validator
 
 from v365_archviz.domain.building_kind import BuildingFeatures, BuildingKind, Compass
 from v365_archviz.domain.common import DomainModel, PositiveMeters, UnitInterval
+from v365_archviz.domain.gate import GateRole
 from v365_archviz.domain.scene import BoundingBox, SemanticRole
 
 
@@ -151,6 +152,20 @@ class BuildingDesign(DomainModel):
     features: BuildingFeatures | None = None
 
 
+class GateDesign(DomainModel):
+    """A gate the source draws, so prompts can name it and keep it where it is."""
+
+    gate_id: str = Field(min_length=1)
+    role: GateRole
+    bounding_box: BoundingBox
+    width_m: PositiveMeters
+    height_m: PositiveMeters
+    #: The side of the plot it stands on, when the plot boundary is known.
+    side: Compass | None = None
+    #: Drawn with a boom barrier: a cabinet and a striped arm across the opening.
+    barrier: bool = False
+
+
 class RoofAssembly(DomainModel):
     """One continuous roof spanning one or more aligned LOD100 source blocks."""
 
@@ -288,6 +303,7 @@ class DesignDNA(DomainModel):
     design_preferences: DesignPreferences = Field(default_factory=DesignPreferences)
     buildings: tuple[BuildingDesign, ...]
     roof_assemblies: tuple[RoofAssembly, ...] = ()
+    gates: tuple[GateDesign, ...] = ()
     grammar_version: str = Field(min_length=1)
     asset_library_version: str = Field(min_length=1)
 

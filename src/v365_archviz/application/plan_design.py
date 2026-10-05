@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+from v365_archviz.application.gate_brief import gate_designs
 from v365_archviz.application.plan_industrial_context import PlanIndustrialContext
 from v365_archviz.artifacts import atomic_write
 from v365_archviz.domain.design import (
@@ -364,6 +365,7 @@ class PlanDesign:
             design_preferences=brief.design_preferences,
             buildings=tuple(buildings),
             roof_assemblies=roof_assemblies,
+            gates=gate_designs(scene),
             grammar_version=brief.grammar_version,
             asset_library_version=brief.asset_library_version,
         )

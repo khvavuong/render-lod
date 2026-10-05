@@ -784,6 +784,70 @@
       "title": "FacadeDesign",
       "type": "object"
     },
+    "GateDesign": {
+      "additionalProperties": false,
+      "description": "A gate the source draws, so prompts can name it and keep it where it is.",
+      "properties": {
+        "barrier": {
+          "default": false,
+          "title": "Barrier",
+          "type": "boolean"
+        },
+        "bounding_box": {
+          "$ref": "#/$defs/BoundingBox"
+        },
+        "gate_id": {
+          "minLength": 1,
+          "title": "Gate Id",
+          "type": "string"
+        },
+        "height_m": {
+          "exclusiveMinimum": 0.0,
+          "title": "Height M",
+          "type": "number"
+        },
+        "role": {
+          "enum": [
+            "main",
+            "secondary"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "side": {
+          "anyOf": [
+            {
+              "enum": [
+                "north",
+                "east",
+                "south",
+                "west"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Side"
+        },
+        "width_m": {
+          "exclusiveMinimum": 0.0,
+          "title": "Width M",
+          "type": "number"
+        }
+      },
+      "required": [
+        "gate_id",
+        "role",
+        "bounding_box",
+        "width_m",
+        "height_m"
+      ],
+      "title": "GateDesign",
+      "type": "object"
+    },
     "IndustrialContextPlan": {
       "additionalProperties": false,
       "description": "Deterministic off-site planning geometry; never represented as authored fact.",
@@ -1166,6 +1230,14 @@
     },
     "environment": {
       "$ref": "#/$defs/EnvironmentDesign"
+    },
+    "gates": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/GateDesign"
+      },
+      "title": "Gates",
+      "type": "array"
     },
     "grammar_version": {
       "minLength": 1,

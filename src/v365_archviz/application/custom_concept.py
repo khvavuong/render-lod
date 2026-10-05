@@ -30,9 +30,7 @@ def prompt_preset(prompt: str) -> ConceptPreset:
         **brief.get("design_preferences", {}),
         "client_prompt": screened,
     }
-    summary = (
-        screened if len(screened) <= SUMMARY_LIMIT else screened[: SUMMARY_LIMIT - 1].rstrip() + "…"
-    )
+    summary = _summary(screened)
     return ConceptPreset(
         preset_id=f"custom-{hashlib.sha256(screened.encode()).hexdigest()[:10]}",
         order=base.order,
@@ -40,3 +38,31 @@ def prompt_preset(prompt: str) -> ConceptPreset:
         summary=summary,
         brief=brief,
     )
+
+
+def adjusted_preset(base: ConceptPreset, adjustment: str) -> ConceptPreset:
+    """The same direction with the client's adjustment on top, as a design of its own.
+
+    The adjustment is screened like a description; the caller sends the whole chain of
+    adjustments a concept has had, so each one is stated in full.
+    """
+
+    screened, _ignored = screen_free_text(adjustment, "adjustment")
+    if not screened:
+        raise InvalidModelError("the adjustment asks for nothing that can be designed")
+    brief = dict(base.brief)
+    brief["design_preferences"] = {
+        **brief.get("design_preferences", {}),
+        "creative_prompt": screened,
+    }
+    return ConceptPreset(
+        preset_id=f"{base.preset_id[:48]}-adj-{hashlib.sha256(screened.encode()).hexdigest()[:10]}",
+        order=base.order,
+        name=base.name,
+        summary=_summary(screened),
+        brief=brief,
+    )
+
+
+def _summary(text: str) -> str:
+    return text if len(text) <= SUMMARY_LIMIT else text[: SUMMARY_LIMIT - 1].rstrip() + "…"

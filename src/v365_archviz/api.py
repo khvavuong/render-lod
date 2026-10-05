@@ -45,7 +45,7 @@ from v365_archviz.application.build_canonical_scene import BuildCanonicalScene
 from v365_archviz.application.compile_user_intent import CompileUserRenderIntent
 from v365_archviz.application.create_generation_job import CreateGenerationJob
 from v365_archviz.application.create_video_job import CreateVideoJob
-from v365_archviz.application.custom_concept import prompt_preset
+from v365_archviz.application.custom_concept import adjusted_preset, prompt_preset
 from v365_archviz.application.extract_ifc import ExtractIfc
 from v365_archviz.application.import_scene_upload import ImportSceneUpload
 from v365_archviz.application.inspect_model import InspectModel
@@ -2019,6 +2019,8 @@ class StartConceptsRequest(BaseModel):
     variant: int = Field(default=1, ge=1, le=99)
     #: One concept from the user's own description instead of the presets.
     prompt: str | None = Field(default=None, min_length=3, max_length=1000)
+    #: The client's adjustment to one direction: a single preset, or the description.
+    adjustment: str | None = Field(default=None, min_length=3, max_length=1000)
 
 
 class ConceptJobResponse(BaseModel):
@@ -2171,10 +2173,16 @@ async def start_concepts(request: StartConceptsRequest) -> StartConceptsResponse
 
 def _concept_presets(request: StartConceptsRequest) -> tuple[ConceptPreset, ...]:
     if request.prompt is not None:
-        return (prompt_preset(request.prompt),)
-    return find_concept_presets(
-        request.preset_ids or tuple(preset.preset_id for preset in load_concept_presets())
-    )
+        presets: tuple[ConceptPreset, ...] = (prompt_preset(request.prompt),)
+    else:
+        presets = find_concept_presets(
+            request.preset_ids or tuple(preset.preset_id for preset in load_concept_presets())
+        )
+    if request.adjustment is None:
+        return presets
+    if len(presets) != 1:
+        raise InvalidModelError("an adjustment applies to one direction")
+    return (adjusted_preset(presets[0], request.adjustment),)
 
 
 @app.get(

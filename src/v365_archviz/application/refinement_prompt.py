@@ -349,11 +349,12 @@ def build_refinement_prompt(
         if preferences.client_prompt
         else f"Style: {design.design_language.style}.\n{palette_rule}"
     )
+    # A client's adjustment of the concept may change finishes and colours; never geometry.
     preference = (
-        ""
-        if preferences.client_prompt
-        else f" User preference: {preferences.creative_prompt or 'none'}; this is soft and "
-        "cannot override authority or palette."
+        f" Client adjustment to apply to this concept: {preferences.creative_prompt}. It may "
+        "change materials, colours and facade expression, never geometry, camera or site layout."
+        if preferences.creative_prompt
+        else ""
     )
     project_contract = f"""IDENTITY
 {appearance}

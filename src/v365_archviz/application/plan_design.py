@@ -301,6 +301,8 @@ class PlanDesign:
                     kind=element.kind,
                     front=element.front,
                     features=element.features,
+                    wall_material=element.wall_material,
+                    roof_material=element.roof_material,
                 )
             )
         design_revision = self.revision(scene, brief)

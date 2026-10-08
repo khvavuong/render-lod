@@ -26,6 +26,8 @@ BuildingKind = Literal[
 ]
 Compass = Literal["north", "east", "south", "west"]
 RoofForm = Literal["gable", "mono_pitch", "flat"]
+#: What a building's walls or roof are made of, as the editor's Materials fields set them.
+BuildingMaterial = Literal["concrete", "precast", "steel", "brick", "wood", "glass"]
 
 
 class BuildingFeatures(DomainModel):

@@ -19,7 +19,12 @@ from pathlib import Path
 import numpy as np
 
 from v365_archviz.artifacts import atomic_write
-from v365_archviz.domain.building_kind import BuildingFeatures, BuildingKind, Compass
+from v365_archviz.domain.building_kind import (
+    BuildingFeatures,
+    BuildingKind,
+    BuildingMaterial,
+    Compass,
+)
 from v365_archviz.domain.common import Matrix4x4, Vec3
 from v365_archviz.domain.gate import GatePart
 from v365_archviz.domain.scene import (
@@ -74,7 +79,7 @@ def scene_upload_revision(upload: SceneUpload) -> str:
 
 #: Building fields added after the first uploads: left out of the hash while unset, so an
 #: upload that does not use them keeps the revision, and the artifacts, it always had.
-_LATER_BUILDING_FIELDS = ("kind", "front", "features")
+_LATER_BUILDING_FIELDS = ("kind", "front", "features", "wall_material", "roof_material")
 
 
 def _upload_digest(upload: SceneUpload) -> str:
@@ -120,6 +125,8 @@ class ImportSceneUpload:
                     kind=building.kind,
                     front=building.front,
                     features=building.features,
+                    wall_material=building.wall_material,
+                    roof_material=building.roof_material,
                 )
             )
             surfaces.extend(
@@ -207,6 +214,8 @@ class ImportSceneUpload:
         kind: BuildingKind | None = None,
         front: Compass | None = None,
         features: BuildingFeatures | None = None,
+        wall_material: BuildingMaterial | None = None,
+        roof_material: BuildingMaterial | None = None,
         outline: tuple[Point2, ...] | None = None,
         gate_parts: tuple[GatePart, ...] | None = None,
     ) -> SceneElement:
@@ -236,6 +245,8 @@ class ImportSceneUpload:
             kind=kind,
             front=front,
             features=features,
+            wall_material=wall_material,
+            roof_material=roof_material,
             outline=outline,
             gate_parts=gate_parts,
         )

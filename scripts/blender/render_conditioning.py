@@ -415,12 +415,13 @@ def create_objects(
         roof = assembly_roofs.get(
             element["scene_element_id"], roofs.get(element["scene_element_id"])
         )
-        if (
+        gabled = bool(
             roof
             and treatments.get(element["scene_element_id"]) == "focus"
             and element["semantic_role"] == "main_shed"
             and "gable" in roof["roof_type"].casefold()
-        ):
+        )
+        if gabled:
             top = element["bounding_box"]["maximum"][2]
             eave = top - _roof_rise(
                 roof_bounds.get(element["scene_element_id"], element["bounding_box"]), roof
@@ -441,14 +442,68 @@ def create_objects(
             "context_building" if treatment == "context" else element["semantic_role"]
         )
         obj["building_treatment"] = treatment
+        wall_material = element.get("wall_material")
         selected_material = (
             materials["context"]
-            if treatments.get(element["scene_element_id"]) == "context"
+            if treatment == "context"
+            else _building_material(wall_material)
+            if wall_material
             else materials.get(element["semantic_role"], materials["unknown"])
         )
         obj.data.materials.append(selected_material)
         bpy.context.collection.objects.link(obj)
+        roof_material = element.get("roof_material")
+        if roof_material and treatment != "context" and not gabled:
+            _flat_roof(obj, faces, _building_material(roof_material))
     return len(scene_data["elements"])
+
+
+# The editor's wall and roof materials (site-forma Properties > Materials): colour, metallic,
+# roughness. A building that names them is drawn in them instead of the concept palette.
+_BUILDING_MATERIALS = {
+    "concrete": ("#B3B1AB", 0.0, 0.85),
+    "precast": ("#CFCBC2", 0.0, 0.78),
+    "steel": ("#8C99A6", 0.55, 0.35),
+    "brick": ("#94503A", 0.0, 0.88),
+    "wood": ("#9A6A43", 0.0, 0.7),
+    "glass": ("#577C90", 0.1, 0.08),
+}
+
+
+def _building_material(kind: str):
+    name = f"building_{kind}"
+    existing = bpy.data.materials.get(name)
+    if existing is not None:
+        return existing
+    hex_value, metallic, roughness = _BUILDING_MATERIALS[kind]
+    result = material(name, _hex_color(hex_value), metallic, roughness)
+    result["asset_id"] = f"site_forma.{kind}"
+    return result
+
+
+def _flat_roof(building, faces: list, roof_material) -> None:
+    """Cover the top of a flat-roofed building in its roof material, as one instance with it."""
+
+    vertices = [vertex.co.copy() for vertex in building.data.vertices]
+    top = max(vertex.z for vertex in vertices)
+    roof_faces = [face for face in faces if all(abs(vertices[i].z - top) < 1e-4 for i in face)]
+    if not roof_faces:
+        return
+    used = sorted({i for face in roof_faces for i in face})
+    position = {old: new for new, old in enumerate(used)}
+    mesh = bpy.data.meshes.new(f"{building.name}:roof")
+    mesh.from_pydata(
+        [(vertices[i].x, vertices[i].y, top + 0.02) for i in used],
+        [],
+        [[position[i] for i in face] for face in roof_faces],
+    )
+    mesh.update()
+    roof = bpy.data.objects.new(f"{building.name}:roof", mesh)
+    roof.pass_index = building.pass_index
+    for key in ("source_external_id", "semantic_role", "building_treatment"):
+        roof[key] = building[key]
+    roof.data.materials.append(roof_material)
+    bpy.context.collection.objects.link(roof)
 
 
 def _detail_box(
@@ -1496,6 +1551,20 @@ def create_design_details(
         for building_id in assembly["building_ids"]
     }
     resolved_materials = build_materials(design_data, asset_data)
+
+    def roof_material_of(building_ids: list[str]):
+        """The roof material the first of these buildings names, else the concept roof."""
+
+        named = next(
+            (
+                elements[building_id]["roof_material"]
+                for building_id in building_ids
+                if elements.get(building_id, {}).get("roof_material")
+            ),
+            None,
+        )
+        return _building_material(named) if named else resolved_materials["roof"]
+
     detail_materials = {
         "seam": resolved_materials["panel_seam"],
         "dock": resolved_materials["loading_dock"],
@@ -2115,7 +2184,7 @@ def create_design_details(
                 f"{building['building_id']}:gable-roof",
                 element["bounding_box"],
                 roof,
-                detail_materials["roof"],
+                roof_material_of([building["building_id"]]),
                 detail_index,
             )
     for assembly in design_data.get("roof_assemblies", []):
@@ -2127,7 +2196,7 @@ def create_design_details(
             assembly["assembly_id"],
             assembly["bounding_box"],
             roof,
-            detail_materials["roof"],
+            roof_material_of(assembly["building_ids"]),
             detail_index,
         )
     return detail_index

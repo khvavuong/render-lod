@@ -12,7 +12,12 @@ from typing import Literal
 
 from pydantic import Field, model_validator
 
-from v365_archviz.domain.building_kind import BuildingFeatures, BuildingKind, Compass
+from v365_archviz.domain.building_kind import (
+    BuildingFeatures,
+    BuildingKind,
+    BuildingMaterial,
+    Compass,
+)
 from v365_archviz.domain.common import DomainModel
 from v365_archviz.domain.gate import GatePart, GateRole
 
@@ -54,6 +59,9 @@ class UploadBuilding(DomainModel):
     #: The side its front faces after rotation: doors, glazing and canopies are on it.
     front: Compass | None = None
     features: BuildingFeatures | None = None
+    #: What its walls and roof are made of; the render draws them so.
+    wall_material: BuildingMaterial | None = None
+    roof_material: BuildingMaterial | None = None
 
     @model_validator(mode="after")
     def validate_finite(self) -> UploadBuilding:

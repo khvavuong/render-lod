@@ -7,7 +7,12 @@ from enum import Enum
 
 from pydantic import Field, model_validator
 
-from v365_archviz.domain.building_kind import BuildingFeatures, BuildingKind, Compass
+from v365_archviz.domain.building_kind import (
+    BuildingFeatures,
+    BuildingKind,
+    BuildingMaterial,
+    Compass,
+)
 from v365_archviz.domain.common import DomainModel, Matrix4x4, PositiveMeters, Vec3
 from v365_archviz.domain.gate import GatePart
 
@@ -103,6 +108,8 @@ class SceneElement(DomainModel):
     kind: BuildingKind | None = None
     front: Compass | None = None
     features: BuildingFeatures | None = None
+    wall_material: BuildingMaterial | None = None
+    roof_material: BuildingMaterial | None = None
     #: The plan outline of a flat element when the source states it: the plot a fence follows,
     #: the opening a gate leaves in it.
     outline: tuple[tuple[float, float], ...] | None = Field(default=None, min_length=3)

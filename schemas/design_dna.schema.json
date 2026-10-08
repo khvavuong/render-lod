@@ -126,6 +126,26 @@
         "roof": {
           "$ref": "#/$defs/RoofDesign"
         },
+        "roof_material": {
+          "anyOf": [
+            {
+              "enum": [
+                "concrete",
+                "precast",
+                "steel",
+                "brick",
+                "wood",
+                "glass"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Roof Material"
+        },
         "semantic_role": {
           "anyOf": [
             {
@@ -154,6 +174,26 @@
         "treatment": {
           "$ref": "#/$defs/BuildingTreatment",
           "default": "focus"
+        },
+        "wall_material": {
+          "anyOf": [
+            {
+              "enum": [
+                "concrete",
+                "precast",
+                "steel",
+                "brick",
+                "wood",
+                "glass"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Wall Material"
         }
       },
       "required": [

@@ -524,6 +524,26 @@
           "default": null,
           "title": "Outline"
         },
+        "roof_material": {
+          "anyOf": [
+            {
+              "enum": [
+                "concrete",
+                "precast",
+                "steel",
+                "brick",
+                "wood",
+                "glass"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Roof Material"
+        },
         "scene_element_id": {
           "minLength": 1,
           "title": "Scene Element Id",
@@ -640,6 +660,26 @@
           ],
           "title": "Transform",
           "type": "array"
+        },
+        "wall_material": {
+          "anyOf": [
+            {
+              "enum": [
+                "concrete",
+                "precast",
+                "steel",
+                "brick",
+                "wood",
+                "glass"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Wall Material"
         }
       },
       "required": [

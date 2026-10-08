@@ -19,7 +19,12 @@ from pathlib import Path
 import numpy as np
 
 from v365_archviz.artifacts import atomic_write
-from v365_archviz.domain.building_kind import BuildingFeatures, BuildingKind, Compass
+from v365_archviz.domain.building_kind import (
+    BuildingFeatures,
+    BuildingKind,
+    BuildingMaterial,
+    Compass,
+)
 from v365_archviz.domain.common import Matrix4x4, Vec3
 from v365_archviz.domain.gate import GatePart
 from v365_archviz.domain.scene import (
@@ -74,7 +79,7 @@ def scene_upload_revision(upload: SceneUpload) -> str:
 
 #: Building fields added after the first uploads: left out of the hash while unset, so an
 #: upload that does not use them keeps the revision, and the artifacts, it always had.
-_LATER_BUILDING_FIELDS = ("kind", "front", "features")
+_LATER_BUILDING_FIELDS = ("kind", "front", "features", "wall_material", "roof_material")
 
 
 def _upload_digest(upload: SceneUpload) -> str:
@@ -120,6 +125,8 @@ class ImportSceneUpload:
                     kind=building.kind,
                     front=building.front,
                     features=building.features,
+                    wall_material=building.wall_material,
+                    roof_material=building.roof_material,
                 )
             )
             surfaces.extend(
@@ -157,8 +164,20 @@ class ImportSceneUpload:
                     SemanticRole.MAIN_ENTRANCE
                     if gate.role == "main"
                     else SemanticRole.SECONDARY_ENTRANCE,
-                    # The opening is a flat pad; the gate itself is its parts.
-                    _prism(corners, gate.base_z, gate.base_z + 0.02),
+                    # Its blocks when it has them, so a camera check measures the gate a
+                    # view sees; else a flat pad marking the opening.
+                    _merge(
+                        [
+                            _prism(
+                                _box_corners(part.center[:2], *part.size[:2], part.rotation_rad),
+                                part.center[2] - part.size[2] / 2,
+                                part.center[2] + part.size[2] / 2,
+                            )
+                            for part in gate.parts
+                        ]
+                    )
+                    if gate.parts
+                    else _prism(corners, gate.base_z, gate.base_z + 0.02),
                     gate.name,
                     outline=tuple(corners),
                     gate_parts=gate.parts or None,
@@ -195,6 +214,8 @@ class ImportSceneUpload:
         kind: BuildingKind | None = None,
         front: Compass | None = None,
         features: BuildingFeatures | None = None,
+        wall_material: BuildingMaterial | None = None,
+        roof_material: BuildingMaterial | None = None,
         outline: tuple[Point2, ...] | None = None,
         gate_parts: tuple[GatePart, ...] | None = None,
     ) -> SceneElement:
@@ -224,6 +245,8 @@ class ImportSceneUpload:
             kind=kind,
             front=front,
             features=features,
+            wall_material=wall_material,
+            roof_material=roof_material,
             outline=outline,
             gate_parts=gate_parts,
         )
@@ -239,11 +262,20 @@ def _box_corners(center: Point2, width: float, length: float, rotation: float) -
     return [(cx + x * cos - y * sin, cy + x * sin + y * cos) for x, y in local]
 
 
+def _merge(meshes: list[_Mesh]) -> _Mesh:
+    vertices: list[Vec3] = []
+    faces: list[tuple[int, int, int]] = []
+    for mesh in meshes:
+        offset = len(vertices)
+        faces.extend((a + offset, b + offset, c + offset) for a, b, c in mesh.faces)
+        vertices.extend(mesh.vertices)
+    return _Mesh(vertices, faces)
+
+
 def _ribbon(ring: list[Point2], width: float, bottom: float, top: float) -> _Mesh:
     """A thin strip along each edge of a closed ring."""
 
-    vertices: list[Vec3] = []
-    faces: list[tuple[int, int, int]] = []
+    strips = []
     for index, start in enumerate(ring):
         end = ring[(index + 1) % len(ring)]
         length = math.hypot(end[0] - start[0], end[1] - start[1])
@@ -251,11 +283,8 @@ def _ribbon(ring: list[Point2], width: float, bottom: float, top: float) -> _Mes
             continue
         center = ((start[0] + end[0]) / 2, (start[1] + end[1]) / 2)
         rotation = math.atan2(end[1] - start[1], end[0] - start[0])
-        strip = _prism(_box_corners(center, length, width, rotation), bottom, top)
-        offset = len(vertices)
-        faces.extend((a + offset, b + offset, c + offset) for a, b, c in strip.faces)
-        vertices.extend(strip.vertices)
-    return _Mesh(vertices, faces)
+        strips.append(_prism(_box_corners(center, length, width, rotation), bottom, top))
+    return _merge(strips)
 
 
 def _signed_area(ring: list[Point2] | tuple[Point2, ...]) -> float:

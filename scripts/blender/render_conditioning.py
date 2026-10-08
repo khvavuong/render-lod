@@ -406,6 +406,10 @@ def create_objects(
         for building_id in assembly["building_ids"]
     }
     for index, element in enumerate(scene_data["elements"], start=1):
+        if element.get("gate_parts"):
+            # Its mesh is its blocks in one colour: build them one by one in their own.
+            _create_gate_parts(element, index)
+            continue
         arrays = np.load(scene_root / element["mesh_ref"])
         vertices = arrays["vertices"].tolist()
         roof = assembly_roofs.get(
@@ -1258,9 +1262,9 @@ _GATE_COLOURS = {
 }
 
 
-def _create_gate_parts(entrance: dict, index: int) -> int:
+def _create_gate_parts(entrance: dict, pass_index: int) -> None:
     """Build a gate from the blocks its source draws it with: Site Forma's capped pillars,
-    barrier cabinet, striped arm and rest post, each kind in its own colour."""
+    barrier cabinet, striped arm and rest post, each kind in its own colour, all one instance."""
 
     up = Vector((0, 0, 1))
     for number, part in enumerate(entrance["gate_parts"], start=1):
@@ -1272,16 +1276,16 @@ def _create_gate_parts(entrance: dict, index: int) -> int:
         gate_material = bpy.data.materials.get(name) or material(
             name, _hex_color(_GATE_COLOURS[kind]), metallic, 0.5
         )
-        index += 1
-        _oriented_box(
+        block = _oriented_box(
             f"{entrance['scene_element_id']}:gate-{kind}-{number:02d}",
             Vector(part["center"]),
             ((Vector((cos, sin, 0)), along), (Vector((-sin, cos, 0)), across), (up, height)),
             gate_material,
-            index,
+            pass_index,
             semantic_role=entrance["semantic_role"],
         )
-    return index
+        block["source_external_id"] = entrance["source"]["external_id"]
+        block["building_treatment"] = "site"
 
 
 def _fence_sides(boundary: dict) -> list[tuple[str, Vector, Vector, Vector, float]]:
@@ -1521,7 +1525,7 @@ def create_design_details(
         if element["semantic_role"] in {"main_entrance", "secondary_entrance"}
     ):
         if entrance.get("gate_parts"):
-            detail_index = _create_gate_parts(entrance, detail_index)
+            # Built with the source geometry (create_objects); no generic leaf beside it.
             continue
         bounds = entrance["bounding_box"]
         x0, y0, _ = bounds["minimum"]

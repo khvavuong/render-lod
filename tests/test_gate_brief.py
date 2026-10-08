@@ -102,6 +102,10 @@ def test_gates_become_entrances_with_their_blocks_and_the_plot_a_fence_line(
     assert max(ys) - min(ys) == pytest.approx(10)
     assert max(xs) - min(xs) == pytest.approx(1)
 
+    # The element is the gate's blocks, 3 m high, so a camera check measures what a view sees;
+    # a flat pad seen at eye level predicts nothing and failed every entrance view.
+    assert west.bounding_box.maximum[2] - west.bounding_box.minimum[2] == pytest.approx(3)
+
     plot = elements["plot-boundary"]
     assert plot.semantic_role is SemanticRole.SITE_BOUNDARY
     assert plot.outline is not None and len(plot.outline) == 4
